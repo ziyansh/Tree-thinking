@@ -22,26 +22,23 @@ export type BranchInputFlowNode = Node<BranchInputNodeData, 'branch-input'>
 /** ghost 节点的联合类型（建议箭头 + 输入箭头） */
 export type GhostFlowNode = SuggestionGhostNode | InputGhostNode
 
-/** 候选方向与父卡片之间的水平间距，与后端创建子节点时的坐标规则一致；自动整理据此预留 ghost 列 */
-export const GHOST_X_GAP = 320
-/** ghost 卡片自身高度，与 GhostNode / GhostInputNode 的 44px 保持一致 */
+/** 候选方向与父卡片之间的水平间距：与「卡片间距」保持一致 */
 const GHOST_HEIGHT = 44
 /** ghost 卡片之间的纵向间距 */
 const GHOST_GAP = 8
 /** 分支输入条之间的纵向堆叠间距 */
 const BRANCH_INPUT_GAP = 52
-/** 分支卡片与父卡片/兄弟分支之间的纵向间距，与后端 BRANCH_GAP 保持一致 */
-export const BRANCH_GAP = 64
 
 /**
  * 由卡片派生 ghost 箭头。
- * 候选方向紧凑纵向堆叠：组顶部与父卡片顶部对齐，x 位于父卡片右侧 320px。
+ * 候选方向紧凑纵向堆叠：组顶部与父卡片顶部对齐，x 位于父卡片右侧一个卡片间距处。
  * 每条未被使用的建议生成一个 ghost 节点，每个已消费过滤后的卡片末尾再追加一个输入箭头。
  * 父卡片已消费候选方向（单选过一条）时整组隐藏，包括输入项。
  */
 export function buildGhostNodes(
   cards: GraphFlowNode[],
   cardSize: { width: number; height: number },
+  cardGap: number,
 ): GhostFlowNode[] {
   /** 已被创建成子卡片的建议，键为「父节点 id:建议 id」 */
   const usedSuggestions = new Set<string>()
@@ -63,7 +60,7 @@ export function buildGhostNodes(
     // 只有已完成且未被消费建议的卡片才展示候选方向
     if (node.status !== 'done' || node.suggestionsConsumed) continue
 
-    const x = card.position.x + cardSize.width + GHOST_X_GAP
+    const x = card.position.x + cardSize.width + cardGap
     const seen = new Set<string>()
     let index = 0
 
@@ -112,6 +109,7 @@ export function buildBranchInputNodes(
   inputs: BranchInput[],
   cards: GraphFlowNode[],
   cardSize: { width: number; height: number },
+  cardGap: number,
 ): BranchInputFlowNode[] {
   const nodes: BranchInputFlowNode[] = []
   /** 每个父卡片已排入的输入条数量，用于计算堆叠序号 */
@@ -127,7 +125,7 @@ export function buildBranchInputNodes(
       type: 'branch-input',
       position: {
         x: parent.position.x,
-        y: parent.position.y + cardSize.height + BRANCH_GAP + index * BRANCH_INPUT_GAP,
+        y: parent.position.y + cardSize.height + cardGap + index * BRANCH_INPUT_GAP,
       },
       data: { inputId: input.id },
       // 输入条高于卡片，与候选方向同层

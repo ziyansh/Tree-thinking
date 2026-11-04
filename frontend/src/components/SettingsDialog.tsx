@@ -18,11 +18,10 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
-/** 选项卡：模型服务 / 画布 / 指针 / 保存 / 外观 */
+/** 选项卡：模型服务 / 画布（含指针手势） / 保存 / 外观 */
 const TABS = [
   { id: 'model', label: '模型服务' },
   { id: 'canvas', label: '画布' },
-  { id: 'motion', label: '指针' },
   { id: 'save', label: '保存' },
   { id: 'appearance', label: '外观' },
 ] as const
@@ -47,6 +46,7 @@ interface SettingsForm {
   openaiReasoningEffort: ReasoningEffort
   openaiTimeoutSeconds: number
   suggestionCount: number
+  cardGap: number
   connectionStyle: ConnectionStyle
   doubleClickMs: number
   dragDriftDelayMs: number
@@ -80,6 +80,7 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     openaiReasoningEffort: data.openaiReasoningEffort,
     openaiTimeoutSeconds: data.openaiTimeoutSeconds,
     suggestionCount: data.suggestionCount,
+    cardGap: data.cardGap,
     connectionStyle: data.connectionStyle,
     doubleClickMs: data.doubleClickMs,
     dragDriftDelayMs: data.dragDriftDelayMs,
@@ -97,7 +98,7 @@ function fromSettings(data: SettingsDTO): SettingsForm {
 
 /** 输入框统一样式，颜色全部取自主题令牌 */
 const INPUT_CLASS =
-  'w-full rounded-lg border border-subtle bg-elevated px-3 py-2 text-[13px] text-ink outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent'
+  'w-full rounded-lg border border-subtle bg-elevated px-3 py-2 text-[14px] text-ink outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent'
 
 /** 表单每一行：左侧标题与说明，右侧控件 */
 function Field({
@@ -110,10 +111,10 @@ function Field({
   children: ReactNode
 }) {
   return (
-    <div className="mb-4">
-      <label className="mb-1.5 block text-[13px] font-medium text-ink">{label}</label>
+    <div className="mb-5">
+      <label className="mb-2 block text-[14px] font-medium text-ink">{label}</label>
       {children}
-      {hint && <p className="mt-1.5 text-[12px] leading-[1.5] text-muted">{hint}</p>}
+      {hint && <p className="mt-1.5 text-[13px] leading-[1.55] text-muted">{hint}</p>}
     </div>
   )
 }
@@ -142,7 +143,7 @@ function ChoiceGroup<T extends string>({
             aria-pressed={option.value === value}
             onClick={() => onChange(option.value)}
             className={[
-              'rounded-lg border px-3 py-1.5 text-[13px] transition-colors duration-150',
+              'rounded-lg border px-3.5 py-2 text-[14px] transition-colors duration-150',
               option.value === value
                 ? 'border-accent bg-accent-dim text-accent'
                 : 'border-subtle bg-elevated text-body hover:text-ink',
@@ -183,6 +184,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     openaiReasoningEffort: 'default',
     openaiTimeoutSeconds: 60,
     suggestionCount: 3,
+    cardGap: 80,
     connectionStyle: 'direct',
     doubleClickMs: 300,
     dragDriftDelayMs: 0,
@@ -256,6 +258,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         openaiReasoningEffort: form.openaiReasoningEffort,
         openaiTimeoutSeconds: form.openaiTimeoutSeconds,
         suggestionCount: form.suggestionCount,
+        cardGap: form.cardGap,
         connectionStyle: form.connectionStyle,
         doubleClickMs: form.doubleClickMs,
         dragDriftDelayMs: form.dragDriftDelayMs,
@@ -301,11 +304,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-label="设置"
-        className="flex h-[520px] max-h-[calc(100vh-48px)] w-[780px] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-subtle bg-panel shadow-2xl"
+        className="flex h-[640px] max-h-[calc(100vh-48px)] w-[920px] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-subtle bg-panel shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <aside className="flex w-[168px] flex-none flex-col border-r border-subtle bg-card">
-          <div className="px-4 pb-3 pt-4 text-[13px] font-semibold text-ink">设置</div>
+        <aside className="flex w-[190px] flex-none flex-col border-r border-subtle bg-card">
+          <div className="px-5 pb-3 pt-5 text-[15px] font-semibold text-ink">设置</div>
           <nav className="flex flex-col gap-1 px-2">
             {TABS.map((tab) => {
               const active = tab.id === activeTab
@@ -315,7 +318,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   className={[
-                    'rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors duration-150',
+                    'rounded-lg px-3 py-2.5 text-left text-[14px] transition-colors duration-150',
                     active ? 'bg-accent-dim text-accent' : 'text-body hover:bg-ghost-border hover:text-ink',
                   ].join(' ')}
                 >
@@ -327,8 +330,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         </aside>
 
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center justify-between border-b border-subtle px-5 py-3">
-            <h2 className="text-[14px] font-semibold text-ink">{activeLabel}</h2>
+          <header className="flex items-center justify-between border-b border-subtle px-6 py-3.5">
+            <h2 className="text-[15px] font-semibold text-ink">{activeLabel}</h2>
             <button
               type="button"
               title="关闭设置"
@@ -340,9 +343,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             </button>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {loading ? (
-              <p className="py-6 text-center text-[13px] text-muted">正在读取设置…</p>
+              <p className="py-6 text-center text-[14px] text-muted">正在读取设置…</p>
             ) : (
               <>
                 {activeTab === 'model' && (
@@ -622,20 +625,35 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                 )}
 
                 {activeTab === 'canvas' && (
-                  <ChoiceGroup
-                    label="连接方式"
-                    hint="只影响分支边：直接分支从父卡片上/下边中点连到子卡片，共用母线则先在右侧引出统一母线再分叉"
-                    value={form.connectionStyle}
-                    options={[
-                      { value: 'direct', label: '直接分支' },
-                      { value: 'bus', label: '共用母线' },
-                    ]}
-                    onChange={(connectionStyle) => setForm({ ...form, connectionStyle })}
-                  />
-                )}
-
-                {activeTab === 'motion' && (
                   <>
+                    <ChoiceGroup
+                      label="连接方式"
+                      hint="直接分支从父卡片上/下边中点连到子卡片；共用母线由全部子分支共享一条母线"
+                      value={form.connectionStyle}
+                      options={[
+                        { value: 'direct', label: '直接分支' },
+                        { value: 'bus', label: '共用母线' },
+                      ]}
+                      onChange={(connectionStyle) => setForm({ ...form, connectionStyle })}
+                    />
+
+                    <Field
+                      label="卡片间距（px）"
+                      hint="新建子卡片与自动整理共用；默认 80，范围 16–1200"
+                    >
+                      <input
+                        type="number"
+                        min={16}
+                        max={1200}
+                        step={1}
+                        value={form.cardGap}
+                        onChange={(event) =>
+                          setForm({ ...form, cardGap: Number(event.target.value) })
+                        }
+                        className={[INPUT_CLASS, 'w-28'].join(' ')}
+                      />
+                    </Field>
+
                     <Field
                       label="双击间隔（最大，毫秒）"
                       hint="两次点击在这个间隔内算双击；默认 300，范围 100–1000"

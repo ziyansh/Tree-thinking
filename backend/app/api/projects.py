@@ -328,9 +328,8 @@ def create_node(
         x=x,
         y=y,
     )
-    # 点选建议即为「已选」，父节点整组候选方向隐藏
-    if payload.origin == "suggestion":
-        parent.suggestions_consumed = True
+    # 创建任意子卡片都意味着这一轮候选方向已结束（建议、自定义输入、底部追问通用）
+    parent.suggestions_consumed = True
     db.add(node)
     db.commit()
     db.refresh(node)

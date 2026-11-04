@@ -32,7 +32,6 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
   const [content, setContent] = useState(node.answer)
   // Esc 取消标题编辑时置位，避免随后的失焦再次提交
   const escapedRef = useRef(false)
-  const [resizing, setResizing] = useState(false)
   // 缩放中的实时尺寸预览，松手后写入 store 并持久化
   const [sizeDraft, setSizeDraft] = useState<{ width: number; height: number } | null>(null)
 
@@ -80,7 +79,6 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
       let latest = { width: startWidth, height: startHeight }
 
       target.setPointerCapture(pointerId)
-      setResizing(true)
 
       const handleMove = (moveEvent: PointerEvent) => {
         // 只对实际拖动的方向做最小尺寸夹取，避免拖右边时把默认高度 220 抬到 240
@@ -101,7 +99,6 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
         target.removeEventListener('pointerup', handleEnd)
         target.removeEventListener('pointercancel', handleEnd)
         if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
-        setResizing(false)
         setSizeDraft(null)
         // 尺寸未变化时不发请求
         if (latest.width === startWidth && latest.height === startHeight) return
@@ -113,8 +110,7 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
       target.addEventListener('pointercancel', handleEnd)
     }
 
-  // 选中或拖动中完全可见，未选中时仅在悬停整张卡片时浅显显示
-  const handleVisible = resizing || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+  // 选中、悬停与错误态都由卡片外边框表达，缩放命中区本身保持透明
 
   const boxShadow = isSelected
     ? '0 0 0 1px var(--accent), 0 0 24px var(--accent-dim)'
@@ -125,7 +121,7 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
       className={[
         'group card-drag-handle relative flex flex-col rounded-xl border bg-card p-3 transition-[border-color,box-shadow] duration-150 ease-out',
         node.pinned ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
-        isSelected ? 'border-accent' : 'border-subtle',
+        isSelected ? 'border-accent' : 'border-subtle hover:border-accent',
       ].join(' ')}
       style={{ width, height, boxShadow }}
     >
@@ -183,7 +179,7 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
         style={{ fontSize: 'var(--card-font-size)' }}
       />
 
-      {/* 四边与四角缩放命中区：仅选中或悬停时可见 */}
+      {/* 四边与四角缩放命中区：仅提供光标与命中，不绘制高亮 */}
       {EDGE_ZONES.map((zone) => (
         <div
           key={zone.edge}
@@ -191,13 +187,7 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
           aria-label="拖动调整笔记尺寸"
           onPointerDown={startResize(zone.edge)}
           onClick={(event) => event.stopPropagation()}
-          className={[
-            'nodrag nopan absolute',
-            zone.position,
-            zone.cursor,
-            'bg-accent-dim transition-opacity duration-150',
-            handleVisible,
-          ].join(' ')}
+          className={['nodrag nopan absolute', zone.position, zone.cursor].join(' ')}
         />
       ))}
       {CORNER_ZONES.map((zone) => (
@@ -207,13 +197,7 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
           aria-label="拖动调整笔记尺寸"
           onPointerDown={startResize(zone.edge)}
           onClick={(event) => event.stopPropagation()}
-          className={[
-            'nodrag nopan absolute h-3 w-3',
-            zone.position,
-            zone.cursor,
-            'rounded-sm bg-accent-dim transition-opacity duration-150',
-            handleVisible,
-          ].join(' ')}
+          className={['nodrag nopan absolute h-3 w-3', zone.position, zone.cursor].join(' ')}
         />
       ))}
     </div>

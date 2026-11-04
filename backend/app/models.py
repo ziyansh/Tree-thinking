@@ -110,6 +110,8 @@ class AppSetting(Base):
     # 全局卡片尺寸；为空表示使用默认值 400×560
     card_width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     card_height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 卡片间距（px）：新建卡片与自动整理共用；为空表示 80
+    card_gap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 分支连线方式：direct（直接分支）/ bus（共用母线）；为空表示 direct
     connection_style: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 指针手势：双击间隔、拖动漂移延迟与漂移距离

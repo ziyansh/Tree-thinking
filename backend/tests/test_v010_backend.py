@@ -12,6 +12,7 @@ SETTING_DEFAULTS = {
     "dragDriftDelayMs": 0,
     "dragDriftDistance": 10,
     "cardFontSize": 14,
+    "cardGap": 80,
     "autosaveMinutes": 5,
     "undoSteps": 10,
     "themeHue": 173,
@@ -57,6 +58,7 @@ def test_settings_new_fields(client):
         "/api/settings",
         json={
             "connectionStyle": "bus",
+            "cardGap": 120,
             "doubleClickMs": 500,
             "dragDriftDelayMs": 120,
             "dragDriftDistance": 24,
@@ -72,6 +74,7 @@ def test_settings_new_fields(client):
     assert saved.status_code == 200
     again = client.get("/api/settings").json()
     assert again["connectionStyle"] == "bus"
+    assert again["cardGap"] == 120
     assert again["doubleClickMs"] == 500
     assert again["dragDriftDelayMs"] == 120
     assert again["dragDriftDistance"] == 24

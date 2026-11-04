@@ -11,7 +11,8 @@ import { formatModifiedTime } from '../lib/time'
 
 /** Markdown 正文样式：颜色只取自主题令牌，避免卡片被长回答撑高 */
 const MARKDOWN_CLASS = [
-  'nodrag selectable-text text-body leading-[1.65] break-words',
+  // 文字容器按内容收缩，只有文字本身优先选中；周围留白仍可拖动卡片
+  'nodrag selectable-text inline-block max-w-full align-top text-left text-body leading-[1.65] break-words',
   '[&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0',
   '[&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5',
   '[&_li]:my-1',
@@ -107,19 +108,21 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
   const isSelected = useGraphStore((state) => state.selectedNodeIds.includes(node.id))
   // 修改时间跟随设置中的时间制式，设置变更后立即重新格式化
   const timeFormat = useGraphStore((state) => state.preferences.timeFormat)
-  // 标题双击编辑使用设置里的双击间隔
+  // 标题双击编辑使用设置里的双击间隔与漂移距离
   const doubleClickMs = useGraphStore((state) => state.preferences.doubleClickMs)
+  const dragDriftDistance = useGraphStore((state) => state.preferences.dragDriftDistance)
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
 
   const [draft, setDraft] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [reasoningOpen, setReasoningOpen] = useState(false)
-  const [resizing, setResizing] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   /** 上一次点击标题的时间，用于手动判定双击 */
   const lastTitleClickRef = useRef(0)
+  /** 标题上按下时的坐标，用于排除拖动/选字造成的误双击 */
+  const titlePointerRef = useRef<{ x: number; y: number } | null>(null)
 
   const isStreaming = node.status === 'streaming'
   const isError = node.status === 'error'
@@ -159,8 +162,21 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
     setEditingTitle(true)
   }
 
-  /** 按设置的双击间隔手动识别标题双击，避免依赖浏览器默认间隔 */
-  const handleTitlePointerUp = () => {
+  /** 按设置的双击间隔手动识别标题双击；拖动时不算点击 */
+  const handleTitlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    titlePointerRef.current = { x: event.clientX, y: event.clientY }
+  }
+
+  const handleTitlePointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const down = titlePointerRef.current
+    titlePointerRef.current = null
+    if (!down) return
+    const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y)
+    if (moved > dragDriftDistance) {
+      lastTitleClickRef.current = 0
+      return
+    }
+
     const now = performance.now()
     if (lastTitleClickRef.current && now - lastTitleClickRef.current <= doubleClickMs) {
       lastTitleClickRef.current = 0
@@ -201,7 +217,6 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
       const startWidth = cardSize.width
       const startHeight = cardSize.height
       target.setPointerCapture(pointerId)
-      setResizing(true)
 
       const handleMove = (moveEvent: PointerEvent) => {
         const dx = moveEvent.clientX - startX
@@ -214,7 +229,6 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
         target.removeEventListener('pointerup', handleEnd)
         target.removeEventListener('pointercancel', handleEnd)
         if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
-        setResizing(false)
         void saveCardSize()
       }
 
@@ -222,9 +236,6 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
       target.addEventListener('pointerup', handleEnd)
       target.addEventListener('pointercancel', handleEnd)
     }
-
-  // 选中或拖动中完全可见，未选中时仅在悬停整张卡片时浅显显示
-  const handleVisible = resizing || isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
 
   // 卡片外发光完全由主题令牌派生：选中为强调色描边+光晕，流式为 20% 强调色描边
   const boxShadow = isError
@@ -240,7 +251,11 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
       className={[
         'group card-drag-handle relative flex flex-col rounded-xl border bg-card p-4 transition-[border-color,box-shadow] duration-150 ease-out',
         node.pinned ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
-        isError ? 'border-danger' : isSelected ? 'border-accent' : 'border-subtle',
+        isError
+          ? 'border-danger'
+          : isSelected
+            ? 'border-accent'
+            : 'border-subtle hover:border-accent',
       ].join(' ')}
       style={{ width: cardSize.width, height: cardSize.height, boxShadow }}
     >
@@ -282,8 +297,9 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
           />
         ) : (
           <h3
+            onPointerDown={handleTitlePointerDown}
             onPointerUp={handleTitlePointerUp}
-            className="nodrag selectable-text min-w-0 flex-1 break-words font-semibold leading-snug text-accent"
+            className="min-w-0 flex-1 cursor-grab break-words font-semibold leading-snug text-accent active:cursor-grabbing"
             style={{ fontSize: 'calc(var(--card-font-size) + 1px)' }}
           >
             {node.question || <span className="text-muted">请输入你的元问题</span>}
@@ -332,7 +348,7 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
             <span>{isStreaming ? '思考中…' : '思考过程'}</span>
           </button>
           {reasoningOpen && (
-            <div className="nodrag nowheel selectable-text mt-2 max-h-[200px] overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-[1.6] text-muted">
+            <div className="nodrag nowheel selectable-text mt-2 inline-block max-h-[200px] max-w-full overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-[1.6] text-muted">
               {node.reasoning}
             </div>
           )}
@@ -423,7 +439,7 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
         </>
       )}
 
-      {/* 四边与四角缩放命中区：仅选中或悬停时可见；根卡片同样可缩放 */}
+      {/* 四边与四角缩放命中区：仅提供光标与命中，不绘制高亮；根卡片同样可缩放 */}
       {EDGE_ZONES.map((zone) => (
         <div
           key={zone.edge}
@@ -432,13 +448,7 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
           onPointerDown={startResize(zone.edge)}
           // 阻止 click 冒泡，避免拖动/点击手柄改变节点选中态
           onClick={(event) => event.stopPropagation()}
-          className={[
-            'nodrag nopan absolute',
-            zone.position,
-            zone.cursor,
-            'bg-accent-dim transition-opacity duration-150',
-            handleVisible,
-          ].join(' ')}
+          className={['nodrag nopan absolute', zone.position, zone.cursor].join(' ')}
         />
       ))}
       {CORNER_ZONES.map((zone) => (
@@ -448,13 +458,7 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
           aria-label="拖动调整卡片尺寸"
           onPointerDown={startResize(zone.edge)}
           onClick={(event) => event.stopPropagation()}
-          className={[
-            'nodrag nopan absolute h-3 w-3',
-            zone.position,
-            zone.cursor,
-            'rounded-sm bg-accent-dim transition-opacity duration-150',
-            handleVisible,
-          ].join(' ')}
+          className={['nodrag nopan absolute h-3 w-3', zone.position, zone.cursor].join(' ')}
         />
       ))}
     </div>

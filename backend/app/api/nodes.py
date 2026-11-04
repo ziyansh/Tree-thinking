@@ -93,6 +93,8 @@ def patch_node(node_id: str, payload: NodePatch, db: Session = Depends(get_db)) 
         node.pinned = payload.pinned
     if payload.title is not None:
         node.question = payload.title
+    if payload.suggestions_consumed is not None:
+        node.suggestions_consumed = payload.suggestions_consumed
     if payload.suggestions is not None:
         items = [suggestion.model_dump() for suggestion in payload.suggestions]
         # 撤销「换一个方向」时整组回写；空 id/text 属于非法内容，直接拒绝

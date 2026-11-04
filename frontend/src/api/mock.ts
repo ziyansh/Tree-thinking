@@ -134,6 +134,7 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   suggestionCount: 3,
   cardWidth: 400,
   cardHeight: 560,
+  cardGap: 80,
   connectionStyle: 'direct',
   doubleClickMs: 300,
   dragDriftDelayMs: 0,
@@ -364,6 +365,7 @@ export const mockApi: ApiClient = {
     if (patch.title !== undefined) node.question = patch.title
     // 候选方向整组覆盖（撤销「换一个方向」）
     if (patch.suggestions !== undefined) node.suggestions = patch.suggestions
+    if (patch.suggestionsConsumed !== undefined) node.suggestionsConsumed = patch.suggestionsConsumed
     // 正文与独立尺寸仅对笔记生效，与后端一致
     if (node.nodeType === 'note') {
       if (patch.content !== undefined) node.answer = patch.content
@@ -569,6 +571,9 @@ export const mockApi: ApiClient = {
     }
     if (patch.cardHeight !== undefined) {
       settings.cardHeight = Math.max(MIN_CARD_HEIGHT, patch.cardHeight)
+    }
+    if (patch.cardGap !== undefined) {
+      settings.cardGap = Math.min(1200, Math.max(16, Math.round(patch.cardGap)))
     }
     // 字号变大时自动放大卡片（只放大不缩小），与前端 store 保持一致
     if (patch.cardFontSize !== undefined) {

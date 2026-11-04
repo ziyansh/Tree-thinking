@@ -53,6 +53,7 @@ export type Preferences = Pick<
   SettingsDTO,
   | 'cardWidth'
   | 'cardHeight'
+  | 'cardGap'
   | 'connectionStyle'
   | 'doubleClickMs'
   | 'dragDriftDelayMs'
@@ -71,6 +72,7 @@ export type Preferences = Pick<
 const DEFAULT_PREFERENCES: Preferences = {
   cardWidth: DEFAULT_CARD_SIZE.width,
   cardHeight: DEFAULT_CARD_SIZE.height,
+  cardGap: 80,
   connectionStyle: 'direct',
   doubleClickMs: 300,
   dragDriftDelayMs: 0,
@@ -90,6 +92,7 @@ function pickPreferences(settings: SettingsDTO): Preferences {
   return {
     cardWidth: settings.cardWidth,
     cardHeight: settings.cardHeight,
+    cardGap: settings.cardGap,
     connectionStyle: settings.connectionStyle,
     doubleClickMs: settings.doubleClickMs,
     dragDriftDelayMs: settings.dragDriftDelayMs,
@@ -110,6 +113,7 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
   return {
     cardWidth: patch.cardWidth ?? base.cardWidth,
     cardHeight: patch.cardHeight ?? base.cardHeight,
+    cardGap: patch.cardGap ?? base.cardGap,
     connectionStyle: patch.connectionStyle ?? base.connectionStyle,
     doubleClickMs: patch.doubleClickMs ?? base.doubleClickMs,
     dragDriftDelayMs: patch.dragDriftDelayMs ?? base.dragDriftDelayMs,
@@ -157,6 +161,7 @@ type NodePatchBody = {
   width?: number
   height?: number
   suggestions?: NodeDTO['suggestions']
+  suggestionsConsumed?: boolean
 }
 
 /** toast 定时器：模块级，避免进入 store 状态 */
@@ -190,6 +195,10 @@ function buildUndoPatch(node: NodeDTO, snapshot: NodeDTO): NodePatchBody | null 
   }
   if (JSON.stringify(node.suggestions) !== JSON.stringify(snapshot.suggestions)) {
     patch.suggestions = snapshot.suggestions
+  }
+  // 新增子卡片会把父节点候选方向标记为已消费，撤销时一并恢复
+  if (node.suggestionsConsumed !== snapshot.suggestionsConsumed) {
+    patch.suggestionsConsumed = snapshot.suggestionsConsumed
   }
   return Object.keys(patch).length > 0 ? patch : null
 }
@@ -634,6 +643,8 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         question: text,
         origin: 'user',
       })
+      // 一旦继续追问，父卡片这一轮候选方向即结束，整组隐藏
+      patchNode(nodeId, (current) => ({ ...current, suggestionsConsumed: true }))
       set((state) => ({
         nodes: [...state.nodes, toFlowNode(child)],
         selectedNodeId: child.id,
@@ -668,10 +679,8 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         selectedNodeId: child.id,
         selectedNodeIds: [child.id],
       }))
-      // 由建议派生的子卡片意味着该轮候选方向已被消费
-      if (payload.origin === 'suggestion') {
-        patchNode(parentId, (node) => ({ ...node, suggestionsConsumed: true }))
-      }
+      // 由建议派生的子卡片意味着该轮候选方向已被消费；自定义输入与分支输入同样隐藏整组
+      patchNode(parentId, (node) => ({ ...node, suggestionsConsumed: true }))
 
       await get().runAnswer(child.id)
     },
@@ -698,11 +707,23 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       const parent = nodes.find((item) => item.id === input.parentId)
       if (!parent) return
 
-      // 落点：父卡片正下方；已有子卡片时按「卡片高 + 64」逐层下移
+      // 第一子卡片永远是主干：父卡片正右方、同一 y；
+      // 之后为分支头：直接分支落在父卡片同列下方，共用母线落在右侧下一列
+      const cardWidth = preferences.cardWidth
       const cardHeight = preferences.cardHeight
+      const cardGap = preferences.cardGap
       const slots = nodes.filter((item) => item.data.node.parentId === input.parentId).length
-      const x = parent.position.x
-      const y = parent.position.y + cardHeight + 64 + slots * (cardHeight + 64)
+      const mainX = parent.position.x + cardWidth + cardGap
+      const x =
+        slots === 0
+          ? mainX
+          : preferences.connectionStyle === 'direct'
+            ? parent.position.x
+            : mainX
+      const y =
+        slots === 0
+          ? parent.position.y
+          : parent.position.y + (slots + 1) * (cardHeight + cardGap)
 
       let child: NodeDTO
       get().pushUndo('新增分支卡片')
@@ -721,6 +742,8 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         return
       }
 
+      // 分支输入提交后，父卡片这一轮候选方向同样结束
+      patchNode(input.parentId, (node) => ({ ...node, suggestionsConsumed: true }))
       set((state) => ({
         nodes: [...state.nodes, toFlowNode(child)],
         branchInputs: state.branchInputs.filter((item) => item.id !== inputId),

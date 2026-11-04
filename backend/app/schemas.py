@@ -183,6 +183,8 @@ class NodePatch(CamelModel):
     width: float | None = None
     height: float | None = None
     suggestions: list[Suggestion] | None = None
+    # 候选方向是否已消费（撤销新增卡片时回写）
+    suggestions_consumed: bool | None = None
 
 
 class NoteCreate(CamelModel):
@@ -263,6 +265,8 @@ class SettingsPatch(CamelModel):
     suggestion_count: int | None = None
     card_width: int | None = None
     card_height: int | None = None
+    # 卡片间距（px）：新建卡片与自动整理共用；服务层夹到 16–1200
+    card_gap: int | None = None
     # 画布：分支连线方式
     connection_style: Literal["direct", "bus"] | None = None
     # 指针手势：双击间隔、拖动漂移延迟与漂移距离（服务层夹取范围）

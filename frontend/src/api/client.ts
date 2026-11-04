@@ -80,6 +80,8 @@ export interface ApiClient {
       height?: number
       /** 整组回写候选方向（撤销「换一个方向」时使用） */
       suggestions?: SuggestionDTO[]
+      /** 候选方向是否已消费（撤销新增卡片时回写） */
+      suggestionsConsumed?: boolean
     },
   ): Promise<NodeDTO>
   deleteNode(id: string): Promise<void>

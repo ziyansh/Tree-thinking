@@ -41,8 +41,6 @@ const edgeTypes = {
 
 /** ghost 卡片尺寸，与 GhostNode / GhostInputNode 的 280×44 保持一致 */
 const GHOST_SIZE = { width: 280, height: 44 }
-/** 共用母线距父卡片右边的距离 */
-const BUS_GUTTER_GAP = 160
 
 /** 画布点阵颜色：按解析后的主题取值，跟随系统时监听系统深浅色切换 */
 function useDotColor(): string {
@@ -275,6 +273,8 @@ function CanvasInner() {
     rootId: string
     positions: Map<string, { x: number; y: number }>
   } | null>(null)
+  /** 拖拽结束时间：抑制拖拽后的 click 把多选收缩成单选 */
+  const lastDragEndRef = useRef(0)
 
   // 空格按住时左键可平移（[0,1] = 左键+中键）；平时只有中键平移，左键空白用于拖动/点击判定
   useEffect(() => {
@@ -453,11 +453,14 @@ function CanvasInner() {
   )
 
   // 由 parentId 派生 ghost 箭头（建议 + 自定义输入），坐标依赖当前卡片尺寸
-  const ghosts = useMemo(() => buildGhostNodes(nodes, cardSize), [nodes, cardSize])
+  const ghosts = useMemo(
+    () => buildGhostNodes(nodes, cardSize, preferences.cardGap),
+    [nodes, cardSize, preferences.cardGap],
+  )
   // 分支输入条同样跟随父卡片移动，堆叠在卡片下方
   const branchInputNodes = useMemo(
-    () => buildBranchInputNodes(branchInputs, nodes, cardSize),
-    [branchInputs, nodes, cardSize],
+    () => buildBranchInputNodes(branchInputs, nodes, cardSize, preferences.cardGap),
+    [branchInputs, nodes, cardSize, preferences.cardGap],
   )
   const allNodes = useMemo(
     () => [
@@ -475,7 +478,7 @@ function CanvasInner() {
 
   // 卡片之间为主链/分支实线；卡片指向 ghost 的连线复用主链边并保持虚线
   const edges = useMemo<Edge[]>(() => {
-    const { cardWidth, cardHeight, connectionStyle, edgeColor, edgeWidth } = preferences
+    const { cardWidth, cardHeight, cardGap, connectionStyle, edgeColor, edgeWidth } = preferences
     const visual = { color: edgeColor, width: edgeWidth }
 
     // 所有卡片矩形：聊天卡片用全局尺寸，笔记用自身尺寸，ghost 用固定尺寸
@@ -532,15 +535,11 @@ function CanvasInner() {
         const id = `${parentId}-${child.id}`
         const obstacles = obstaclesOf(parentId, child.id)
         const childRect = rects.get(child.id)
-        // 主链按位置判定：子卡片中心在父卡片右侧，且与父卡片处于同一水平带
-        const isMain = childRect
-          ? childRect.x + childRect.width / 2 > parentRect.x + parentRect.width / 2 &&
-            childRect.y < parentRect.y + parentRect.height &&
-            childRect.y + childRect.height > parentRect.y
-          : index === 0
+        // 第一子卡片永远是主干（左→右、与父卡片同线）；其余为分支头
+        const isMain = index === 0
 
-        // 共用母线：父卡片的全部子卡片共用一条母线（父右引线 → 统一纵向母线 → 子左）
-        if (connectionStyle === 'bus') {
+        // 共用母线：主链保持直连，全部非主干分支共用同一条母线
+        if (connectionStyle === 'bus' && !isMain) {
           result.push({
             id,
             source: parentId,
@@ -551,7 +550,8 @@ function CanvasInner() {
             data: {
               obstacles,
               style: visual,
-              gutterX: parentRect.x + parentRect.width + BUS_GUTTER_GAP,
+              // 母线位于父卡片与右侧子卡片列的中点，全部兄弟分支共用同一 x
+              gutterX: parentRect.x + parentRect.width + cardGap / 2,
             },
           })
           return
@@ -697,6 +697,8 @@ function CanvasInner() {
       const origin = dragOriginRef.current
       dragOriginRef.current = null
       if (!origin) return
+      // 记录结束时间，避免拖拽后触发的 click 把多选恢复成单选
+      lastDragEndRef.current = performance.now()
 
       const cards = useGraphStore.getState().nodes
       void Promise.all(
@@ -716,6 +718,7 @@ function CanvasInner() {
       state.nodes,
       state.cardSize,
       state.preferences.connectionStyle,
+      state.preferences.cardGap,
     )
     if (positions.size === 0) return
     // 整理会改变全部坐标，先压入撤销快照
@@ -797,6 +800,8 @@ function CanvasInner() {
         onNodeClick={(event, node) => {
           // ghost 与分支输入条不可选中；聊天卡片与笔记都参与选中
           if (node.type !== 'card' && node.type !== 'note') return
+          // 拖拽松手后浏览器仍可能补发 click，此时保持原来的多选集合
+          if (performance.now() - lastDragEndRef.current < 100) return
           if (event.ctrlKey || event.metaKey) {
             toggleSelected(node.id)
           } else {

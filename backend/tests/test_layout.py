@@ -38,7 +38,7 @@ def _create_child(client, project_id: str, parent_id: str, question: str, **extr
 
 
 def test_first_child_aligns_with_parent(client):
-    """首个子节点与父卡片同一水平线，水平间距为「卡片宽 + 320」。"""
+    """首个子节点为主干：父卡片正右方、同一 y，间距取默认 80。"""
     project = _create_project(client)
     project_id = project["project"]["id"]
     root = project["rootNode"]
@@ -46,11 +46,11 @@ def test_first_child_aligns_with_parent(client):
     child = _create_child(client, project_id, root["id"], "继续追问")
 
     assert child["y"] == root["y"]
-    assert child["x"] == root["x"] + 400 + 320
+    assert child["x"] == root["x"] + 400 + 80
 
 
-def test_second_child_offsets_by_card_height(client):
-    """第二个子节点按「卡片高 + 100」纵向错开，水平坐标与首个孩子一致。"""
+def test_second_child_is_branch_head_in_direct_mode(client):
+    """直接分支模式下，第二个子节点落在父卡片同列下方，纵向间距为卡片高 + 80。"""
     project = _create_project(client)
     project_id = project["project"]["id"]
     root = project["rootNode"]
@@ -59,8 +59,37 @@ def test_second_child_offsets_by_card_height(client):
     second = _create_child(client, project_id, root["id"], "第二个分支", origin="user")
 
     assert first["y"] == root["y"]
-    assert second["y"] == root["y"] + (560 + 64)
-    assert second["x"] == first["x"] == root["x"] + 400 + 320
+    assert second["y"] == root["y"] + (560 + 80)
+    assert second["x"] == root["x"]
+    assert first["x"] == root["x"] + 400 + 80
+
+
+def test_second_child_shares_column_in_bus_mode(client):
+    """共用母线模式下，分支头位于父卡片右侧下一列，与主干子卡片同列。"""
+    project = _create_project(client)
+    project_id = project["project"]["id"]
+    root = project["rootNode"]
+    client.put("/api/settings", json={"connectionStyle": "bus"})
+
+    first = _create_child(client, project_id, root["id"], "主干")
+    second = _create_child(client, project_id, root["id"], "分支头")
+
+    assert first["x"] == root["x"] + 400 + 80
+    assert second["x"] == first["x"]
+    assert second["y"] == root["y"] + (560 + 80)
+
+
+def test_custom_child_consumes_parent_suggestions(client, session_factory):
+    """自定义输入/底部追问创建子卡片后，父卡片这一轮候选方向也应隐藏。"""
+    project = _create_project(client, "自定义输入")
+    project_id = project["project"]["id"]
+    root = project["rootNode"]
+    _mark_done(session_factory, root["id"], [{"id": "sug00001", "text": "方向一"}])
+
+    child = _create_child(client, project_id, root["id"], "自定义问题", origin="user")
+
+    assert _graph_nodes(client, project_id)[root["id"]]["suggestionsConsumed"] is True
+    assert _graph_nodes(client, project_id)[child["id"]]["suggestionsConsumed"] is False
 
 
 def test_suggestion_marks_parent_consumed(client, session_factory, monkeypatch):
@@ -101,7 +130,7 @@ def test_suggestion_marks_parent_consumed(client, session_factory, monkeypatch):
 
 
 def test_branch_creates_empty_input_node(client, session_factory):
-    """分支接口返回输入态空卡片；连续调用时纵向间距为「卡片高 + 100」。"""
+    """分支接口返回输入态空卡片；首个分支为主干，后续分支落在父卡片同列下方。"""
     project = _create_project(client, "分支测试")
     project_id = project["project"]["id"]
     root = project["rootNode"]
@@ -115,13 +144,14 @@ def test_branch_creates_empty_input_node(client, session_factory):
     assert first["answer"] == ""
     assert first["reasoning"] == ""
     assert first["suggestions"] == []
-    # 首个分支与父卡片齐平
+    # 首个分支即主干，与父卡片齐平并位于正右方
     assert first["y"] == root["y"]
-    assert first["x"] == root["x"] + 400 + 320
+    assert first["x"] == root["x"] + 400 + 80
 
     second = client.post(f"/api/nodes/{root['id']}/branch").json()
-    assert second["y"] == first["y"] + (560 + 64)
-    assert second["x"] == first["x"]
+    # 第二个分支在直接分支模式下落到父卡片同列下方
+    assert second["y"] == first["y"] + (560 + 80)
+    assert second["x"] == root["x"]
 
 
 def test_branch_requires_done_status(client):

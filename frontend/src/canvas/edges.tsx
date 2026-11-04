@@ -222,16 +222,15 @@ export function MainEdge({ sourceX, sourceY, targetX, targetY, data }: EdgeProps
   // 子卡片在右侧时走两段折线（竖直段在中间），否则从父卡片右侧先拉出固定间距
   const midX = to.x > from.x ? from.x + (to.x - from.x) / 2 : from.x + MARGIN * 2
   const base = [from, { x: midX, y: from.y }, { x: midX, y: to.y }, to]
-  const points =
-    blockingRects(base, obstacles).length === 0
-      ? base
-      : chooseRoute(
-          [
-            detourVertical(from, to, obstacles, -1),
-            detourVertical(from, to, obstacles, 1),
-          ],
-          obstacles,
-        )
+  // 优先直线折线；若穿过任意卡片（包括无关卡片），从上方或下方整体绕行
+  const points = chooseRoute(
+    [
+      base,
+      detourVertical(from, to, obstacles, -1),
+      detourVertical(from, to, obstacles, 1),
+    ],
+    obstacles,
+  )
 
   return <BaseEdge path={orthogonalPath(points)} style={visualStyle(data)} />
 }
@@ -251,7 +250,16 @@ export function DirectEdge({ sourceX, sourceY, targetX, targetY, data }: EdgePro
   const points =
     blockingRects(base, obstacles).length === 0
       ? base
-      : chooseRoute([detourSide(from, to, obstacles, -1), detourSide(from, to, obstacles, 1)], obstacles)
+      : chooseRoute(
+          [
+            detourSide(from, to, obstacles, -1),
+            detourSide(from, to, obstacles, 1),
+            // 侧向绕行仍被卡住时，再从上方/下方整体绕行
+            detourVertical(from, to, obstacles, -1),
+            detourVertical(from, to, obstacles, 1),
+          ],
+          obstacles,
+        )
 
   return <BaseEdge path={orthogonalPath(points)} style={visualStyle(data)} />
 }
@@ -262,7 +270,7 @@ export function BusEdge({ sourceX, sourceY, targetX, targetY, data }: EdgeProps<
   const to = { x: targetX, y: targetY }
   const obstacles = data?.obstacles ?? []
 
-  let gutterX = data?.gutterX ?? from.x + 160
+  const gutterX = data?.gutterX ?? from.x + 160
   const build = (x: number): Point[] => [
     from,
     { x, y: from.y },
@@ -270,28 +278,17 @@ export function BusEdge({ sourceX, sourceY, targetX, targetY, data }: EdgeProps<
     to,
   ]
 
-  // 一次把所有纵向区间内卡片的右边界纳入，避免母线/水平引线穿过子卡片
-  const spanTop = Math.min(from.y, to.y) - MARGIN
-  const spanBottom = Math.max(from.y, to.y) + MARGIN
-  const nearby = obstacles.filter(
-    (rect) => rect.y < spanBottom && rect.y + rect.height > spanTop,
+  // 母线 x 由父卡片统一给出，所有兄弟分支共用同一根竖线；
+  // 只有实际穿过卡片时才整体绕行，避免不同分支各自移动母线
+  const points = build(gutterX)
+  const routed = chooseRoute(
+    [
+      points,
+      detourVertical(from, to, obstacles, -1),
+      detourVertical(from, to, obstacles, 1),
+    ],
+    obstacles,
   )
-  if (nearby.length > 0) {
-    gutterX = Math.max(
-      gutterX,
-      ...nearby.map((rect) => rect.x + rect.width + MARGIN),
-    )
-  }
 
-  let points = build(gutterX)
-
-  // 兜底：仍有遮挡时继续右移到所有遮挡卡片之外
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const blockers = blockingRects(points, obstacles)
-    if (blockers.length === 0) break
-    gutterX = Math.max(...blockers.map((rect) => rect.x + rect.width + MARGIN))
-    points = build(gutterX)
-  }
-
-  return <BaseEdge path={orthogonalPath(points)} style={visualStyle(data)} />
+  return <BaseEdge path={orthogonalPath(routed)} style={visualStyle(data)} />
 }

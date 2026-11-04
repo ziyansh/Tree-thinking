@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.1.3** | [中文说明](readme.md)
+> Current version: **0.1.4** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -12,13 +12,13 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 - **Card sizes and notes**: chat cards share one global size, adjustable from all four edges and corners (minimum 280×240); note cards keep their own size. Double-click empty canvas to create a note, then edit its title and body.
 - **Compact, single-choice suggestions**: after an answer completes, N suggestion cards (default 3, configurable 2–6) plus 1 custom-input card appear as a compact vertical stack on the right. Only one can be picked per round; picking one hides the whole group, and “换一个方向” (another direction) starts a new round. Suggestion cards and the branch input bar render on separate layers and never overlap.
 - **Branch input and isolated context**: branches are created from an input bar as wide as the card; long text wraps and grows the bar automatically. Press Enter to create the card. A request only contains the root-to-current path, so sibling branches never see each other.
-- **Branch edges**: the main chain stays left-to-right; direct branches connect from the parent's top/bottom center to the child, and the shared bus is shared by every child of the same parent. Edges route around cards.
-- **Auto layout**: cards are arranged for the current connection style; branches stay in the parent's column below it instead of being forced to the right, and the result can be undone.
+- **Branch edges**: the main chain stays left-to-right; direct branches connect from the parent's top/bottom center to the child, and all non-main branches of one parent share a single bus. Edges route around cards.
+- **Auto layout**: the root card keeps its current position and the main chain always stays on one horizontal line. In direct mode branch heads sit directly below their parent in the same column; in bus mode they sit in the next column to the right and share one bus. Row/column spacing is controlled by Settings → Canvas → Card spacing.
 - **Drag, pin, and multi-select**: any blank area of a card can be dragged while text and buttons never trigger a drag; a grab cursor is shown. Pinning locks a card in place (the root card is pinned by default); dragging moves the whole subtree. Ctrl-click toggles multi-select and batch delete, while Shift snaps to a 20px grid and nearby cards.
 - **Title editing**: double-click a card title to edit it (the interval is configurable); Enter or blur commits, Esc cancels.
 - **Undo and save**: each canvas keeps its own multi-step undo stack (Ctrl+Z, depth configurable); Ctrl+S saves manually and autosave is configurable. Saving does not clear undo history.
 - **Multiple canvases**: a collapsible left sidebar (240px / 48px) to create, switch, rename, and delete canvases. Each canvas has exactly one root question. After the first answer completes, the app asks the model for a canvas title; a manual rename is never overwritten.
-- **In-app settings**: the gear at the bottom-left opens a floating dialog with Model service / Canvas / Pointer / Save / Appearance tabs. The Model service tab lets you switch between DeepSeek and OpenAI; each provider keeps its own key, base URL, and model, and changes take effect immediately — no restart.
+- **In-app settings**: the gear at the bottom-left opens a floating dialog with Model service / Canvas / Save / Appearance tabs. The Canvas tab holds the connection style, card spacing, and pointer gestures; the Model service tab lets you switch between DeepSeek and OpenAI, and changes take effect immediately — no restart.
 - **Multiple providers**: any OpenAI-compatible endpoint works. DeepSeek supports `deepseek-flash` / `deepseek-v4-pro`; OpenAI adds organization/project IDs, temperature, max output tokens, reasoning effort, and request timeout, and can point at a compatible proxy.
 - **Persistence**: canvases, cards, positions, and viewport are stored in local SQLite and restored after refresh.
 - **Appearance**: follow system / light / dark, plus accent hue, edge width and color; 12/24-hour time formats. Card body font size is adjustable (12–24px, default 14) and cards grow automatically when the font size increases.
@@ -100,10 +100,9 @@ git config core.hooksPath .githooks
 4. **Compare branches**: any card can fork; branches never share content created after the fork.
 5. **Manage canvases**: switch, create, rename, delete from the left sidebar; the bottom input follows the selected card.
 6. **Create and edit notes**: double-click empty canvas to create a note; edit its title and body directly, and drag any edge or corner to resize it independently. Notes are excluded from auto layout and edges.
-7. **Adjust appearance and interaction**: the Settings dialog at the bottom-left has five tabs:
+7. **Adjust appearance and interaction**: the Settings dialog at the bottom-left has four tabs:
    - **Model service**: API key, base URL, model, thinking mode, suggestion count;
-   - **Canvas**: branch connection style (direct branch / shared bus);
-   - **Pointer**: double-click interval (300ms by default), pointer drag drift delay (0ms by default), and drift distance (10px by default);
+   - **Canvas**: connection style (direct branch / shared bus), card spacing (80px by default, shared by new cards and auto layout), double-click interval, pointer drift delay and distance;
    - **Save**: autosave interval (0 disables it) and undo depth;
    - **Appearance**: follow system / light / dark, body font size (12–24px), accent hue, edge width and color, 12/24-hour clock.
 8. **Undo and save**: `Ctrl+Z` undoes the last action on the current canvas (stacks are per-canvas); `Ctrl+S` saves the current canvas; autosave runs on the configured interval, and saving never clears undo history.
@@ -154,6 +153,14 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.1.4 — 2026-11-04
+- Added Settings → Canvas → Card spacing (80px by default, range 16–1200), shared by newly created cards and auto layout.
+- Rewrote auto layout: the root card keeps its position; every card's first child is always the main branch and stays on the parent's horizontal line.
+- Direct mode: branch heads sit directly below their parent in the same column and connect from the parent's top/bottom centers; spacing is much tighter.
+- Bus mode: branch heads sit in the next column to the right, aligned with the main child column, and all sibling branches share one bus.
+- Enlarged the Settings dialog (fonts and controls scaled up) and merged the Pointer tab into Canvas.
+- Bumped the version to 0.1.4.
 
 ### 0.1.3 — 2026-11-04
 - Holding Space no longer turns the wheel into vertical scrolling; the wheel always zooms.

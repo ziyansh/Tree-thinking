@@ -20,6 +20,10 @@ DEFAULT_CARD_WIDTH = 400
 DEFAULT_CARD_HEIGHT = 560
 MIN_CARD_WIDTH = 280
 MIN_CARD_HEIGHT = 240
+# 卡片间距（px）：新建卡片与自动整理共用，默认 80，允许较大自由度
+DEFAULT_CARD_GAP = 80
+MIN_CARD_GAP = 16
+MAX_CARD_GAP = 1200
 
 # 画布 / 移动 / 保存 / 外观类设置的默认值与取值范围
 DEFAULT_CONNECTION_STYLE = "direct"
@@ -230,6 +234,12 @@ def effective(db: Session) -> dict:
         "card_height": _effective_size(
             row.card_height if row else None, DEFAULT_CARD_HEIGHT, MIN_CARD_HEIGHT
         ),
+        "card_gap": _effective_int(
+            row.card_gap if row else None,
+            DEFAULT_CARD_GAP,
+            MIN_CARD_GAP,
+            MAX_CARD_GAP,
+        ),
         "connection_style": _effective_choice(
             row.connection_style if row else None, CONNECTION_STYLES, DEFAULT_CONNECTION_STYLE
         ),
@@ -307,6 +317,7 @@ def dto(db: Session) -> dict:
         "suggestionCount": values["suggestion_count"],
         "cardWidth": values["card_width"],
         "cardHeight": values["card_height"],
+        "cardGap": values["card_gap"],
         "connectionStyle": values["connection_style"],
         "doubleClickMs": values["double_click_ms"],
         "dragDriftDelayMs": values["drag_drift_delay_ms"],
@@ -397,6 +408,10 @@ def update(db: Session, patch: dict) -> dict:
         row.card_width = max(MIN_CARD_WIDTH, int(patch["card_width"]))
     if patch.get("card_height") is not None:
         row.card_height = max(MIN_CARD_HEIGHT, int(patch["card_height"]))
+    if patch.get("card_gap") is not None:
+        row.card_gap = _effective_int(
+            patch["card_gap"], DEFAULT_CARD_GAP, MIN_CARD_GAP, MAX_CARD_GAP
+        )
 
     # 以下设置一律夹取/校验后落库，非法值不抛异常，直接回落默认值
     if patch.get("connection_style") is not None:

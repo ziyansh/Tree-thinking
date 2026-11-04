@@ -65,6 +65,7 @@ _EXTRA_COLUMNS = {
         "openai_timeout_seconds": "INTEGER",
         "card_width": "INTEGER",
         "card_height": "INTEGER",
+        "card_gap": "INTEGER",
         "connection_style": "VARCHAR(16)",
         # 指针手势三项；long_press_ms 为旧列，保留但不再使用
         "double_click_ms": "INTEGER",

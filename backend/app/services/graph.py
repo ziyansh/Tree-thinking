@@ -14,9 +14,6 @@ NOTE_DEFAULT_HEIGHT = 220
 NOTE_MIN_WIDTH = 280
 NOTE_MIN_HEIGHT = 240
 
-# 同列分支卡片的纵向安全间距（与前端 BRANCH_GAP 保持一致）
-BRANCH_GAP = 64
-
 
 def get_node_or_404(db: Session, node_id: str, detail: str = "节点不存在") -> ConversationNode:
     """按 id 取节点，不存在时抛 404。"""
@@ -32,12 +29,16 @@ def node_to_dto(node: ConversationNode) -> dict:
 
 
 def next_child_position(db: Session, parent: ConversationNode) -> tuple[float, float]:
-    """计算新子节点坐标：水平间隔为「卡片宽 + 320」。
+    """按连接方式与「卡片间距」计算新子节点坐标。
 
-    首个孩子与父卡片同一水平线；出现第二个及以上孩子时，
-    每个后续孩子按「卡片高 + BRANCH_GAP」纵向错开。
+    第一子卡片永远是主干：父卡片正右方、同一 y。
+    第二个及以后为分支头：
+    - 直接分支：父卡片正下方，同 x 列；
+    - 共用母线：父卡片右侧下一列，纵向错开。
     """
     runtime = runtime_settings.effective(db)
+    gap = runtime["card_gap"]
+    style = runtime["connection_style"]
     sibling_count = (
         db.scalar(
             select(func.count())
@@ -46,10 +47,12 @@ def next_child_position(db: Session, parent: ConversationNode) -> tuple[float, f
         )
         or 0
     )
-    x = parent.x + runtime["card_width"] + 320
+    main_x = parent.x + runtime["card_width"] + gap
     if sibling_count == 0:
-        return x, parent.y
-    return x, parent.y + sibling_count * (runtime["card_height"] + BRANCH_GAP)
+        return main_x, parent.y
+
+    x = parent.x if style == "direct" else main_x
+    return x, parent.y + sibling_count * (runtime["card_height"] + gap)
 
 
 def collect_subtree_ids(db: Session, root_id: str) -> list[str]:

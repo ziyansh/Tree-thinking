@@ -18,6 +18,7 @@ def test_settings_defaults(client):
     # 卡片尺寸默认 400×560
     assert data["cardWidth"] == 400
     assert data["cardHeight"] == 560
+    assert data["cardGap"] == 80
     # 指针手势默认：双击 300ms、漂移延迟 0ms、漂移距离 10px
     assert data["doubleClickMs"] == 300
     assert data["dragDriftDelayMs"] == 0

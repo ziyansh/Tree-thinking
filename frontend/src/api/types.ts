@@ -114,6 +114,8 @@ export interface SettingsDTO {
   cardWidth: number
   /** 全局卡片高度（默认 560，仅限制最小值） */
   cardHeight: number
+  /** 卡片间距（默认 80px）：新建卡片与自动整理共用，范围 16–1200 */
+  cardGap: number
   /** 分支连线方式（默认 direct） */
   connectionStyle: ConnectionStyle
   /** 双击最大间隔（默认 300ms，范围 100–1000） */
@@ -160,6 +162,7 @@ export interface SettingsPatch {
   suggestionCount?: number
   cardWidth?: number
   cardHeight?: number
+  cardGap?: number
   connectionStyle?: ConnectionStyle
   doubleClickMs?: number
   dragDriftDelayMs?: number

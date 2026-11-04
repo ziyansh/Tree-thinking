@@ -1,0 +1,39 @@
+# Python 虚拟环境
+backend/.venv/
+__pycache__/
+
+# 数据库文件
+backend/data/
+
+# 环境变量（可能包含 API Key）
+backend/.env
+
+# 前端依赖与构建产物
+node_modules/
+dist/
+
+# 日志与操作系统文件
+*.log
+.DS_Store
+
+# 本地文档缓存
+.trae/documents/
+.screenshots/
+.pytest_cache/
+
+#参考文档
+Reference_Doc/
+
+# 任何环境变量文件（保留示例）
+.env
+.env.*
+!.env.example
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 密钥/证书
+*.key
+*.pem

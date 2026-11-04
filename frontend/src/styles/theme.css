@@ -1,0 +1,167 @@
+@import "tailwindcss";
+
+/* 深色主题令牌（默认；未设置 data-theme 或显式 dark 时生效） */
+:root,
+[data-theme="dark"] {
+  /* 背景 */
+  --bg-canvas: #08090c;
+  --bg-panel: #0d0f13;
+  --bg-card: #12141a;
+  --bg-elevated: #181b21;
+
+  /* 边框 */
+  --border-subtle: #24272f;
+  --border-strong: #33373f;
+
+  /* 文字 */
+  --text-primary: #e6e8ec;
+  --text-body: #c9cbd1;
+  --text-muted: #7c818b;
+
+  /* 卡片正文字号，运行时由设置覆盖 */
+  --card-font-size: 14px;
+
+  /* 文字选中高亮：低饱和强调色，避免浏览器默认蓝色块 */
+  --selection-bg: hsl(var(--theme-hue) 65% 55% / 0.3);
+  --selection-text: #f2fffb;
+
+  /* 强调与状态：色相与明度由设置运行时覆盖 */
+  --theme-hue: 173;
+  --accent-lightness: 60%;
+  --accent: hsl(var(--theme-hue) 62% var(--accent-lightness));
+  --accent-dim: hsl(var(--theme-hue) 62% var(--accent-lightness) / 0.14);
+  --on-accent: #08090c;
+  --danger: #f87171;
+
+  /* 连线、画布点阵与 ghost 建议箭头 */
+  --edge: #3a3f4a;
+  --dot-color: #1a1c22;
+  --ghost-bg: rgba(255, 255, 255, 0.03);
+  --ghost-border: rgba(255, 255, 255, 0.07);
+
+  color-scheme: dark;
+}
+
+/* 浅色主题令牌：与深色同名，保证组件只依赖令牌即可切换 */
+[data-theme="light"] {
+  /* 背景 */
+  --bg-canvas: #f4f5f7;
+  --bg-panel: #ffffff;
+  --bg-card: #ffffff;
+  --bg-elevated: #f0f1f4;
+
+  /* 边框 */
+  --border-subtle: #d9dbe1;
+  --border-strong: #b9bdc7;
+
+  /* 文字 */
+  --text-primary: #1c1e24;
+  --text-body: #3a3d45;
+  --text-muted: #7c818b;
+
+  /* 强调与状态：浅色下降低明度，保证强调色上的白字可读 */
+  --theme-hue: 173;
+  --accent-lightness: 42%;
+
+  /* 文字选中高亮：浅色下降低透明度，保持文字对比 */
+  --selection-bg: hsl(var(--theme-hue) 62% 42% / 0.22);
+  --selection-text: #101216;
+  --accent: hsl(var(--theme-hue) 62% var(--accent-lightness));
+  --accent-dim: hsl(var(--theme-hue) 62% var(--accent-lightness) / 0.14);
+  --on-accent: #ffffff;
+  --danger: #dc2626;
+
+  /* 连线、画布点阵与 ghost 建议箭头 */
+  --edge: #a7abb6;
+  --dot-color: #d5d7dd;
+  --ghost-bg: rgba(0, 0, 0, 0.03);
+  --ghost-border: rgba(0, 0, 0, 0.08);
+
+  color-scheme: light;
+}
+
+/* 把 CSS 变量映射为 Tailwind 颜色工具类 */
+@theme inline {
+  --color-canvas: var(--bg-canvas);
+  --color-panel: var(--bg-panel);
+  --color-card: var(--bg-card);
+  --color-elevated: var(--bg-elevated);
+  --color-subtle: var(--border-subtle);
+  --color-strong: var(--border-strong);
+  --color-ink: var(--text-primary);
+  --color-body: var(--text-body);
+  --color-muted: var(--text-muted);
+  --color-accent: var(--accent);
+  --color-accent-dim: var(--accent-dim);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --color-edge: var(--edge);
+  --color-ghost-bg: var(--ghost-bg);
+  --color-ghost-border: var(--ghost-border);
+}
+
+/* 全局字体栈、铺满高度与主题底色 */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: var(--bg-canvas);
+  color: var(--text-body);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 细滚动条（6px，滑块 #2e323b） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2e323b transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: #2e323b;
+  border-radius: 3px;
+}
+
+/* React Flow 在重新测量节点时会短暂隐藏节点，流式增长的卡片会因此闪烁；
+   卡片坐标与宽度均由数据决定，这里让节点始终保持可见 */
+.react-flow__node {
+  visibility: visible !important;
+}
+
+/* 卡片文字可选中：React Flow 默认给节点容器设置 user-select:none，
+   这里用 !important 提高优先级，保证正文、标题与输入框都能拖选文字 */
+.react-flow__node .selectable-text,
+.selectable-text {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+
+/* 文字选中高亮：卡片、输入框、笔记正文统一使用主题色低饱和版本 */
+::selection {
+  background: var(--selection-bg);
+  color: var(--selection-text);
+}
+
+/* 空白画布可拖动：悬停显示抓取，按下显示抓紧；卡片与输入框会覆盖自己的光标 */
+.react-flow__pane {
+  cursor: grab;
+}
+
+.react-flow__pane:active {
+  cursor: grabbing;
+}

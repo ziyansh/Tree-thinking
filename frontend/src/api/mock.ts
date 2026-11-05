@@ -1,6 +1,14 @@
 import type { ApiClient } from './client'
 import type { StreamHandlers } from './sse'
-import type { GraphDTO, NodeDTO, ProjectDTO, SettingsDTO, SettingsPatch, SuggestionDTO } from './types'
+import type {
+  AttachmentDTO,
+  GraphDTO,
+  NodeDTO,
+  ProjectDTO,
+  SettingsDTO,
+  SettingsPatch,
+  SuggestionDTO,
+} from './types'
 
 /** Mock 数据在 sessionStorage 中的键（刷新后同一标签页仍保留） */
 const STORAGE_KEY = 'tree-thinking:mock-graph'
@@ -62,6 +70,8 @@ function makeRoot(projectId: string): NodeDTO {
     error: null,
     suggestions: [],
     suggestionsConsumed: false,
+    sources: [],
+    attachments: [],
     // 元卡片默认固定，与后端一致
     pinned: true,
     nodeType: 'chat',
@@ -147,6 +157,7 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   edgeColor: '#3a3f4a',
   themeMode: 'system',
   timeFormat: '24h',
+  webSearchEnabled: false,
 }
 
 /** 全局卡片尺寸的最小值（与后端一致，无上限） */
@@ -247,6 +258,8 @@ function makeNode(init: Partial<NodeDTO> & { projectId: string; parentId: string
     error: null,
     suggestions: [],
     suggestionsConsumed: false,
+    sources: init.sources ?? [],
+    attachments: init.attachments ?? [],
     pinned: init.pinned ?? false,
     nodeType: init.nodeType ?? 'chat',
     width: init.width ?? null,
@@ -256,6 +269,43 @@ function makeNode(init: Partial<NodeDTO> & { projectId: string; parentId: string
     createdAt: nowIso(),
     updatedAt: nowIso(),
   }
+}
+
+/** Mock 附件缓存：按 id 保存元数据，创建节点时按 id 解析 */
+const attachmentCache = new Map<string, AttachmentDTO>()
+
+/** 作为纯文本读取的扩展名白名单（与后端保持一致） */
+const TEXT_EXTENSIONS = new Set([
+  '.txt', '.md', '.markdown', '.json', '.csv', '.log',
+  '.py', '.js', '.ts', '.tsx', '.jsx', '.html', '.css', '.xml',
+  '.yaml', '.yml', '.toml', '.ini', '.sql', '.java', '.c', '.cpp',
+  '.h', '.go', '.rs', '.sh', '.bat', '.ps1',
+])
+
+/** 按 MIME 与扩展名判定附件类型：image / text / other */
+function kindOfAttachment(name: string, mime: string): AttachmentDTO['kind'] {
+  if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mime)) return 'image'
+  const dot = name.lastIndexOf('.')
+  const ext = dot === -1 ? '' : name.slice(dot).toLowerCase()
+  if (mime.startsWith('text/') || TEXT_EXTENSIONS.has(ext)) return 'text'
+  return 'other'
+}
+
+/** 把附件 id 解析成元信息，找不到时给出占位，避免节点缺字段 */
+function resolveAttachments(ids?: string[]): AttachmentDTO[] {
+  if (!ids || ids.length === 0) return []
+  return ids.slice(0, 10).map(
+    (id) =>
+      attachmentCache.get(id) ?? {
+        id,
+        name: id,
+        mime: '',
+        size: 0,
+        kind: 'other',
+        ext: '',
+        url: `/api/attachments/${id}`,
+      },
+  )
 }
 
 export const mockApi: ApiClient = {
@@ -333,6 +383,31 @@ export const mockApi: ApiClient = {
     }
   },
 
+  async uploadAttachment(file) {
+    await delay(120)
+    // 读成 data URL，Mock 模式下图片可直接用于 img src
+    const url = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = () => reject(new Error('读取文件失败'))
+      reader.readAsDataURL(file)
+    })
+    const id = crypto.randomUUID().replace(/-/g, '')
+    const dot = file.name.lastIndexOf('.')
+    const ext = dot === -1 ? '' : file.name.slice(dot)
+    const attachment: AttachmentDTO = {
+      id,
+      name: file.name || id,
+      mime: file.type,
+      size: file.size,
+      kind: kindOfAttachment(file.name, file.type),
+      ext,
+      url,
+    }
+    attachmentCache.set(id, attachment)
+    return { ...attachment }
+  },
+
   async createNode(projectId, input) {
     await delay(80)
     const db = getDb()
@@ -345,6 +420,7 @@ export const mockApi: ApiClient = {
       origin: input.origin,
       suggestionId: input.suggestionId ?? null,
       status: 'pending',
+      attachments: resolveAttachments(input.attachments),
       ...position,
     })
     // 由建议派生出的子卡片意味着父节点该轮候选方向已被消费
@@ -447,12 +523,14 @@ export const mockApi: ApiClient = {
     saveDb(db)
   },
 
-  async setNodeQuestion(id, question) {
+  async setNodeQuestion(id, question, attachments) {
     await delay(60)
     const db = getDb()
     const node = findNode(id)
     node.question = question
     node.error = null
+    // 附件按 id 解析成元信息；未传该字段时保持原附件不变
+    if (attachments !== undefined) node.attachments = resolveAttachments(attachments)
     node.updatedAt = nowIso()
     // 根问题写入后同步画布摘要，侧边栏列表才能显示最新摘要
     syncProjectMeta(db, node.projectId)
@@ -614,6 +692,7 @@ export const mockApi: ApiClient = {
     }
     if (patch.themeMode !== undefined) settings.themeMode = patch.themeMode
     if (patch.timeFormat !== undefined) settings.timeFormat = patch.timeFormat
+    if (patch.webSearchEnabled !== undefined) settings.webSearchEnabled = patch.webSearchEnabled
     saveSettingsState(settings)
     return { ...settings }
   },
@@ -660,6 +739,8 @@ export async function mockStreamAnswer(
   node.reasoning = ''
   node.error = null
   node.suggestions = []
+  // 新一轮回答开始时清空上一轮的搜索来源
+  node.sources = []
   node.updatedAt = nowIso()
   saveDb(db)
 

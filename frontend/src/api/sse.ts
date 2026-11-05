@@ -1,8 +1,9 @@
 import { isMock, mockStreamAnswer } from './mock'
-import type { SuggestionDTO } from './types'
+import type { SourceDTO, SuggestionDTO } from './types'
 
 /** 流式回答的回调集合 */
 export interface StreamHandlers {
+  onSources?: (list: SourceDTO[]) => void
   onReasoning?: (text: string) => void
   onDelta?: (text: string) => void
   onSuggestions?: (list: SuggestionDTO[]) => void
@@ -38,6 +39,31 @@ function parseSuggestions(data: string): SuggestionDTO[] | null {
     return {
       id: typeof record.id === 'string' ? record.id : `suggestion-${index}`,
       text: typeof record.text === 'string' ? record.text : String(record.text ?? ''),
+    }
+  })
+}
+
+/**
+ * 兼容两类来源下发格式：[{...}] 或 {sources:[...]}，
+ * 字段缺失时用空串 / null 补齐，避免前端渲染时判空。
+ */
+function parseSources(data: string): SourceDTO[] | null {
+  const parsed = parseJson(data)
+  const items = Array.isArray(parsed)
+    ? parsed
+    : typeof parsed === 'object' && parsed !== null && Array.isArray((parsed as { sources?: unknown }).sources)
+      ? (parsed as { sources: unknown[] }).sources
+      : null
+  if (!items) return null
+  return items.map((item) => {
+    const record = (item ?? {}) as Record<string, unknown>
+    return {
+      title: typeof record.title === 'string' ? record.title : String(record.title ?? ''),
+      url: typeof record.url === 'string' ? record.url : String(record.url ?? ''),
+      snippet: typeof record.snippet === 'string' ? record.snippet : '',
+      summary: typeof record.summary === 'string' ? record.summary : '',
+      siteName: typeof record.siteName === 'string' ? record.siteName : null,
+      date: typeof record.date === 'string' ? record.date : null,
     }
   })
 }
@@ -98,6 +124,12 @@ function dispatchEvent(rawEvent: string, handlers: StreamHandlers): boolean {
   const data = dataLines.join('\n')
 
   switch (event) {
+    case 'sources': {
+      // 来源在正文增量之前下发，解析失败时忽略，不中断回答
+      const list = parseSources(data)
+      if (list) handlers.onSources?.(list)
+      return false
+    }
     case 'reasoning':
       handlers.onReasoning?.(parseTextPayload(data))
       return false

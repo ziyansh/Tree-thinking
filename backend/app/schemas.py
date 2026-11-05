@@ -113,6 +113,10 @@ class NodeOut(CamelModel):
     status: str
     error: str | None = None
     suggestions: list[Suggestion] = []
+    # 联网搜索来源（camelCase 的 title/url/snippet/summary/siteName/date）
+    sources: list[dict] = []
+    # 节点附件元数据（上传接口返回的结构）
+    attachments: list[dict] = []
     suggestions_consumed: bool = False
     # 是否固定（元问题根节点默认固定）
     pinned: bool = False
@@ -130,6 +134,21 @@ class NodeOut(CamelModel):
     @classmethod
     def _parse_suggestions(cls, value: Any) -> Any:
         """数据库里是 JSON 数组字符串，解析后输出数组；非法内容返回空数组。"""
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return []
+            return parsed if isinstance(parsed, list) else []
+        return value
+
+    @field_validator("sources", "attachments", mode="before")
+    @classmethod
+    def _parse_json_list(cls, value: Any) -> Any:
+        """数据库里是 JSON 数组字符串，解析后输出数组；非法内容返回空数组。"""
+        # 旧库补列后历史行为 NULL，按空数组处理
+        if value is None:
+            return []
         if isinstance(value, str):
             try:
                 parsed = json.loads(value)
@@ -165,6 +184,8 @@ class NodeCreate(CamelModel):
     question: str
     origin: Literal["user", "suggestion"] = "user"
     suggestion_id: str | None = None
+    # 附件 id 列表（先上传取得 id，创建节点时绑定）
+    attachments: list[str] = []
 
 
 class NodePatch(CamelModel):
@@ -211,6 +232,9 @@ class NodeRestoreItem(CamelModel):
     status: str = "done"
     error: str | None = None
     suggestions: list[Suggestion] = []
+    # 来源与附件元数据：撤销删除时一并恢复
+    sources: list[dict] = []
+    attachments: list[dict] = []
     suggestions_consumed: bool = False
     pinned: bool = False
     node_type: str = "chat"
@@ -230,6 +254,8 @@ class NodeQuestion(CamelModel):
     """写入节点问题请求。"""
 
     question: str
+    # 附件 id 列表；空数组表示该节点不附带附件
+    attachments: list[str] = []
 
 
 class SuggestionRequest(CamelModel):
@@ -284,6 +310,8 @@ class SettingsPatch(CamelModel):
     edge_color: str | None = None
     theme_mode: Literal["system", "light", "dark"] | None = None
     time_format: Literal["24h", "12h"] | None = None
+    # 联网搜索开关
+    web_search_enabled: bool | None = None
 
     @field_validator("edge_color")
     @classmethod

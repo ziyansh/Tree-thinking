@@ -47,6 +47,8 @@ OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 THINKING_ENABLED: bool = _read_bool("THINKING_ENABLED", True)
 # 每个节点生成的候选方向数量
 SUGGESTION_COUNT: int = _read_int("SUGGESTION_COUNT", 3)
+# 是否默认开启联网搜索；页面「设置」里的开关优先
+WEB_SEARCH_ENABLED: bool = _read_bool("WEB_SEARCH_ENABLED", False)
 
 
 def _resolve_db_path(raw: str) -> Path:
@@ -61,3 +63,10 @@ def _resolve_db_path(raw: str) -> Path:
 DB_PATH: Path = _resolve_db_path(os.getenv("DB_PATH", "") or "backend/data/app.db")
 # 数据目录必须存在，否则 SQLite 无法创建数据库
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# 附件存放目录；默认 backend/data/uploads，同样支持相对路径
+UPLOAD_DIR: Path = _resolve_db_path(
+    os.getenv("UPLOAD_DIR", "") or "backend/data/uploads"
+)
+# 上传目录必须存在，否则保存附件时会失败
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

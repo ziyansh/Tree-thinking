@@ -156,6 +156,12 @@ def effective(db: Session) -> dict:
     else:
         thinking_enabled = bool(config.THINKING_ENABLED)
 
+    # 联网搜索：数据库开关优先，否则回落到环境变量默认值
+    if row and row.web_search_enabled is not None:
+        web_search_enabled = bool(row.web_search_enabled)
+    else:
+        web_search_enabled = bool(config.WEB_SEARCH_ENABLED)
+
     # OpenAI：独立保存，数据库为空时回落到 .env / 默认值
     openai_api_key = (
         (row.openai_api_key if row and row.openai_api_key else config.OPENAI_API_KEY)
@@ -288,6 +294,7 @@ def effective(db: Session) -> dict:
         "time_format": _effective_choice(
             row.time_format if row else None, TIME_FORMATS, DEFAULT_TIME_FORMAT
         ),
+        "web_search_enabled": web_search_enabled,
     }
 
 
@@ -330,6 +337,8 @@ def dto(db: Session) -> dict:
         "edgeColor": values["edge_color"],
         "themeMode": values["theme_mode"],
         "timeFormat": values["time_format"],
+        # 联网搜索开关
+        "webSearchEnabled": values["web_search_enabled"],
     }
 
 
@@ -472,6 +481,8 @@ def update(db: Session, patch: dict) -> dict:
         row.time_format = _effective_choice(
             patch["time_format"], TIME_FORMATS, DEFAULT_TIME_FORMAT
         )
+    if patch.get("web_search_enabled") is not None:
+        row.web_search_enabled = bool(patch["web_search_enabled"])
 
     db.commit()
     return dto(db)

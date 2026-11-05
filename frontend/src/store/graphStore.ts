@@ -22,6 +22,8 @@ export interface CreateBranchPayload {
   origin: 'user' | 'suggestion'
   question: string
   suggestionId?: string
+  /** 新卡片携带的附件 id 列表 */
+  attachmentIds?: string[]
   x: number
   y: number
 }
@@ -66,6 +68,8 @@ export type Preferences = Pick<
   | 'edgeColor'
   | 'themeMode'
   | 'timeFormat'
+  | 'provider'
+  | 'webSearchEnabled'
 >
 
 /** 与后端默认值保持一致，读取设置失败时沿用 */
@@ -85,6 +89,8 @@ const DEFAULT_PREFERENCES: Preferences = {
   edgeColor: '#3a3f4a',
   themeMode: 'system',
   timeFormat: '24h',
+  provider: 'deepseek',
+  webSearchEnabled: false,
 }
 
 /** 从设置 DTO 中摘出偏好字段，保证 store 与后端返回值同形 */
@@ -105,6 +111,8 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     edgeColor: settings.edgeColor,
     themeMode: settings.themeMode,
     timeFormat: settings.timeFormat,
+    provider: settings.provider,
+    webSearchEnabled: settings.webSearchEnabled,
   }
 }
 
@@ -126,6 +134,8 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     edgeColor: patch.edgeColor ?? base.edgeColor,
     themeMode: patch.themeMode ?? base.themeMode,
     timeFormat: patch.timeFormat ?? base.timeFormat,
+    provider: patch.provider ?? base.provider,
+    webSearchEnabled: patch.webSearchEnabled ?? base.webSearchEnabled,
   }
 }
 
@@ -269,7 +279,7 @@ interface GraphState {
   /** 批量删除选中的卡片（含未选中分支时二次确认） */
   deleteSelected: () => Promise<void>
   /** 提交问题：待输入节点写入问题，已有问答的节点新建子卡片；返回要生成回答的节点 id */
-  startQuestion: (nodeId: string, question: string) => Promise<string | null>
+  startQuestion: (nodeId: string, question: string, attachmentIds?: string[]) => Promise<string | null>
   /** 由 ghost 箭头创建子卡片，坐标以后端返回值为准 */
   createBranch: (parentId: string, payload: CreateBranchPayload) => Promise<void>
   /** 在指定卡片下方新增一条分支输入条 */
@@ -296,7 +306,7 @@ interface GraphState {
   setViewport: (viewport: Viewport) => Promise<void>
   /** 读取个人偏好设置（失败只告警，不阻塞画布），并同步卡片尺寸 */
   loadPreferences: () => Promise<void>
-  /** 乐观更新个人偏好并持久化；失败回滚。成功返回后端最新设置，失败返回 null */
+  /** 乐观更新个人偏好并持久化；失败回滚并抛出，成功返回后端最新设置 */
   updatePreferences: (patch: SettingsPatch) => Promise<SettingsDTO | null>
   /** 仅更新本地尺寸，用于拖拽实时预览 */
   setCardSize: (width: number, height: number) => void
@@ -613,7 +623,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       }))
     },
 
-    startQuestion: async (nodeId, question) => {
+    startQuestion: async (nodeId, question, attachmentIds) => {
       const text = question.trim()
       if (!text) return null
       const projectId = get().currentProjectId
@@ -624,7 +634,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
 
       // 待输入的卡片（通常是根卡片）直接写入问题
       if (node.status === 'input') {
-        const updated = await api.setNodeQuestion(nodeId, text)
+        const updated = await api.setNodeQuestion(nodeId, text, attachmentIds)
         patchNode(nodeId, (current) => ({ ...current, ...updated }))
         // 根问题变化后同步画布摘要，侧边栏无需重新拉取列表即可显示
         if (node.parentId === null && node.nodeType === 'chat') {
@@ -642,6 +652,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         parentId: nodeId,
         question: text,
         origin: 'user',
+        attachments: attachmentIds,
       })
       // 一旦继续追问，父卡片这一轮候选方向即结束，整组隐藏
       patchNode(nodeId, (current) => ({ ...current, suggestionsConsumed: true }))
@@ -665,6 +676,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           question: payload.question,
           origin: payload.origin,
           suggestionId: payload.suggestionId,
+          attachments: payload.attachmentIds,
         })
       } catch (err) {
         console.warn('创建分支失败', err)
@@ -701,40 +713,21 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     submitBranchInput: async (inputId, question) => {
       const text = question.trim()
       if (!text) return
-      const { branchInputs, nodes, currentProjectId, preferences } = get()
+      const { branchInputs, nodes, currentProjectId } = get()
       const input = branchInputs.find((item) => item.id === inputId)
       if (!input || !currentProjectId) return
       const parent = nodes.find((item) => item.id === input.parentId)
       if (!parent) return
 
-      // 第一子卡片永远是主干：父卡片正右方、同一 y；
-      // 之后为分支头：直接分支落在父卡片同列下方，共用母线落在右侧下一列
-      const cardWidth = preferences.cardWidth
-      const cardHeight = preferences.cardHeight
-      const cardGap = preferences.cardGap
-      const slots = nodes.filter((item) => item.data.node.parentId === input.parentId).length
-      const mainX = parent.position.x + cardWidth + cardGap
-      const x =
-        slots === 0
-          ? mainX
-          : preferences.connectionStyle === 'direct'
-            ? parent.position.x
-            : mainX
-      const y =
-        slots === 0
-          ? parent.position.y
-          : parent.position.y + (slots + 1) * (cardHeight + cardGap)
-
       let child: NodeDTO
       get().pushUndo('新增分支卡片')
       try {
+        // 坐标由后端按当前卡片尺寸与分支规则计算，直接使用返回值
         child = await api.createNode(currentProjectId, {
           parentId: input.parentId,
           question: text,
           origin: 'user',
         })
-        // 后端坐标规则不用于分支卡片，落点由前端写回
-        child = await api.patchNode(child.id, { x, y })
       } catch (err) {
         console.warn('提交分支失败', err)
         dropLastUndo(currentProjectId)
@@ -851,7 +844,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     },
 
     runAnswer: async (nodeId) => {
-      // 清空旧回答并进入流式态
+      // 清空旧回答、来源并进入流式态
       patchNode(nodeId, (node) => ({
         ...node,
         answer: '',
@@ -859,6 +852,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         error: null,
         status: 'streaming',
         suggestions: [],
+        sources: [],
       }))
       set((state) => ({
         isStreamingIds: [...state.isStreamingIds.filter((id) => id !== nodeId), nodeId],
@@ -874,6 +868,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         await streamAnswer(
           nodeId,
           {
+            onSources: (sources) => patchNode(nodeId, (node) => ({ ...node, sources })),
             onReasoning: (reasoning) =>
               patchNode(nodeId, (node) => ({ ...node, reasoning: node.reasoning + reasoning })),
             onDelta: (delta) =>
@@ -1035,9 +1030,10 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         return settings
       } catch (err) {
         console.warn('保存个人设置失败', err)
+        // 回滚乐观更新后抛出，交由调用方提示失败
         set(syncPreferences(previous))
         applyTheme(previous)
-        return null
+        throw err
       }
     },
 
@@ -1055,7 +1051,12 @@ export const useGraphStore = create<GraphState>()((set, get) => {
 
     saveCardSize: async () => {
       const { width, height } = get().cardSize
-      await get().updatePreferences({ cardWidth: width, cardHeight: height })
+      try {
+        await get().updatePreferences({ cardWidth: width, cardHeight: height })
+      } catch (err) {
+        // 拖拽缩放保存失败只告警，避免未处理的 rejection
+        console.warn('保存卡片尺寸失败', err)
+      }
     },
   }
 })

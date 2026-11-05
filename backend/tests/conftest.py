@@ -8,6 +8,8 @@ from pathlib import Path
 # 必须在导入 app 模块之前设置环境变量：config 在导入时读取 DB_PATH 与 Key
 _TMP_DIR = Path(tempfile.mkdtemp(prefix="tree_thinking_test_"))
 os.environ["DB_PATH"] = str(_TMP_DIR / "app.db")
+# 附件写入临时目录，避免测试污染真实 backend/data/uploads
+os.environ["UPLOAD_DIR"] = str(_TMP_DIR / "uploads")
 # 测试默认不配置 Key，避免意外发起真实请求
 os.environ["DEEPSEEK_API_KEY"] = ""
 os.environ["OPENAI_API_KEY"] = ""

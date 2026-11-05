@@ -4,6 +4,8 @@ DeepSeek 的 /chat/completions 是无状态的，每次请求都要传完整历�
 这里只沿 parent_id 上溯，兄弟分支的问答不会进入上下文。
 """
 
+from typing import Callable
+
 from sqlalchemy.orm import Session
 
 from app.models import ConversationNode
@@ -18,20 +20,42 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_messages(path: list[ConversationNode]) -> list[dict]:
+def _user_content(
+    node: ConversationNode,
+    attachments_for: Callable[[ConversationNode], tuple[str, list[dict]]] | None,
+) -> str | list[dict]:
+    """拼一条 user 消息的 content：有附件文本则追加，有图片则改用内容块数组。"""
+    if attachments_for is None:
+        return node.question
+    extra_text, images = attachments_for(node)
+    content = node.question + (extra_text or "")
+    if images:
+        return [{"type": "text", "text": content}, *images]
+    return content
+
+
+def build_messages(
+    path: list[ConversationNode],
+    attachments_for: Callable[[ConversationNode], tuple[str, list[dict]]] | None = None,
+) -> list[dict]:
     """把祖先路径拼成 messages 列表（纯函数，不查库，便于单测）。
 
     path 顺序为「根 → 当前节点」，最后一项是待回答节点。
     祖先只回传问题与最终回答，绝不包含 reasoning（思考过程不进上下文）。
+    attachments_for 为空时保持旧的纯文本行为；传入时按节点注入附件文本与图片。
     """
     if not path:
         return []
 
     messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
     for ancestor in path[:-1]:
-        messages.append({"role": "user", "content": ancestor.question})
+        messages.append(
+            {"role": "user", "content": _user_content(ancestor, attachments_for)}
+        )
         messages.append({"role": "assistant", "content": ancestor.answer})
-    messages.append({"role": "user", "content": path[-1].question})
+    messages.append(
+        {"role": "user", "content": _user_content(path[-1], attachments_for)}
+    )
     return messages
 
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { X } from 'lucide-react'
+import { RotateCcw, X } from 'lucide-react'
 import { api } from '../api/client'
 import type {
   ConnectionStyle,
@@ -18,11 +18,10 @@ interface SettingsDialogProps {
   onClose: () => void
 }
 
-/** 选项卡：模型服务 / 画布（含指针手势） / 保存 / 外观 */
+/** 选项卡：模型服务 / 画布（含保存） / 外观 */
 const TABS = [
   { id: 'model', label: '模型服务' },
   { id: 'canvas', label: '画布' },
-  { id: 'save', label: '保存' },
   { id: 'appearance', label: '外观' },
 ] as const
 
@@ -96,12 +95,300 @@ function fromSettings(data: SettingsDTO): SettingsForm {
   }
 }
 
-/** 输入框统一样式，颜色全部取自主题令牌 */
+/** 文本输入统一样式，宽度由外层容器限制在 380px 内 */
 const INPUT_CLASS =
-  'w-full rounded-lg border border-subtle bg-elevated px-3 py-2 text-[14px] text-ink outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent'
+  'rounded-lg border border-subtle bg-elevated px-3 py-2 text-[13px] text-ink outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent'
 
-/** 表单每一行：左侧标题与说明，右侧控件 */
-function Field({
+/** 数值归一化：空值还原、整数截断、按 step 四舍五入，最后夹到 [min,max] */
+function normalizeNumber(
+  raw: string,
+  fallback: number,
+  min: number,
+  max?: number,
+  step?: number,
+): number {
+  const parsed = raw.trim() === '' ? Number.NaN : Number(raw)
+  let next = Number.isFinite(parsed) ? parsed : fallback
+  if (step === undefined || Number.isInteger(step)) {
+    next = Math.trunc(next)
+  } else {
+    const factor = Math.round(1 / step)
+    next = Math.round(next * factor) / factor
+  }
+  if (max !== undefined) next = Math.min(max, next)
+  return Math.max(min, next)
+}
+
+/** 数字输入框：编辑时保留草稿，失焦时归一化并提交 */
+function NumberBox({
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  disabled,
+  className,
+}: {
+  value: number
+  onChange: (value: number) => void
+  min: number
+  max?: number
+  step?: number
+  disabled?: boolean
+  className?: string
+}) {
+  // draft 为 null 时直接展示外部值，编辑期间保留用户输入
+  const [draft, setDraft] = useState<string | null>(null)
+  const display = draft ?? String(value)
+
+  const commit = () => {
+    const next = normalizeNumber(display, value, min, max, step)
+    setDraft(null)
+    onChange(next)
+  }
+
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      disabled={disabled}
+      value={display}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      className={className}
+    />
+  )
+}
+
+/** 滑块 + 数字框：两者共用同一归一化提交逻辑 */
+function SliderNumber({
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  disabled,
+}: {
+  value: number
+  onChange: (value: number) => void
+  min: number
+  max: number
+  step?: number
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-subtle bg-elevated px-2.5 py-1.5">
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onChange(normalizeNumber(event.target.value, value, min, max, step))}
+        className="w-[140px] flex-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+        style={{ accentColor: 'var(--accent)' }}
+      />
+      <NumberBox
+        value={value}
+        onChange={onChange}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        className="w-[66px] rounded-md border border-strong bg-canvas px-2 py-1 text-center text-[13px] text-ink outline-none transition-colors duration-150 focus:border-accent disabled:cursor-not-allowed disabled:opacity-40"
+      />
+    </div>
+  )
+}
+
+/** 仅数字框：同样使用胶囊容器 */
+function NumberInput({
+  value,
+  onChange,
+  min,
+  max,
+  step,
+}: {
+  value: number
+  onChange: (value: number) => void
+  min: number
+  max?: number
+  step?: number
+}) {
+  return (
+    <div className="flex w-[110px] items-center rounded-lg border border-subtle bg-elevated px-2.5 py-1.5">
+      <NumberBox
+        value={value}
+        onChange={onChange}
+        min={min}
+        max={max}
+        step={step}
+        className="w-full rounded-md border border-strong bg-canvas px-2 py-1 text-center text-[13px] text-ink outline-none transition-colors duration-150 focus:border-accent"
+      />
+    </div>
+  )
+}
+
+/** 下拉框：原生 select，宽度 200px，不占整行 */
+function SelectRow<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+}: {
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (value: T) => void
+  ariaLabel: string
+}) {
+  return (
+    <select
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(event) => onChange(event.target.value as T)}
+      className={`${INPUT_CLASS} w-[200px] cursor-pointer`}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  )
+}
+
+/** 单选项按钮组：连接方式、推理强度、主题模式与时间制式共用 */
+function ChoiceGroup<T extends string>({
+  value,
+  options,
+  onChange,
+}: {
+  value: T
+  options: { value: T; label: string }[]
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="flex flex-wrap justify-end gap-2">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={option.value === value}
+          onClick={() => onChange(option.value)}
+          className={[
+            'rounded-lg border px-3 py-1.5 text-[13px] transition-colors duration-150',
+            option.value === value
+              ? 'border-accent bg-accent-dim text-accent'
+              : 'border-subtle bg-elevated text-body hover:text-ink',
+          ].join(' ')}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** 开关：沿用原有 toggle 样式 */
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={() => onChange(!checked)}
+      className={[
+        'relative h-5 w-9 flex-none rounded-full border transition-colors duration-150',
+        checked ? 'border-accent bg-accent-dim' : 'border-subtle bg-elevated',
+      ].join(' ')}
+    >
+      <span
+        className={[
+          'absolute top-0.5 h-3.5 w-3.5 rounded-full transition-[left,background-color] duration-150',
+          checked ? 'left-[18px] bg-accent' : 'left-0.5 bg-muted',
+        ].join(' ')}
+      />
+    </button>
+  )
+}
+
+/** 主题色相滑块：彩虹轨道 + 数值徽标 + 恢复默认；拖动时实时预览 */
+function HueSlider({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (value: number) => void
+}) {
+  // 预览期间直接改 CSS 变量；组件卸载（关闭设置）时恢复为已保存的色相
+  useEffect(() => {
+    document.documentElement.style.setProperty('--theme-hue', String(value))
+    return () => {
+      const saved = useGraphStore.getState().preferences.themeHue
+      document.documentElement.style.setProperty('--theme-hue', String(saved))
+    }
+  }, [value])
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="range"
+        min={0}
+        max={360}
+        step={1}
+        value={value}
+        onChange={(event) => onChange(normalizeNumber(event.target.value, value, 0, 360, 1))}
+        className="hue-slider w-[150px] flex-none cursor-pointer"
+      />
+      <span className="flex h-8 w-[56px] flex-none items-center justify-center rounded-lg border border-subtle bg-elevated text-[13px] tabular-nums text-ink">
+        {value}
+      </span>
+      <button
+        type="button"
+        title="恢复默认色相 173"
+        aria-label="恢复默认色相"
+        onClick={() => onChange(173)}
+        className="flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-subtle bg-elevated text-muted transition-colors duration-150 hover:text-ink"
+      >
+        <RotateCcw size={14} />
+      </button>
+    </div>
+  )
+}
+
+/** 二级标题：同一选项卡内用分区组织 */
+function Section({
+  title,
+  hint,
+  children,
+}: {
+  title: string
+  hint?: string
+  children: ReactNode
+}) {
+  return (
+    <section className="mt-8 first:mt-0">
+      <h3 className="mb-2 text-[15px] font-semibold text-ink">{title}</h3>
+      {hint && <p className="mb-2 text-[13px] leading-[1.55] text-muted">{hint}</p>}
+      {children}
+    </section>
+  )
+}
+
+/** 设置行：左侧标题与说明，右侧控件；最后一行不画分隔线 */
+function Row({
   label,
   hint,
   children,
@@ -111,49 +398,13 @@ function Field({
   children: ReactNode
 }) {
   return (
-    <div className="mb-5">
-      <label className="mb-2 block text-[14px] font-medium text-ink">{label}</label>
-      {children}
-      {hint && <p className="mt-1.5 text-[13px] leading-[1.55] text-muted">{hint}</p>}
-    </div>
-  )
-}
-
-/** 单选项按钮组：连接方式、主题模式与时间制式共用 */
-function ChoiceGroup<T extends string>({
-  label,
-  hint,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  hint?: string
-  value: T
-  options: { value: T; label: string }[]
-  onChange: (value: T) => void
-}) {
-  return (
-    <Field label={label} hint={hint}>
-      <div className="flex flex-wrap gap-2">
-        {options.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            aria-pressed={option.value === value}
-            onClick={() => onChange(option.value)}
-            className={[
-              'rounded-lg border px-3.5 py-2 text-[14px] transition-colors duration-150',
-              option.value === value
-                ? 'border-accent bg-accent-dim text-accent'
-                : 'border-subtle bg-elevated text-body hover:text-ink',
-            ].join(' ')}
-          >
-            {option.label}
-          </button>
-        ))}
+    <div className="flex items-center justify-between gap-6 border-b border-subtle py-4 last:border-0">
+      <div className="min-w-0">
+        <p className="text-[14px] font-medium text-ink">{label}</p>
+        {hint && <p className="mt-0.5 text-[13px] leading-[1.55] text-muted">{hint}</p>}
       </div>
-    </Field>
+      <div className="flex w-[380px] max-w-[46%] flex-none justify-end">{children}</div>
+    </div>
   )
 }
 
@@ -284,6 +535,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       setSettings(data)
       setForm(fromSettings(data))
       setMessage('已保存，立即生效')
+    } catch (err) {
+      // 后端 detail 会作为 Error.message 抛出；保留表单便于用户修改后重试
+      setError(err instanceof Error ? err.message : '保存失败，请稍后重试')
     } finally {
       setSaving(false)
     }
@@ -304,11 +558,11 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-label="设置"
-        className="flex h-[640px] max-h-[calc(100vh-48px)] w-[920px] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-subtle bg-panel shadow-2xl"
+        className="flex h-[760px] w-[1040px] max-h-[calc(100vh-48px)] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-subtle bg-panel shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
-        <aside className="flex w-[190px] flex-none flex-col border-r border-subtle bg-card">
-          <div className="px-5 pb-3 pt-5 text-[15px] font-semibold text-ink">设置</div>
+        <aside className="flex w-[200px] flex-none flex-col border-r border-subtle bg-card">
+          <div className="px-5 pb-3 pt-5 text-[16px] font-semibold text-ink">设置</div>
           <nav className="flex flex-col gap-1 px-2">
             {TABS.map((tab) => {
               const active = tab.id === activeTab
@@ -330,8 +584,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         </aside>
 
         <section className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center justify-between border-b border-subtle px-6 py-3.5">
-            <h2 className="text-[15px] font-semibold text-ink">{activeLabel}</h2>
+          <header className="flex items-center justify-between border-b border-subtle px-8 py-3.5">
+            <h2 className="text-[16px] font-semibold text-ink">{activeLabel}</h2>
             <button
               type="button"
               title="关闭设置"
@@ -343,27 +597,33 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             </button>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
             {loading ? (
               <p className="py-6 text-center text-[14px] text-muted">正在读取设置…</p>
             ) : (
               <>
                 {activeTab === 'model' && (
                   <>
-                    <ChoiceGroup
-                      label="服务商"
-                      hint="切换后下一次问答立即生效；两个服务商的 Key 与模型各自保存，互不覆盖"
-                      value={form.provider}
-                      options={[
-                        { value: 'deepseek', label: 'DeepSeek' },
-                        { value: 'openai', label: 'OpenAI' },
-                      ]}
-                      onChange={(provider) => setForm({ ...form, provider })}
-                    />
+                    <Section title="服务商与连接">
+                      <Row
+                        label="服务商"
+                        hint="OpenAI 兼容可填写任意兼容 OpenAI 协议的服务（官方 OpenAI、中转、OpenRouter、Moonshot 等）"
+                      >
+                        <SelectRow
+                          ariaLabel="服务商"
+                          value={form.provider}
+                          options={[
+                            { value: 'deepseek', label: 'DeepSeek' },
+                            { value: 'openai', label: 'OpenAI 兼容' },
+                          ]}
+                          onChange={(provider) => setForm({ ...form, provider })}
+                        />
+                      </Row>
+                    </Section>
 
                     {form.provider === 'deepseek' && (
-                      <>
-                        <Field
+                      <Section title="DeepSeek 参数">
+                        <Row
                           label="DeepSeek API Key"
                           hint={
                             settings?.hasKey
@@ -376,80 +636,52 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                             autoComplete="off"
                             value={form.apiKey}
                             onChange={(event) => setForm({ ...form, apiKey: event.target.value })}
-                            placeholder={settings?.hasKey ? '留空保持不变' : 'sk-…'}
-                            className={INPUT_CLASS}
+                            placeholder={settings?.hasKey ? '留空保持不变' : '填写 DeepSeek API Key'}
+                            className={`${INPUT_CLASS} w-full`}
                           />
-                        </Field>
+                        </Row>
 
-                        <Field
-                          label="接口地址"
-                          hint="默认 https://api.deepseek.com，兼容其他 OpenAI 协议服务"
-                        >
+                        <Row label="接口地址" hint="默认 https://api.deepseek.com，兼容其他 OpenAI 协议服务">
                           <input
                             type="text"
                             value={form.baseUrl}
                             onChange={(event) => setForm({ ...form, baseUrl: event.target.value })}
-                            className={INPUT_CLASS}
+                            className={`${INPUT_CLASS} w-full`}
                           />
-                        </Field>
+                        </Row>
 
-                        <Field label="模型" hint="留空会恢复为 .env 中的默认模型">
+                        <Row label="模型" hint="留空会恢复为 .env 中的默认模型">
                           <input
                             type="text"
                             list="settings-model-options"
                             value={form.model}
                             onChange={(event) => setForm({ ...form, model: event.target.value })}
-                            className={INPUT_CLASS}
+                            className={`${INPUT_CLASS} w-full`}
                           />
-                          <datalist id="settings-model-options">
-                            <option value="deepseek-flash" />
-                            <option value="deepseek-v4-pro" />
-                          </datalist>
-                        </Field>
+                        </Row>
+                        <datalist id="settings-model-options">
+                          <option value="deepseek-flash" />
+                          <option value="deepseek-v4-pro" />
+                        </datalist>
 
-                        <div className="mb-4 flex items-start justify-between gap-4">
-                          <div>
-                            <p className="text-[13px] font-medium text-ink">思考模式</p>
-                            <p className="mt-1 text-[12px] leading-[1.5] text-muted">
-                              关闭后不再返回思考过程，回答更快、更省 Token
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            role="switch"
-                            aria-checked={form.thinkingEnabled}
-                            aria-label="思考模式"
-                            onClick={() =>
-                              setForm({ ...form, thinkingEnabled: !form.thinkingEnabled })
-                            }
-                            className={[
-                              'relative mt-0.5 h-5 w-9 flex-none rounded-full border transition-colors duration-150',
-                              form.thinkingEnabled
-                                ? 'border-accent bg-accent-dim'
-                                : 'border-subtle bg-elevated',
-                            ].join(' ')}
-                          >
-                            <span
-                              className={[
-                                'absolute top-0.5 h-3.5 w-3.5 rounded-full transition-[left,background-color] duration-150',
-                                form.thinkingEnabled
-                                  ? 'left-[18px] bg-accent'
-                                  : 'left-0.5 bg-muted',
-                              ].join(' ')}
-                            />
-                          </button>
-                        </div>
-                      </>
+                        <Row label="思考模式" hint="关闭后不再返回思考过程，回答更快、更省 Token">
+                          <Toggle
+                            label="思考模式"
+                            checked={form.thinkingEnabled}
+                            onChange={(thinkingEnabled) => setForm({ ...form, thinkingEnabled })}
+                          />
+                        </Row>
+                      </Section>
                     )}
 
                     {form.provider === 'openai' && (
-                      <>
-                        <Field
-                          label="OpenAI API Key"
+                      <Section title="OpenAI 兼容参数">
+                        <Row
+                          label="API Key"
                           hint={
                             settings?.openaiHasKey
                               ? `当前：${settings.openaiApiKeyMasked}；留空保持不变`
-                              : '尚未配置，填写后才能获得回答；Key 只保存在本地后端'
+                              : '兼容任意 OpenAI 协议服务（官方 OpenAI、中转、OpenRouter、Moonshot 等），Key 只保存在本地后端'
                           }
                         >
                           <input
@@ -459,26 +691,25 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                             onChange={(event) =>
                               setForm({ ...form, openaiApiKey: event.target.value })
                             }
-                            placeholder={settings?.openaiHasKey ? '留空保持不变' : 'sk-…'}
-                            className={INPUT_CLASS}
+                            placeholder={
+                              settings?.openaiHasKey ? '留空保持不变' : '填写服务商提供的 API Key'
+                            }
+                            className={`${INPUT_CLASS} w-full`}
                           />
-                        </Field>
+                        </Row>
 
-                        <Field
-                          label="接口地址"
-                          hint="默认 https://api.openai.com/v1，可填写兼容 OpenAI 协议的中转地址"
-                        >
+                        <Row label="接口地址" hint="默认 https://api.openai.com/v1，可填写兼容 OpenAI 协议的中转地址">
                           <input
                             type="text"
                             value={form.openaiBaseUrl}
                             onChange={(event) =>
                               setForm({ ...form, openaiBaseUrl: event.target.value })
                             }
-                            className={INPUT_CLASS}
+                            className={`${INPUT_CLASS} w-full`}
                           />
-                        </Field>
+                        </Row>
 
-                        <Field label="模型" hint="可手填任意模型名；留空恢复默认 gpt-4o-mini">
+                        <Row label="模型" hint="可手填任意模型名；留空恢复默认 gpt-4o-mini">
                           <input
                             type="text"
                             list="settings-openai-model-options"
@@ -486,362 +717,269 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                             onChange={(event) =>
                               setForm({ ...form, openaiModel: event.target.value })
                             }
-                            className={INPUT_CLASS}
+                            className={`${INPUT_CLASS} w-full`}
                           />
-                          <datalist id="settings-openai-model-options">
-                            <option value="gpt-4o-mini" />
-                            <option value="gpt-4o" />
-                            <option value="gpt-4.1-mini" />
-                          </datalist>
-                        </Field>
+                        </Row>
+                        <datalist id="settings-openai-model-options">
+                          <option value="gpt-4o-mini" />
+                          <option value="gpt-4o" />
+                          <option value="gpt-4.1-mini" />
+                        </datalist>
 
-                        <Field
-                          label="Organization ID（可选）"
-                          hint="仅 OpenAI 官方组织需要填写，留空表示不发送该请求头"
-                        >
+                        <Row label="Organization ID（可选）" hint="仅 OpenAI 官方组织需要填写，留空表示不发送该请求头">
                           <input
                             type="text"
                             value={form.openaiOrganization}
                             onChange={(event) =>
                               setForm({ ...form, openaiOrganization: event.target.value })
                             }
-                            className={INPUT_CLASS}
+                            className={`${INPUT_CLASS} w-full`}
                           />
-                        </Field>
+                        </Row>
 
-                        <Field
-                          label="Project ID（可选）"
-                          hint="仅 OpenAI 官方项目需要填写，留空表示不发送该请求头"
-                        >
+                        <Row label="Project ID（可选）" hint="留空不发送">
                           <input
                             type="text"
                             value={form.openaiProject}
                             onChange={(event) =>
                               setForm({ ...form, openaiProject: event.target.value })
                             }
-                            className={INPUT_CLASS}
+                            className={`${INPUT_CLASS} w-full`}
                           />
-                        </Field>
+                        </Row>
 
-                        <Field
-                          label="温度"
-                          hint="默认不发送，由模型自行决定；推理模型可能不支持 temperature"
-                        >
+                        <Row label="温度" hint="默认不发送，由模型自行决定；推理模型可能不支持 temperature">
                           <div className="flex items-center gap-3">
-                            <label className="flex flex-none items-center gap-2 text-[13px] text-body">
-                              <input
-                                type="checkbox"
-                                checked={form.openaiTemperatureEnabled}
-                                onChange={(event) =>
-                                  setForm({
-                                    ...form,
-                                    openaiTemperatureEnabled: event.target.checked,
-                                  })
-                                }
-                                className="h-4 w-4 accent-[var(--accent)]"
-                              />
-                              自定义温度
-                            </label>
-                            <input
-                              type="number"
+                            <Toggle
+                              label="自定义温度"
+                              checked={form.openaiTemperatureEnabled}
+                              onChange={(openaiTemperatureEnabled) =>
+                                setForm({ ...form, openaiTemperatureEnabled })
+                              }
+                            />
+                            <SliderNumber
+                              value={form.openaiTemperature}
+                              onChange={(openaiTemperature) =>
+                                setForm({ ...form, openaiTemperature })
+                              }
                               min={0}
                               max={2}
                               step={0.1}
                               disabled={!form.openaiTemperatureEnabled}
-                              value={form.openaiTemperature}
-                              onChange={(event) =>
-                                setForm({ ...form, openaiTemperature: Number(event.target.value) })
-                              }
-                              className={[
-                                INPUT_CLASS,
-                                'w-24',
-                                'disabled:cursor-not-allowed disabled:opacity-40',
-                              ].join(' ')}
                             />
                           </div>
-                        </Field>
+                        </Row>
 
-                        <Field
-                          label="最大输出 tokens"
-                          hint="0 表示不发送、交给模型默认；大于 0 时按 max_completion_tokens 传递"
-                        >
-                          <input
-                            type="number"
-                            min={0}
+                        <Row label="最大输出 tokens" hint="0 表示不发送；大于 0 时按 max_completion_tokens 传递">
+                          <NumberInput
                             value={form.openaiMaxTokens}
-                            onChange={(event) =>
-                              setForm({ ...form, openaiMaxTokens: Number(event.target.value) })
-                            }
-                            className={[INPUT_CLASS, 'w-28'].join(' ')}
+                            onChange={(openaiMaxTokens) => setForm({ ...form, openaiMaxTokens })}
+                            min={0}
+                            max={999999}
+                            step={1}
                           />
-                        </Field>
+                        </Row>
 
-                        <ChoiceGroup
-                          label="推理强度"
-                          hint="默认表示不发送该参数；仅推理模型（如 o 系列）支持"
-                          value={form.openaiReasoningEffort}
-                          options={[
-                            { value: 'default', label: '默认' },
-                            { value: 'low', label: '低' },
-                            { value: 'medium', label: '中' },
-                            { value: 'high', label: '高' },
-                          ]}
-                          onChange={(openaiReasoningEffort) =>
-                            setForm({ ...form, openaiReasoningEffort })
-                          }
-                        />
+                        <Row label="推理强度" hint="默认表示不发送该参数；仅推理模型（如 o 系列）支持">
+                          <ChoiceGroup
+                            value={form.openaiReasoningEffort}
+                            options={[
+                              { value: 'default', label: '默认' },
+                              { value: 'low', label: '低' },
+                              { value: 'medium', label: '中' },
+                              { value: 'high', label: '高' },
+                            ]}
+                            onChange={(openaiReasoningEffort) =>
+                              setForm({ ...form, openaiReasoningEffort })
+                            }
+                          />
+                        </Row>
 
-                        <Field label="请求超时（秒）" hint="10–300，默认 60">
-                          <input
-                            type="number"
+                        <Row label="请求超时" hint="10–300 秒，默认 60">
+                          <SliderNumber
+                            value={form.openaiTimeoutSeconds}
+                            onChange={(openaiTimeoutSeconds) =>
+                              setForm({ ...form, openaiTimeoutSeconds })
+                            }
                             min={10}
                             max={300}
-                            value={form.openaiTimeoutSeconds}
-                            onChange={(event) =>
-                              setForm({ ...form, openaiTimeoutSeconds: Number(event.target.value) })
-                            }
-                            className={[INPUT_CLASS, 'w-28'].join(' ')}
                           />
-                        </Field>
-                      </>
+                        </Row>
+                      </Section>
                     )}
 
-                    <Field
-                      label="候选方向数量"
-                      hint="每张卡片回答完成后生成的建议箭头数量（2–6），另有 1 条自定义输入"
-                    >
-                      <input
-                        type="number"
-                        min={2}
-                        max={6}
-                        value={form.suggestionCount}
-                        onChange={(event) =>
-                          setForm({ ...form, suggestionCount: Number(event.target.value) })
-                        }
-                        className={[INPUT_CLASS, 'w-24'].join(' ')}
-                      />
-                    </Field>
+                    <Section title="通用">
+                      <Row label="候选方向数量" hint="每张卡片回答完成后生成的建议箭头数量（2–6），另有 1 条自定义输入">
+                        <SliderNumber
+                          value={form.suggestionCount}
+                          onChange={(suggestionCount) => setForm({ ...form, suggestionCount })}
+                          min={2}
+                          max={6}
+                        />
+                      </Row>
+                    </Section>
                   </>
                 )}
 
                 {activeTab === 'canvas' && (
                   <>
-                    <ChoiceGroup
-                      label="连接方式"
-                      hint="直接分支从父卡片上/下边中点连到子卡片；共用母线由全部子分支共享一条母线"
-                      value={form.connectionStyle}
-                      options={[
-                        { value: 'direct', label: '直接分支' },
-                        { value: 'bus', label: '共用母线' },
-                      ]}
-                      onChange={(connectionStyle) => setForm({ ...form, connectionStyle })}
-                    />
+                    <Section title="布局">
+                      <Row
+                        label="连接方式"
+                        hint="直接分支从父卡片上/下边中点连到子卡片；共用母线由全部子分支共享一条母线"
+                      >
+                        <ChoiceGroup
+                          value={form.connectionStyle}
+                          options={[
+                            { value: 'direct', label: '直接分支' },
+                            { value: 'bus', label: '共用母线' },
+                          ]}
+                          onChange={(connectionStyle) => setForm({ ...form, connectionStyle })}
+                        />
+                      </Row>
 
-                    <Field
-                      label="卡片间距（px）"
-                      hint="新建子卡片与自动整理共用；默认 80，范围 16–1200"
-                    >
-                      <input
-                        type="number"
-                        min={16}
-                        max={1200}
-                        step={1}
-                        value={form.cardGap}
-                        onChange={(event) =>
-                          setForm({ ...form, cardGap: Number(event.target.value) })
-                        }
-                        className={[INPUT_CLASS, 'w-28'].join(' ')}
-                      />
-                    </Field>
+                      <Row label="卡片间距" hint="新建子卡片与自动整理共用；默认 80，范围 16–1200">
+                        <SliderNumber
+                          value={form.cardGap}
+                          onChange={(cardGap) => setForm({ ...form, cardGap })}
+                          min={16}
+                          max={1200}
+                          step={1}
+                        />
+                      </Row>
+                    </Section>
 
-                    <Field
-                      label="双击间隔（最大，毫秒）"
-                      hint="两次点击在这个间隔内算双击；默认 300，范围 100–1000"
-                    >
-                      <input
-                        type="number"
-                        min={100}
-                        max={1000}
-                        step={50}
-                        value={form.doubleClickMs}
-                        onChange={(event) =>
-                          setForm({ ...form, doubleClickMs: Number(event.target.value) })
-                        }
-                        className={[INPUT_CLASS, 'w-28'].join(' ')}
-                      />
-                    </Field>
+                    <Section title="指针">
+                      <Row label="双击间隔" hint="两次点击在该间隔内算双击；默认 300，范围 100–1000">
+                        <SliderNumber
+                          value={form.doubleClickMs}
+                          onChange={(doubleClickMs) => setForm({ ...form, doubleClickMs })}
+                          min={100}
+                          max={1000}
+                          step={50}
+                        />
+                      </Row>
 
-                    <Field
-                      label="指针点击漂移延迟（毫秒）"
-                      hint="按下后等待多久开始检测晃动；默认 0，范围 0–500"
-                    >
-                      <input
-                        type="number"
-                        min={0}
-                        max={500}
-                        step={10}
-                        value={form.dragDriftDelayMs}
-                        onChange={(event) =>
-                          setForm({ ...form, dragDriftDelayMs: Number(event.target.value) })
-                        }
-                        className={[INPUT_CLASS, 'w-28'].join(' ')}
-                      />
-                    </Field>
+                      <Row label="指针点击漂移延迟" hint="按下后等待多久开始检测晃动；默认 0，范围 0–500">
+                        <SliderNumber
+                          value={form.dragDriftDelayMs}
+                          onChange={(dragDriftDelayMs) => setForm({ ...form, dragDriftDelayMs })}
+                          min={0}
+                          max={500}
+                          step={10}
+                        />
+                      </Row>
 
-                    <Field
-                      label="指针点击漂移（距离，px）"
-                      hint="超过该距离视为拖动，否则视为点击；默认 10，范围 0–50"
-                    >
-                      <input
-                        type="number"
-                        min={0}
-                        max={50}
-                        step={1}
-                        value={form.dragDriftDistance}
-                        onChange={(event) =>
-                          setForm({ ...form, dragDriftDistance: Number(event.target.value) })
-                        }
-                        className={[INPUT_CLASS, 'w-28'].join(' ')}
-                      />
-                    </Field>
-                  </>
-                )}
+                      <Row label="指针点击漂移距离" hint="超过该距离视为拖动，否则视为点击；默认 10，范围 0–50">
+                        <SliderNumber
+                          value={form.dragDriftDistance}
+                          onChange={(dragDriftDistance) => setForm({ ...form, dragDriftDistance })}
+                          min={0}
+                          max={50}
+                          step={1}
+                        />
+                      </Row>
+                    </Section>
 
-                {activeTab === 'save' && (
-                  <>
-                    <Field label="自动保存间隔（分钟）" hint="默认 5 分钟；填写 0 表示关闭自动保存">
-                      <input
-                        type="number"
-                        min={0}
-                        value={form.autosaveMinutes}
-                        onChange={(event) =>
-                          setForm({ ...form, autosaveMinutes: Number(event.target.value) })
-                        }
-                        className={[INPUT_CLASS, 'w-24'].join(' ')}
-                      />
-                    </Field>
+                    <Section title="保存">
+                      <Row label="自动保存间隔" hint="分钟；默认 5，填写 0 表示关闭自动保存">
+                        <NumberInput
+                          value={form.autosaveMinutes}
+                          onChange={(autosaveMinutes) => setForm({ ...form, autosaveMinutes })}
+                          min={0}
+                          step={1}
+                        />
+                      </Row>
 
-                    <Field label="撤销步数" hint="每张画布可回退的步数，默认 10，最小 1">
-                      <input
-                        type="number"
-                        min={1}
-                        value={form.undoSteps}
-                        onChange={(event) =>
-                          setForm({ ...form, undoSteps: Number(event.target.value) })
-                        }
-                        className={[INPUT_CLASS, 'w-24'].join(' ')}
-                      />
-                    </Field>
+                      <Row label="撤销步数" hint="每张画布可回退的步数，默认 10，最小 1">
+                        <NumberInput
+                          value={form.undoSteps}
+                          onChange={(undoSteps) => setForm({ ...form, undoSteps })}
+                          min={1}
+                          step={1}
+                        />
+                      </Row>
+                    </Section>
                   </>
                 )}
 
                 {activeTab === 'appearance' && (
                   <>
-                    <ChoiceGroup
-                      label="主题模式"
-                      hint="跟随系统时，会随 Windows 深浅色设置实时切换"
-                      value={form.themeMode}
-                      options={[
-                        { value: 'system', label: '跟随系统' },
-                        { value: 'light', label: '浅色' },
-                        { value: 'dark', label: '深色' },
-                      ]}
-                      onChange={(themeMode) => setForm({ ...form, themeMode })}
-                    />
+                    <Section title="主题">
+                      <Row label="主题模式" hint="跟随系统时，会随 Windows 深浅色设置实时切换">
+                        <ChoiceGroup
+                          value={form.themeMode}
+                          options={[
+                            { value: 'system', label: '跟随系统' },
+                            { value: 'light', label: '浅色' },
+                            { value: 'dark', label: '深色' },
+                          ]}
+                          onChange={(themeMode) => setForm({ ...form, themeMode })}
+                        />
+                      </Row>
 
-                    <Field
-                      label="正文字号"
-                      hint="12–24，默认 14；字号变大时卡片会自动放大，调小不会缩回"
-                    >
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="range"
+                      <Row label="主题色相" hint="0–360，默认 173（青色）；强调色由此色相派生">
+                        <HueSlider
+                          value={form.themeHue}
+                          onChange={(themeHue) => setForm({ ...form, themeHue })}
+                        />
+                      </Row>
+                    </Section>
+
+                    <Section title="卡片">
+                      <Row label="正文字号" hint="12–24，默认 14；字号变大时卡片会自动放大，调小不会缩回">
+                        <SliderNumber
+                          value={form.cardFontSize}
+                          onChange={(cardFontSize) => setForm({ ...form, cardFontSize })}
                           min={12}
                           max={24}
                           step={1}
-                          value={form.cardFontSize}
-                          onChange={(event) =>
-                            setForm({ ...form, cardFontSize: Number(event.target.value) })
-                          }
-                          className="flex-1"
-                          style={{ accentColor: 'var(--accent)' }}
                         />
-                        <input
-                          type="number"
-                          min={12}
-                          max={24}
-                          step={1}
-                          value={form.cardFontSize}
-                          onChange={(event) =>
-                            setForm({ ...form, cardFontSize: Number(event.target.value) })
-                          }
-                          className={[INPUT_CLASS, 'w-20 flex-none'].join(' ')}
-                        />
-                      </div>
-                    </Field>
+                      </Row>
+                    </Section>
 
-                    <Field label="主题色相" hint="0–360，默认 173（青色）；强调色由此色相派生">
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="range"
-                          min={0}
-                          max={360}
-                          value={form.themeHue}
-                          onChange={(event) =>
-                            setForm({ ...form, themeHue: Number(event.target.value) })
-                          }
-                          className="flex-1"
-                          style={{ accentColor: 'var(--accent)' }}
+                    <Section title="连线">
+                      <Row label="连线粗细" hint="0.5–6，步长 0.5">
+                        <SliderNumber
+                          value={form.edgeWidth}
+                          onChange={(edgeWidth) => setForm({ ...form, edgeWidth })}
+                          min={0.5}
+                          max={6}
+                          step={0.5}
                         />
-                        <input
-                          type="number"
-                          min={0}
-                          max={360}
-                          value={form.themeHue}
-                          onChange={(event) =>
-                            setForm({ ...form, themeHue: Number(event.target.value) })
-                          }
-                          className={[INPUT_CLASS, 'w-20 flex-none'].join(' ')}
+                      </Row>
+
+                      <Row label="连线颜色" hint="所有逻辑线统一使用该颜色">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            aria-label="连线颜色"
+                            value={form.edgeColor}
+                            onChange={(event) => setForm({ ...form, edgeColor: event.target.value })}
+                            className="h-8 w-12 flex-none cursor-pointer rounded-lg border border-subtle bg-elevated p-1"
+                          />
+                          <input
+                            type="text"
+                            value={form.edgeColor}
+                            onChange={(event) => setForm({ ...form, edgeColor: event.target.value })}
+                            className={`${INPUT_CLASS} w-[110px]`}
+                          />
+                        </div>
+                      </Row>
+                    </Section>
+
+                    <Section title="时间">
+                      <Row label="时间制式" hint="卡片修改时间按此制式显示">
+                        <ChoiceGroup
+                          value={form.timeFormat}
+                          options={[
+                            { value: '24h', label: '24 小时制' },
+                            { value: '12h', label: '12 小时制' },
+                          ]}
+                          onChange={(timeFormat) => setForm({ ...form, timeFormat })}
                         />
-                      </div>
-                    </Field>
-
-                    <Field label="连线粗细" hint="0.5–6，步长 0.5">
-                      <input
-                        type="number"
-                        min={0.5}
-                        max={6}
-                        step={0.5}
-                        value={form.edgeWidth}
-                        onChange={(event) =>
-                          setForm({ ...form, edgeWidth: Number(event.target.value) })
-                        }
-                        className={[INPUT_CLASS, 'w-24'].join(' ')}
-                      />
-                    </Field>
-
-                    <Field label="连线颜色" hint="所有逻辑线统一使用该颜色">
-                      <div className="flex items-center gap-3">
-                        <input
-                          type="color"
-                          value={form.edgeColor}
-                          onChange={(event) => setForm({ ...form, edgeColor: event.target.value })}
-                          className="h-9 w-14 flex-none cursor-pointer rounded-lg border border-subtle bg-elevated p-1"
-                        />
-                        <span className="text-[12px] tabular-nums text-muted">{form.edgeColor}</span>
-                      </div>
-                    </Field>
-
-                    <ChoiceGroup
-                      label="时间制式"
-                      hint="卡片修改时间按此制式显示"
-                      value={form.timeFormat}
-                      options={[
-                        { value: '24h', label: '24 小时制' },
-                        { value: '12h', label: '12 小时制' },
-                      ]}
-                      onChange={(timeFormat) => setForm({ ...form, timeFormat })}
-                    />
+                      </Row>
+                    </Section>
                   </>
                 )}
               </>

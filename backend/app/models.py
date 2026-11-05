@@ -57,6 +57,10 @@ class ConversationNode(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 候选方向，存 JSON 数组 [{"id","text"}] 的字符串
     suggestions: Mapped[str] = mapped_column(Text, default="[]")
+    # 联网搜索来源，存 JSON 数组的字符串（没有来源时为空数组）
+    sources: Mapped[str] = mapped_column(Text, default="[]")
+    # 节点附件元数据（上传接口返回的结构），存 JSON 数组的字符串
+    attachments: Mapped[str] = mapped_column(Text, default="[]")
     # 本组候选方向是否已被选择（单选后整组隐藏）
     suggestions_consumed: Mapped[bool] = mapped_column(Boolean, default=False)
     # 是否固定：固定后不能被直接拖起（元问题根节点默认固定）
@@ -135,4 +139,6 @@ class AppSetting(Base):
     theme_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 时间制式：24h / 12h；为空表示 24h
     time_format: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    # 是否开启联网搜索；为空表示沿用环境变量默认值（默认关闭）
+    web_search_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)

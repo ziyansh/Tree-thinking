@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 from app.db import SessionLocal, get_db
 from app.models import ConversationNode
 from app.schemas import NodePatch, NodeQuestion, SuggestionRequest
-from app.services import llm, suggestions
+from app.services import attachments, llm, suggestions
+from app.services import search as search_service
 from app.services import settings as runtime_settings
 from app.services.context import build_messages, get_path
 from app.services.graph import (
@@ -53,10 +54,12 @@ def _persist_answer(
     status: str,
     error: str | None,
     suggestion_list: list[dict] | None = None,
+    sources: list[dict] | None = None,
 ) -> None:
     """用新的会话落库回答结果；suggestion_list 非空时一并写入候选方向。
 
     生成器里不能跨 await 复用请求级的同步会话，所以这里单独开一个会话。
+    sources 非 None 时写入本次搜索来源（即使回答失败也保留）。
     """
     db = SessionLocal()
     try:
@@ -69,9 +72,25 @@ def _persist_answer(
         node.error = error
         if suggestion_list is not None:
             node.suggestions = json.dumps(suggestion_list, ensure_ascii=False)
+        if sources is not None:
+            node.sources = json.dumps(sources, ensure_ascii=False)
         db.commit()
     finally:
         db.close()
+
+
+def _sources_prompt(sources: list[dict]) -> str:
+    """把搜索结果拼成系统提示词，要求模型结合来源作答并给出链接。"""
+    lines = ["以下是与问题相关的联网搜索结果，请结合这些资料回答，并在引用处标注链接："]
+    for index, item in enumerate(sources[:10], start=1):
+        lines.append(
+            f"{index}. 标题：{item.get('title') or '无'}\n"
+            f"   站点：{item.get('siteName') or '无'}\n"
+            f"   日期：{item.get('date') or '未知'}\n"
+            f"   摘要：{item.get('summary') or item.get('snippet') or '无'}\n"
+            f"   链接：{item.get('url') or '无'}"
+        )
+    return "\n".join(lines)
 
 
 @router.patch("/{node_id}")
@@ -161,6 +180,9 @@ def set_question(node_id: str, payload: NodeQuestion, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="该节点已有回答，不能重复写入问题")
 
     node.question = payload.question.strip()
+    # 附件按本次提交整体覆盖；空数组表示该节点不附附件
+    metas = attachments.resolve_ids(payload.attachments)
+    node.attachments = json.dumps(metas, ensure_ascii=False)
     node.status = "pending"
     db.commit()
     db.refresh(node)
@@ -168,8 +190,8 @@ def set_question(node_id: str, payload: NodeQuestion, db: Session = Depends(get_
 
 
 @router.post("/{node_id}/answer")
-def answer_node(node_id: str, db: Session = Depends(get_db)):
-    """流式回答：以 SSE 推送 reasoning / delta / done / error，并把结果落库。"""
+async def answer_node(node_id: str, db: Session = Depends(get_db)):
+    """流式回答：以 SSE 推送 sources / reasoning / delta / done / error，并把结果落库。"""
     node = get_node_or_404(db, node_id)
     question = (node.question or "").strip()
     if not question:
@@ -180,18 +202,24 @@ def answer_node(node_id: str, db: Session = Depends(get_db)):
     node.answer = ""
     node.reasoning = ""
     node.error = None
+    # 重新生成时同样清空上一次的来源，避免新旧来源混在一起
+    node.sources = "[]"
     db.commit()
     db.refresh(node)
 
     # 上下文快照：路径为「根 → 当前节点」，之后生成器内不再使用请求级会话
-    messages = build_messages(get_path(db, node))
+    # 附件在构建 messages 时按节点注入（文本追加到问题后，图片转内容块）
+    messages = build_messages(
+        get_path(db, node),
+        attachments_for=lambda item: attachments.build_message_parts(item),
+    )
     # 当前生效的模型设置（页面「设置」优先，其次 .env）；保存后立即生效
     runtime = runtime_settings.effective(db)
 
     if not runtime["api_key"]:
         # 未配置 Key 也返回 200 + SSE，先告知前端具体原因，并把错误态落库
         message = _no_key_message(runtime["provider"])
-        _persist_answer(node_id, "", "", "error", message)
+        _persist_answer(node_id, "", "", "error", message, sources=[])
 
         def _no_key_stream() -> Iterator[str]:
             yield _sse("error", {"message": message})
@@ -202,11 +230,29 @@ def answer_node(node_id: str, db: Session = Depends(get_db)):
 
     async def _stream() -> AsyncIterator[str]:
         """只累积文本的异步生成器；结束时用新会话一次性落库。"""
+        sources: list[dict] = []
         answer = ""
         reasoning = ""
         error: str | None = None
         suggestion_items: list[dict] = []
         try:
+            # 联网搜索：仅在开启开关、DeepSeek 且已配置 Key 时触发
+            if (
+                runtime.get("web_search_enabled")
+                and runtime["provider"] == "deepseek"
+                and runtime["api_key"]
+            ):
+                try:
+                    sources = await search_service.search_web(question, runtime)
+                except Exception:
+                    logging.warning("联网搜索失败，跳过来源注入", exc_info=True)
+                    sources = []
+
+            if sources:
+                # 来源注入到最后一条 user 消息之前，保证模型看到资料再作答
+                messages.insert(len(messages) - 1, {"role": "system", "content": _sources_prompt(sources)})
+                yield _sse("sources", {"sources": sources})
+
             async for kind, text in llm.stream_chat(messages, runtime):
                 if kind == "reasoning":
                     reasoning += text
@@ -238,6 +284,8 @@ def answer_node(node_id: str, db: Session = Depends(get_db)):
                 error,
                 # 失败时保留旧建议，成功时用本次生成的建议覆盖
                 None if error else suggestion_items,
+                # 失败也保留本次已拿到的来源
+                sources,
             )
 
         if error:

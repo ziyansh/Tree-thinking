@@ -1,7 +1,7 @@
 import type { GraphFlowNode } from '../store/graphStore'
+import { GHOST_WIDTH, suggestionGhostHeight } from './ghosts'
 
-/** ghost 卡片尺寸与纵向间距，与 GhostNode / GhostInputNode / Canvas 的 GHOST_SIZE 保持一致 */
-const GHOST_WIDTH = 280
+/** ghost 输入箭头高度与纵向间距，与 ghosts.ts 的堆叠规则保持一致 */
 const GHOST_HEIGHT = 44
 const GHOST_GAP = 8
 
@@ -19,10 +19,13 @@ function showsGhosts(card: GraphFlowNode): boolean {
   return node.status === 'done' && !node.suggestionsConsumed
 }
 
-/** ghost 组高度：候选方向 + 末尾输入箭头，每条 44、间距 8 */
+/** ghost 组高度：候选方向逐条按估算高度累加，末尾再算输入箭头 44 与间距 8 */
 function ghostGroupHeight(card: GraphFlowNode): number {
-  const count = card.data.node.suggestions.length + 1
-  return count * GHOST_HEIGHT + (count - 1) * GHOST_GAP
+  let height = 0
+  for (const suggestion of card.data.node.suggestions) {
+    height += suggestionGhostHeight(suggestion.text) + GHOST_GAP
+  }
+  return height + GHOST_HEIGHT + GHOST_GAP
 }
 
 /** 布局矩形：聊天卡片或某张卡片右侧的 ghost 组 */

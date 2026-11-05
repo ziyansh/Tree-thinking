@@ -22,12 +22,22 @@ export type BranchInputFlowNode = Node<BranchInputNodeData, 'branch-input'>
 /** ghost 节点的联合类型（建议箭头 + 输入箭头） */
 export type GhostFlowNode = SuggestionGhostNode | InputGhostNode
 
-/** 候选方向与父卡片之间的水平间距：与「卡片间距」保持一致 */
-const GHOST_HEIGHT = 44
+/** ghost 卡片预留宽度（布局与边线避让共用），与 GhostNode 的最大宽度保持一致 */
+export const GHOST_WIDTH = 420
+
 /** ghost 卡片之间的纵向间距 */
 const GHOST_GAP = 8
+
 /** 分支输入条之间的纵向堆叠间距 */
 const BRANCH_INPUT_GAP = 52
+
+/**
+ * 估算候选方向 ghost 的实际高度：每行约 26 个字符、行高 20px、上下内边距 12px，最小 44px。
+ * 与 GhostNode 的 whitespace-normal 换行规则保持一致，避免多行文本互相覆盖。
+ */
+export function suggestionGhostHeight(text: string): number {
+  return Math.max(44, Math.ceil(text.length / 26) * 20 + 12)
+}
 
 /**
  * 由卡片派生 ghost 箭头。
@@ -51,7 +61,6 @@ export function buildGhostNodes(
   }
 
   const ghosts: GhostFlowNode[] = []
-  const step = GHOST_HEIGHT + GHOST_GAP
 
   for (const card of cards) {
     const node = card.data.node
@@ -62,7 +71,8 @@ export function buildGhostNodes(
 
     const x = card.position.x + cardSize.width + cardGap
     const seen = new Set<string>()
-    let index = 0
+    /** 已排入的 ghost 累计高度：按每条候选的实际估算高度向下累加 */
+    let offset = 0
 
     for (const suggestion of node.suggestions) {
       if (usedSuggestions.has(`${node.id}:${suggestion.id}`) || seen.has(suggestion.id)) continue
@@ -71,7 +81,7 @@ export function buildGhostNodes(
         id: `ghost:${node.id}:${suggestion.id}`,
         type: 'ghost',
         // 坐标取拖拽后的最新 position，而非 data.node.x/y
-        position: { x, y: card.position.y + index * step },
+        position: { x, y: card.position.y + offset },
         data: { parentId: node.id, suggestionId: suggestion.id, text: suggestion.text },
         // 候选方向始终浮在卡片之上，避免重叠时被遮挡
         zIndex: 10,
@@ -80,14 +90,14 @@ export function buildGhostNodes(
         deletable: false,
         connectable: false,
       })
-      index += 1
+      offset += suggestionGhostHeight(suggestion.text) + GHOST_GAP
     }
 
-    // 输入箭头排在所有候选方向之后
+    // 输入箭头排在所有候选方向之后，高度固定 44 后不再有其他项
     ghosts.push({
       id: `ghost-input:${node.id}`,
       type: 'ghost-input',
-      position: { x, y: card.position.y + index * step },
+      position: { x, y: card.position.y + offset },
       data: { parentId: node.id },
       // 与候选方向同层，保证可点击、可输入
       zIndex: 10,

@@ -20,7 +20,7 @@ from app.schemas import (
     ProjectPatch,
     RestoreRequest,
 )
-from app.services import naming
+from app.services import attachments, naming
 from app.services import settings as runtime_settings
 from app.services.graph import (
     NOTE_DEFAULT_HEIGHT,
@@ -255,6 +255,9 @@ def restore_nodes(
                     [suggestion.model_dump() for suggestion in item.suggestions],
                     ensure_ascii=False,
                 ),
+                # 来源与附件元数据原样恢复
+                sources=json.dumps(item.sources, ensure_ascii=False),
+                attachments=json.dumps(item.attachments, ensure_ascii=False),
                 suggestions_consumed=item.suggestions_consumed,
                 pinned=item.pinned,
                 node_type=item.node_type,
@@ -315,6 +318,9 @@ def create_node(
     # 已有子节点数决定纵向槽位，避免同级卡片重叠
     x, y = next_child_position(db, parent)
 
+    # 附件先校验（不存在时直接 400，不创建节点）
+    metas = attachments.resolve_ids(payload.attachments)
+
     node = ConversationNode(
         project_id=project_id,
         parent_id=parent.id,
@@ -325,6 +331,7 @@ def create_node(
         suggestion_id=payload.suggestion_id,
         status="pending",
         suggestions="[]",
+        attachments=json.dumps(metas, ensure_ascii=False),
         x=x,
         y=y,
     )

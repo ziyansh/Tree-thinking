@@ -17,6 +17,30 @@ export interface SuggestionDTO {
   text: string
 }
 
+/** 联网搜索来源 */
+export interface SourceDTO {
+  title: string
+  url: string
+  snippet: string
+  summary: string
+  siteName: string | null
+  date: string | null
+}
+
+/** 附件类型：图片 / 纯文本 / 其它 */
+export type AttachmentKind = 'image' | 'text' | 'other'
+
+/** 附件元信息，url 可直接用于 img src 或新窗口打开 */
+export interface AttachmentDTO {
+  id: string
+  name: string
+  mime: string
+  size: number
+  kind: AttachmentKind
+  ext: string
+  url: string
+}
+
 /** 对话卡片对应的后端节点 */
 export interface NodeDTO {
   id: string
@@ -40,6 +64,10 @@ export interface NodeDTO {
   width: number | null
   /** 笔记卡片的独立高度；问答卡片为空，使用全局卡片高度 */
   height: number | null
+  /** 联网搜索来源，未联网或没有结果时为空数组 */
+  sources: SourceDTO[]
+  /** 节点创建时上传的附件元信息 */
+  attachments: AttachmentDTO[]
   x: number
   y: number
   createdAt?: string
@@ -69,6 +97,8 @@ export interface NodeCreateInput {
   question: string
   origin: NodeOrigin
   suggestionId?: string
+  /** 附件 id 列表，后端会解析成附件元信息写入节点 */
+  attachments?: string[]
 }
 
 /** 主题模式：跟随系统 / 浅色 / 深色 */
@@ -140,6 +170,8 @@ export interface SettingsDTO {
   themeMode: ThemeMode
   /** 时间制式（默认 24 小时制） */
   timeFormat: TimeFormat
+  /** 是否开启联网搜索（默认关闭，仅 DeepSeek 服务商可用） */
+  webSearchEnabled: boolean
 }
 
 /** 更新设置入参：只提交要改的字段；apiKey 留空表示保持原 Key */
@@ -175,4 +207,6 @@ export interface SettingsPatch {
   edgeColor?: string
   themeMode?: ThemeMode
   timeFormat?: TimeFormat
+  /** 是否开启联网搜索 */
+  webSearchEnabled?: boolean
 }

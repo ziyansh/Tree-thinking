@@ -1,13 +1,25 @@
-import { memo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Check, ChevronDown, ChevronRight, Copy, GitBranch, Pin, RefreshCw, Trash2 } from 'lucide-react'
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  GitBranch,
+  Paperclip,
+  Pin,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import type { CardNodeData, CardFlowNode } from '../store/graphStore'
 import { formatModifiedTime } from '../lib/time'
+import { AttachmentBar } from './AttachmentBar'
+import { AttachmentChips, useAttachmentUploads, useFileDropZone } from './AttachmentComposer'
 
 /** Markdown 正文样式：颜色只取自主题令牌，避免卡片被长回答撑高 */
 const MARKDOWN_CLASS = [
@@ -117,12 +129,27 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [reasoningOpen, setReasoningOpen] = useState(false)
+  const [sourcesOpen, setSourcesOpen] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   /** 上一次点击标题的时间，用于手动判定双击 */
   const lastTitleClickRef = useRef(0)
   /** 标题上按下时的坐标，用于排除拖动/选字造成的误双击 */
   const titlePointerRef = useRef<{ x: number; y: number } | null>(null)
+  /** 元问题卡片输入区的待提交附件 */
+  const attachments = useAttachmentUploads()
+  const dropZone = useFileDropZone((files) => void attachments.addFiles(files))
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // 来源面板展开时按 Esc 收起
+  useEffect(() => {
+    if (!sourcesOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSourcesOpen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [sourcesOpen])
 
   const isStreaming = node.status === 'streaming'
   const isError = node.status === 'error'
@@ -146,9 +173,14 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
     if (!text || submitting) return
     setSubmitting(true)
     try {
-      const targetId = await startQuestion(node.id, text)
+      const targetId = await startQuestion(
+        node.id,
+        text,
+        attachments.items.map((item) => item.id),
+      )
       if (targetId) {
         setDraft('')
+        attachments.clear()
         await runAnswer(targetId)
       }
     } finally {
@@ -274,6 +306,35 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
       <Handle id="source-top" type="source" position={Position.Top} isConnectable={false} style={{ opacity: 0 }} />
       <Handle id="source-bottom" type="source" position={Position.Bottom} isConnectable={false} style={{ opacity: 0 }} />
 
+      {/* 附件条固定在标题行之前 */}
+      <AttachmentBar node={node} />
+
+      {/* 来源悬浮窗：向上弹出，不撑开卡片尺寸 */}
+      {sourcesOpen && node.sources.length > 0 && (
+        <div className="nodrag nowheel absolute bottom-full left-0 z-30 mb-2 max-h-[300px] w-full overflow-y-auto rounded-xl border border-subtle bg-panel p-3 shadow-2xl">
+          {node.sources.map((source, index) => (
+            <div key={`${source.url}-${index}`} className="mb-3 last:mb-0">
+              <a
+                href={source.url}
+                target="_blank"
+                rel="noreferrer"
+                className="block break-words text-[13px] font-medium text-accent hover:underline"
+              >
+                {source.title || source.url}
+              </a>
+              {(source.siteName || source.date) && (
+                <p className="mt-0.5 text-[11px] text-muted">
+                  {[source.siteName, source.date].filter(Boolean).join(' · ')}
+                </p>
+              )}
+              <p className="mt-1 whitespace-pre-wrap text-[13px] leading-[1.6] text-body">
+                {source.summary || source.snippet}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="card-drag-handle flex shrink-0 items-start gap-2">
         {editingTitle ? (
           <input
@@ -293,14 +354,14 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
               }
             }}
             className="nodrag nopan selectable-text min-w-0 flex-1 rounded-md border border-subtle bg-elevated px-1.5 py-0.5 font-semibold leading-snug text-accent outline-none transition-colors duration-150 focus:border-accent"
-            style={{ fontSize: 'calc(var(--card-font-size) + 1px)' }}
+            style={{ fontSize: 'calc(var(--card-font-size) + 2px)' }}
           />
         ) : (
           <h3
             onPointerDown={handleTitlePointerDown}
             onPointerUp={handleTitlePointerUp}
             className="min-w-0 flex-1 cursor-grab break-words font-semibold leading-snug text-accent active:cursor-grabbing"
-            style={{ fontSize: 'calc(var(--card-font-size) + 1px)' }}
+            style={{ fontSize: 'calc(var(--card-font-size) + 2px)' }}
           >
             {node.question || <span className="text-muted">请输入你的元问题</span>}
           </h3>
@@ -356,7 +417,20 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
       )}
 
       {isInput ? (
-        <div className="nodrag mt-3 flex min-h-0 flex-1 flex-col">
+        <div
+          onDragOver={dropZone.onDragOver}
+          onDragLeave={dropZone.onDragLeave}
+          onDrop={dropZone.onDrop}
+          className={[
+            'nodrag mt-3 flex min-h-0 flex-1 flex-col rounded-lg border p-1 transition-colors duration-150',
+            dropZone.dragOver ? 'border-accent bg-accent-dim' : 'border-transparent',
+          ].join(' ')}
+        >
+          {attachments.items.length > 0 && (
+            <div className="mb-1">
+              <AttachmentChips items={attachments.items} onRemove={attachments.remove} />
+            </div>
+          )}
           <textarea
             autoFocus
             value={draft}
@@ -371,10 +445,33 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
             className="selectable-text min-h-0 w-full flex-1 resize-none rounded-lg border border-subtle bg-elevated p-2 leading-[1.65] text-body outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent"
             style={{ fontSize: 'var(--card-font-size)' }}
           />
-          <div className="mt-2 flex shrink-0 justify-end">
+          <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                title="添加附件"
+                aria-label="添加附件"
+                onClick={() => fileInputRef.current?.click()}
+                className="nodrag flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
+              >
+                <Paperclip size={14} />
+              </button>
+              {attachments.uploading && <span className="text-[11px] text-muted">上传中…</span>}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="nodrag hidden"
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? [])
+                  event.target.value = ''
+                  void attachments.addFiles(files)
+                }}
+              />
+            </div>
             <button
               type="button"
-              disabled={submitting || !draft.trim()}
+              disabled={submitting || attachments.uploading || !draft.trim()}
               onClick={() => void handleSubmit()}
               className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -416,24 +513,42 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
           )}
 
           {node.status === 'done' && (
-            <div className="mt-2 flex shrink-0 items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => void regenerateSuggestions(node.id)}
-                className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
-              >
-                <RefreshCw size={12} />
-                换一个方向
-              </button>
-              <button
-                type="button"
-                title="新增分支"
-                aria-label="新增分支"
-                onClick={() => addBranchInput(node.id)}
-                className="nodrag flex items-center rounded-md px-1 py-0.5 text-muted transition-colors duration-150 hover:text-ink"
-              >
-                <GitBranch size={12} />
-              </button>
+            <div
+              className={[
+                'mt-2 flex shrink-0 items-center gap-2',
+                node.sources.length > 0 ? 'justify-between' : 'justify-end',
+              ].join(' ')}
+            >
+              {node.sources.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setSourcesOpen((open) => !open)}
+                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+                >
+                  参考 {node.sources.length} 篇资料
+                  <ChevronRight size={12} className={sourcesOpen ? 'rotate-90' : ''} />
+                </button>
+              )}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => void regenerateSuggestions(node.id)}
+                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+                >
+                  <RefreshCw size={12} />
+                  换一个方向
+                </button>
+                <button
+                  type="button"
+                  title="新建分支"
+                  aria-label="新建分支"
+                  onClick={() => addBranchInput(node.id)}
+                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+                >
+                  <GitBranch size={12} />
+                  新建分支
+                </button>
+              </div>
             </div>
           )}
         </>

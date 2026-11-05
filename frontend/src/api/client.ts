@@ -1,5 +1,6 @@
 import { isMock, mockApi } from './mock'
 import type {
+  AttachmentDTO,
   GraphDTO,
   NodeCreateInput,
   NodeDTO,
@@ -58,6 +59,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
+/** 上传单个附件：multipart 表单字段名固定为 file，Content-Type 交给浏览器自动生成 */
+async function uploadAttachmentFile(file: File): Promise<AttachmentDTO> {
+  const formData = new FormData()
+  formData.append('file', file)
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/attachments`, { method: 'POST', body: formData })
+  } catch {
+    throw new ApiError(0, '无法连接后端服务，请确认后端已启动')
+  }
+  if (!res.ok) throw new ApiError(res.status, await readError(res))
+  return (await res.json()) as AttachmentDTO
+}
+
 /** 前端用到的全部后端接口（Mock 与真实模式共用） */
 export interface ApiClient {
   listProjects(): Promise<ProjectDTO[]>
@@ -67,6 +82,8 @@ export interface ApiClient {
   autoNameProject(id: string): Promise<ProjectDTO>
   deleteProject(id: string): Promise<void>
   getGraph(projectId: string): Promise<GraphDTO>
+  /** 上传附件（multipart），返回附件元信息，图片 url 可直接用于 img src */
+  uploadAttachment(file: File): Promise<AttachmentDTO>
   createNode(projectId: string, input: NodeCreateInput): Promise<NodeDTO>
   patchNode(
     id: string,
@@ -91,7 +108,7 @@ export interface ApiClient {
   restoreNodes(projectId: string, nodes: NodeDTO[]): Promise<void>
   /** 保存当前画布快照，返回保存时间 */
   saveProject(projectId: string): Promise<{ savedAt: string }>
-  setNodeQuestion(id: string, question: string): Promise<NodeDTO>
+  setNodeQuestion(id: string, question: string, attachments?: string[]): Promise<NodeDTO>
   generateSuggestions(id: string, count?: number): Promise<SuggestionDTO[]>
   /** 新增空分支卡片：后端按当前卡片尺寸计算坐标，返回输入态节点 */
   createBranch(nodeId: string): Promise<NodeDTO>
@@ -118,6 +135,8 @@ const realApi: ApiClient = {
   deleteProject: (id) => request<void>(`/projects/${id}`, { method: 'DELETE' }),
 
   getGraph: (projectId) => request<GraphDTO>(`/projects/${projectId}/graph`),
+
+  uploadAttachment: uploadAttachmentFile,
 
   createNode: (projectId, input) =>
     request<NodeDTO>(`/projects/${projectId}/nodes`, {
@@ -147,10 +166,10 @@ const realApi: ApiClient = {
   saveProject: (projectId) =>
     request<{ savedAt: string }>(`/projects/${projectId}/save`, { method: 'POST' }),
 
-  setNodeQuestion: (id, question) =>
+  setNodeQuestion: (id, question, attachments) =>
     request<NodeDTO>(`/nodes/${id}/question`, {
       method: 'POST',
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({ question, attachments }),
     }),
 
   // 重新生成候选方向，已生成子卡片的建议由后端保留

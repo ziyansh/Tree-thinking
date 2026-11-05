@@ -41,11 +41,6 @@ function IconButton({ title, onClick, small, danger, children }: IconButtonProps
   )
 }
 
-/** 画布摘要：根问题压成单行，尚未填写时显示「空画布」 */
-function summaryOf(project: ProjectDTO): string {
-  return project.rootQuestion?.replace(/\s+/g, ' ').trim() || '空画布'
-}
-
 /** 左侧可折叠画布侧边栏：列出、切换、新建、重命名与删除画布，左下角提供设置入口 */
 export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const projects = useGraphStore((state) => state.projects)
@@ -181,10 +176,6 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
                           {project.name}
                         </div>
                       )}
-
-                      <div className="mt-1 truncate text-[12px] leading-tight text-muted">
-                        {summaryOf(project)}
-                      </div>
 
                       {!editing && (
                         <div className="absolute right-1 top-1 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">

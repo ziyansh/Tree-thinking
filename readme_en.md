@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.1.4** | [中文说明](readme.md)
+> Current version: **0.1.5** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -18,8 +18,10 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 - **Title editing**: double-click a card title to edit it (the interval is configurable); Enter or blur commits, Esc cancels.
 - **Undo and save**: each canvas keeps its own multi-step undo stack (Ctrl+Z, depth configurable); Ctrl+S saves manually and autosave is configurable. Saving does not clear undo history.
 - **Multiple canvases**: a collapsible left sidebar (240px / 48px) to create, switch, rename, and delete canvases. Each canvas has exactly one root question. After the first answer completes, the app asks the model for a canvas title; a manual rename is never overwritten.
-- **In-app settings**: the gear at the bottom-left opens a floating dialog with Model service / Canvas / Save / Appearance tabs. The Canvas tab holds the connection style, card spacing, and pointer gestures; the Model service tab lets you switch between DeepSeek and OpenAI, and changes take effect immediately — no restart.
-- **Multiple providers**: any OpenAI-compatible endpoint works. DeepSeek supports `deepseek-flash` / `deepseek-v4-pro`; OpenAI adds organization/project IDs, temperature, max output tokens, reasoning effort, and request timeout, and can point at a compatible proxy.
+- **In-app settings**: the gear at the bottom-left opens a floating dialog with three tabs — Model service / Canvas / Appearance (save options live in Canvas). Each section has a heading, with a description on the left and the control on the right; bounded values use a slider plus a number input, and changes take effect immediately — no restart.
+- **Multiple providers**: the provider is a dropdown (DeepSeek / OpenAI-compatible); the latter works with any service that implements the OpenAI protocol. DeepSeek supports `deepseek-flash` / `deepseek-v4-pro`; the OpenAI-compatible option adds organization/project IDs, temperature, max output tokens, reasoning effort, and request timeout, and can point at a proxy.
+- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek only). When enabled, the app calls DeepSeek Search before answering and injects a summary; cards show “参考 N 篇资料” at the bottom-left, and clicking it opens a source popover (Esc or a second click closes it).
+- **Attachments**: the root question input and the “custom direction” box accept click-to-upload or drag-and-drop attachments (images and text). Cards show attachments at the top-left (more than three collapse into “附件 N”), and clicking an image opens a viewer with zoom and pan. Attachments are injected along the root-to-current path, so sibling branches never see them.
 - **Persistence**: canvases, cards, positions, and viewport are stored in local SQLite and restored after refresh.
 - **Appearance**: follow system / light / dark, plus accent hue, edge width and color; 12/24-hour time formats. Card body font size is adjustable (12–24px, default 14) and cards grow automatically when the font size increases.
 - **Modified time**: chat and note cards show the last modified time at the bottom-right outside the card (`yyyy-mm-dd hh:mm`, with AM/PM in 12-hour mode), updated as edits happen.
@@ -100,11 +102,10 @@ git config core.hooksPath .githooks
 4. **Compare branches**: any card can fork; branches never share content created after the fork.
 5. **Manage canvases**: switch, create, rename, delete from the left sidebar; the bottom input follows the selected card.
 6. **Create and edit notes**: double-click empty canvas to create a note; edit its title and body directly, and drag any edge or corner to resize it independently. Notes are excluded from auto layout and edges.
-7. **Adjust appearance and interaction**: the Settings dialog at the bottom-left has four tabs:
-   - **Model service**: API key, base URL, model, thinking mode, suggestion count;
-   - **Canvas**: connection style (direct branch / shared bus), card spacing (80px by default, shared by new cards and auto layout), double-click interval, pointer drift delay and distance;
-   - **Save**: autosave interval (0 disables it) and undo depth;
-   - **Appearance**: follow system / light / dark, body font size (12–24px), accent hue, edge width and color, 12/24-hour clock.
+7. **Adjust appearance and interaction**: the Settings dialog at the bottom-left has three tabs:
+   - **Model service**: provider (dropdown: DeepSeek / OpenAI-compatible), API key, base URL, model, thinking mode, suggestion count;
+   - **Canvas**: connection style (direct branch / shared bus), card spacing (80px by default, shared by new cards and auto layout), double-click interval, pointer drift delay and distance, autosave interval and undo depth;
+   - **Appearance**: follow system / light / dark, body font size (12–24px), accent hue (with a reset button), edge width and color, 12/24-hour clock.
 8. **Undo and save**: `Ctrl+Z` undoes the last action on the current canvas (stacks are per-canvas); `Ctrl+S` saves the current canvas; autosave runs on the configured interval, and saving never clears undo history.
 
 ## Project Layout
@@ -145,7 +146,7 @@ Tree_thinking/
 - **Reset all data**: stop the backend, delete `backend/data/app.db`, and start again.
 - **Slow answers / no reasoning panel**: check the thinking-mode switch and the selected model in Settings.
 - **How do I switch themes**: open Settings → Appearance and choose follow system / light / dark; accent hue, edge width, and edge color are adjustable there too.
-- **How do I undo or save**: with no input focused, press `Ctrl+Z` to undo the last action on the current canvas and `Ctrl+S` to save. The autosave interval and undo depth live under Settings → Save.
+- **How do I undo or save**: with no input focused, press `Ctrl+Z` to undo the last action on the current canvas and `Ctrl+S` to save. The autosave interval and undo depth live under Settings → Canvas.
 - **How do I create or resize a note**: double-click empty canvas to create one; drag any edge or corner handle to resize it independently. Click to edit the title and body; the delete button sits at the right of the title bar.
 - **Change defaults only**: edit `backend/.env` and restart the backend; settings saved in the UI take precedence.
 - **`.env` is ignored / the commit hook blocks a commit**: this is expected — environment files and suspected keys must not enter the repository. Keep the real key in a local, ignored `.env` and commit only key-free templates such as `.env.example`; the hook prints the offending file, so remove any `sk-` key or non-empty `DEEPSEEK_API_KEY` from it and commit again.
@@ -153,6 +154,19 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.1.5 — 2026-11-04
+- Fixed: a card created from the branch input now uses the backend's unified position (matching Card spacing, without an extra blank row).
+- Fixed: suggestion cards now display in full, wrap automatically, and size themselves to their content.
+- Fixed: removed the “Empty canvas” subtitle from sidebar canvas entries.
+- Fixed: while Space or the middle mouse button is held, every drag pans the canvas.
+- Settings: reduced to three tabs — Model service / Canvas / Appearance — with Save folded into Canvas; section headings with a description on the left and the control on the right; bounded values use a slider plus a number input; the accent hue uses a rainbow gradient with a reset button; out-of-range values are corrected on blur, and save failures show the backend reason.
+- Settings: the provider is now a dropdown named “OpenAI 兼容” (OpenAI-compatible), supporting any OpenAI-protocol service; key hints no longer mention `sk-`.
+- Web search: added a toggle next to “Auto layout” at the canvas top-left (DeepSeek only); before answering, DeepSeek Search results are injected as a summary. Cards show “参考 N 篇资料” at the bottom-left with a source popover (Esc or a second click closes it).
+- Attachments: the root question input and the custom-direction box accept click or drag-and-drop uploads; cards show attachments at the top-left (image thumbnails, more than three collapse into “附件 N”, hover expands temporarily and click pins); clicking an image opens a viewer with wheel zoom, drag panning, and Esc to close; the custom-direction box expands into a multi-line panel on focus.
+- Attachments: text and image attachments are injected along the root-to-current path, so sibling branches cannot see each other's files.
+- Polish: card titles are one pixel larger; the fork button now reads “New branch”.
+- Bumped the version to 0.1.5.
 
 ### 0.1.4 — 2026-11-04
 - Added Settings → Canvas → Card spacing (80px by default, range 16–1200), shared by newly created cards and auto layout.

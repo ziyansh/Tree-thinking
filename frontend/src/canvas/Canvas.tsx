@@ -10,7 +10,7 @@ import {
 } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { LayoutGrid, Maximize, Minus, Plus, Send } from 'lucide-react'
+import { Globe, LayoutGrid, Maximize, Minus, Plus, Send } from 'lucide-react'
 import { CardNode } from './CardNode'
 import { NoteNode } from './NoteNode'
 import { BranchInputNode } from './BranchInputNode'
@@ -249,6 +249,7 @@ function CanvasInner() {
   const selectedNodeIds = useGraphStore((state) => state.selectedNodeIds)
   const savePosition = useGraphStore((state) => state.savePosition)
   const createNoteAt = useGraphStore((state) => state.createNoteAt)
+  const updatePreferences = useGraphStore((state) => state.updatePreferences)
   const dotColor = useDotColor()
 
   const { fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
@@ -730,6 +731,17 @@ function CanvasInner() {
     )
   }, [])
 
+  // 联网搜索仅 DeepSeek 服务商支持；失败时 store 会回滚，这里只告警
+  const webSearchDisabled = preferences.provider !== 'deepseek'
+  const toggleWebSearch = useCallback(async () => {
+    if (webSearchDisabled) return
+    try {
+      await updatePreferences({ webSearchEnabled: !preferences.webSearchEnabled })
+    } catch (err) {
+      console.warn('切换联网搜索失败', err)
+    }
+  }, [preferences.webSearchEnabled, updatePreferences, webSearchDisabled])
+
   // 仅在打开/切换画布时定位一次：有保存视口则恢复，否则 fitView
   useEffect(() => {
     if (!currentProjectId || nodes.length === 0) return
@@ -774,6 +786,8 @@ function CanvasInner() {
         'relative h-full w-full bg-canvas',
         isPanning ? 'cursor-grabbing' : spacePressed ? 'cursor-grab' : '',
       ].join(' ')}
+      // 空格按住期间禁止文字选中，保证拖动一律是画布平移
+      style={{ userSelect: spacePressed ? 'none' : undefined }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
@@ -795,6 +809,8 @@ function CanvasInner() {
         nodeDragThreshold={preferences.dragDriftDistance}
         // 取消选中卡片自动抬升，保证 ghost 与分支输入条（zIndex 10）始终在卡片之上
         elevateNodesOnSelect={false}
+        // 空格按住时卡片不可拖动，左键拖动改为平移画布
+        nodesDraggable={!spacePressed}
         // 空格按住时左键可平移；中键始终可平移；普通左键不平移
         panOnDrag={spacePressed ? [0, 1] : [1]}
         onNodeClick={(event, node) => {
@@ -823,14 +839,33 @@ function CanvasInner() {
       >
         <Background gap={24} color={dotColor} />
         <Panel position="top-left">
-          <button
-            type="button"
-            onClick={() => void handleAutoLayout()}
-            className="flex h-7 items-center gap-1.5 rounded-lg border border-subtle bg-panel px-2.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
-          >
-            <LayoutGrid size={12} />
-            自动重排
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleAutoLayout()}
+              className="flex h-7 items-center gap-1.5 rounded-lg border border-subtle bg-panel px-2.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+            >
+              <LayoutGrid size={12} />
+              自动重排
+            </button>
+            <button
+              type="button"
+              title={webSearchDisabled ? '仅 DeepSeek 服务商支持联网搜索' : '联网搜索'}
+              disabled={webSearchDisabled}
+              onClick={() => void toggleWebSearch()}
+              className={[
+                'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors duration-150',
+                webSearchDisabled
+                  ? 'cursor-not-allowed border-subtle bg-panel text-muted opacity-40'
+                  : preferences.webSearchEnabled
+                    ? 'border-accent bg-accent-dim text-accent'
+                    : 'border-subtle bg-panel text-muted hover:text-ink',
+              ].join(' ')}
+            >
+              <Globe size={12} />
+              联网搜索
+            </button>
+          </div>
         </Panel>
         {selectedNodeIds.length > 1 && (
           <Panel position="top-center">

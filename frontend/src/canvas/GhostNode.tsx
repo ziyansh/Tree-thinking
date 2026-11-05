@@ -35,14 +35,14 @@ function GhostNodeInner({
     <div
       onClick={() => void handleClick()}
       className={[
-        'group relative flex min-h-[44px] w-[280px] cursor-pointer items-center gap-1.5 rounded-lg border border-ghost-border bg-ghost-bg px-2.5 py-1',
+        'group relative flex min-h-[44px] w-max min-w-[280px] max-w-[420px] cursor-pointer items-center gap-1.5 rounded-lg border border-ghost-border bg-ghost-bg px-2.5 py-2',
         'transition-colors duration-150 hover:border-accent',
         pending ? 'pointer-events-none opacity-60' : '',
       ].join(' ')}
     >
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <span className="shrink-0 text-[10px] leading-none text-muted/70">猜你想问</span>
-      <p className="min-w-0 flex-1 truncate text-[13px] leading-none text-muted transition-colors duration-150 group-hover:text-ink">
+      <p className="min-w-0 flex-1 whitespace-normal break-words text-[13px] leading-[1.45] text-muted transition-colors duration-150 group-hover:text-ink">
         {data.text}
       </p>
       <ChevronRight size={12} className="shrink-0 text-muted/70" />

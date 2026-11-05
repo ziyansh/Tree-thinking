@@ -49,6 +49,9 @@ _EXTRA_COLUMNS = {
         "node_type": "VARCHAR(16) NOT NULL DEFAULT 'chat'",
         "width": "FLOAT",
         "height": "FLOAT",
+        # 联网搜索来源与附件元数据，均为 JSON 数组字符串
+        "sources": "TEXT",
+        "attachments": "TEXT",
     },
     "app_settings": {
         # 服务商与 OpenAI 独立配置（旧库补列）
@@ -80,6 +83,8 @@ _EXTRA_COLUMNS = {
         "edge_color": "VARCHAR(16)",
         "theme_mode": "VARCHAR(16)",
         "time_format": "VARCHAR(8)",
+        # 联网搜索开关
+        "web_search_enabled": "BOOLEAN",
     },
 }
 

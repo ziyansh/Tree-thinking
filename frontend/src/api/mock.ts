@@ -149,6 +149,7 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   doubleClickMs: 300,
   dragDriftDelayMs: 0,
   dragDriftDistance: 10,
+  wheelMode: 'zoom-canvas',
   cardFontSize: 14,
   autosaveMinutes: 5,
   undoSteps: 10,
@@ -158,6 +159,7 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   themeMode: 'system',
   timeFormat: '24h',
   webSearchEnabled: false,
+  sourcesPanelRatio: 0.25,
 }
 
 /** 全局卡片尺寸的最小值（与后端一致，无上限） */
@@ -675,6 +677,9 @@ export const mockApi: ApiClient = {
     if (patch.dragDriftDistance !== undefined) {
       settings.dragDriftDistance = Math.min(50, Math.max(0, Math.round(patch.dragDriftDistance)))
     }
+    if (patch.wheelMode !== undefined) {
+      settings.wheelMode = patch.wheelMode
+    }
     if (patch.autosaveMinutes !== undefined) {
       settings.autosaveMinutes = Math.max(0, Math.round(patch.autosaveMinutes))
     }
@@ -693,6 +698,10 @@ export const mockApi: ApiClient = {
     if (patch.themeMode !== undefined) settings.themeMode = patch.themeMode
     if (patch.timeFormat !== undefined) settings.timeFormat = patch.timeFormat
     if (patch.webSearchEnabled !== undefined) settings.webSearchEnabled = patch.webSearchEnabled
+    // 参考资料抽屉比例：与后端一致夹到 0.15–0.7
+    if (patch.sourcesPanelRatio !== undefined) {
+      settings.sourcesPanelRatio = Math.min(0.7, Math.max(0.15, patch.sourcesPanelRatio))
+    }
     saveSettingsState(settings)
     return { ...settings }
   },

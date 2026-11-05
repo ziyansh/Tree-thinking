@@ -10,7 +10,7 @@ import {
 } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Globe, LayoutGrid, Maximize, Minus, Plus, Send } from 'lucide-react'
+import { Globe, LayoutGrid, Maximize, Minus, Plus } from 'lucide-react'
 import { CardNode } from './CardNode'
 import { NoteNode } from './NoteNode'
 import { BranchInputNode } from './BranchInputNode'
@@ -23,6 +23,7 @@ import type { Rect } from './edges'
 import { NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, useGraphStore } from '../store/graphStore'
 import type { GraphFlowNode } from '../store/graphStore'
 import { DOT_COLORS, resolveTheme } from '../lib/theme'
+import { useSpacePressed } from '../lib/spaceKey'
 
 const nodeTypes = {
   card: CardNode,
@@ -160,79 +161,6 @@ function PanelButton({
   )
 }
 
-/** 底部居中的全局追问输入条：绑定选中卡片，未选中时退回根卡片 */
-function AskBar() {
-  const nodes = useGraphStore((state) => state.nodes)
-  const selectedNodeId = useGraphStore((state) => state.selectedNodeId)
-  const isStreamingIds = useGraphStore((state) => state.isStreamingIds)
-  const startQuestion = useGraphStore((state) => state.startQuestion)
-  const runAnswer = useGraphStore((state) => state.runAnswer)
-
-  const [value, setValue] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  const root = nodes.find(
-    (item) => item.data.node.parentId === null && item.data.node.nodeType === 'chat',
-  )?.data.node
-  const selected = nodes.find((item) => item.id === selectedNodeId)?.data.node
-  // 笔记不参与问答：选中笔记时追问条退回根卡片，避免在笔记下生成聊天分支
-  const target = selected?.nodeType === 'chat' ? selected : root
-  const disabled = !target || submitting || isStreamingIds.length > 0
-
-  const placeholder = !target
-    ? '先创建一个画布'
-    : target.question
-      ? `继续追问：${target.question.slice(0, 12)}${target.question.length > 12 ? '…' : ''}`
-      : '输入你的元问题…'
-
-  const submit = async () => {
-    const text = value.trim()
-    if (!text || !target || disabled) return
-    setSubmitting(true)
-    try {
-      const targetId = await startQuestion(target.id, text)
-      if (targetId) {
-        setValue('')
-        await runAnswer(targetId)
-      }
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <div
-      className="flex items-center gap-2 rounded-[22px] border border-subtle bg-panel px-3 py-1.5"
-      style={{ width: 'min(680px, calc(100vw - 48px))' }}
-    >
-      <textarea
-        rows={1}
-        value={value}
-        disabled={disabled}
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault()
-            void submit()
-          }
-        }}
-        placeholder={placeholder}
-        className="h-8 min-w-0 flex-1 resize-none bg-transparent py-1 text-[14px] leading-6 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed"
-      />
-      <button
-        type="button"
-        title="发送"
-        aria-label="发送"
-        disabled={disabled || !value.trim()}
-        onClick={() => void submit()}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-      >
-        <Send size={14} />
-      </button>
-    </div>
-  )
-}
-
 function CanvasInner() {
   const nodes = useGraphStore((state) => state.nodes)
   const cardSize = useGraphStore((state) => state.cardSize)
@@ -255,8 +183,8 @@ function CanvasInner() {
   const { fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
   const fittedProjectRef = useRef<string | null>(null)
   const viewportTimerRef = useRef<number | null>(null)
-  /** 空格是否按下：决定左键能否拖动平移 */
-  const [spacePressed, setSpacePressed] = useState(false)
+  /** 空格是否按下：由全局 spaceKey 提供，卡片滚轮逻辑也共用同一状态 */
+  const spacePressed = useSpacePressed()
   /** 是否正在自定义平移：用于切换抓取光标 */
   const [isPanning, setIsPanning] = useState(false)
   /** 空白处指针状态：按下坐标、延迟计时与是否已进入平移 */
@@ -276,41 +204,15 @@ function CanvasInner() {
   } | null>(null)
   /** 拖拽结束时间：抑制拖拽后的 click 把多选收缩成单选 */
   const lastDragEndRef = useRef(0)
+  /** 空格手动平移：记录起始指针与按下时的视口 */
+  const spacePanRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    viewport: { x: number; y: number; zoom: number }
+  } | null>(null)
 
-  // 空格按住时左键可平移（[0,1] = 左键+中键）；平时只有中键平移，左键空白用于拖动/点击判定
-  useEffect(() => {
-    // 输入框聚焦时不拦截空格，避免影响文字输入
-    const isEditing = () => {
-      const element = document.activeElement as HTMLElement | null
-      if (!element) return false
-      return (
-        element.tagName === 'INPUT' ||
-        element.tagName === 'TEXTAREA' ||
-        element.tagName === 'SELECT' ||
-        element.isContentEditable
-      )
-    }
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' || isEditing()) return
-      // 阻止空格滚动页面
-      event.preventDefault()
-      setSpacePressed(true)
-    }
-    const handleKeyUp = (event: KeyboardEvent) => {
-      if (event.code === 'Space') setSpacePressed(false)
-    }
-    // 窗口失焦时按键状态可能丢失，统一复位
-    const handleBlur = () => setSpacePressed(false)
-
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-    window.addEventListener('blur', handleBlur)
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-      window.removeEventListener('blur', handleBlur)
-    }
-  }, [])
+  // 空格按住时左键可平移（由 capture 逻辑接管）；平时只有中键平移，左键空白用于拖动/点击判定
 
   // 空白处拖动：按下后经过漂移延迟开始检测，位移超过漂移距离才进入平移
   const startPan = useCallback(
@@ -452,6 +354,68 @@ function CanvasInner() {
       screenToFlowPosition,
     ],
   )
+
+  // 空格按下时接管任意位置的指针：在 capture 阶段拦截，一律平移画布且不选字
+  const handleSpacePanDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (!spacePressed) return
+      // 只响应左键与中键
+      if (event.button !== 0 && event.button !== 1) return
+      event.preventDefault()
+      event.stopPropagation()
+
+      const element = containerRef.current
+      if (!element) return
+      try {
+        element.setPointerCapture(event.pointerId)
+      } catch {
+        // 指针已在窗口外松开时无法捕获，放弃本次平移
+        return
+      }
+
+      spacePanRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        viewport: getViewport(),
+      }
+      // 清空点击记录并抑制随后的空白点击，避免误清空选择
+      lastClickRef.current = null
+      pointerRef.current = null
+      suppressPaneClickRef.current = true
+      setIsPanning(true)
+    },
+    [getViewport, spacePressed],
+  )
+
+  const handleSpacePanMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const state = spacePanRef.current
+      if (!state || event.pointerId !== state.pointerId) return
+      event.stopPropagation()
+      void setViewport(
+        {
+          x: state.viewport.x + (event.clientX - state.startX),
+          y: state.viewport.y + (event.clientY - state.startY),
+          zoom: state.viewport.zoom,
+        },
+        { duration: 0 },
+      )
+    },
+    [setViewport],
+  )
+
+  const handleSpacePanEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const state = spacePanRef.current
+    if (!state || event.pointerId !== state.pointerId) return
+    event.stopPropagation()
+    spacePanRef.current = null
+    const element = containerRef.current
+    if (element?.hasPointerCapture(state.pointerId)) {
+      element.releasePointerCapture(state.pointerId)
+    }
+    setIsPanning(false)
+  }, [])
 
   // 由 parentId 派生 ghost 箭头（建议 + 自定义输入），坐标依赖当前卡片尺寸
   const ghosts = useMemo(
@@ -784,10 +748,15 @@ function CanvasInner() {
       ref={containerRef}
       className={[
         'relative h-full w-full bg-canvas',
+        // 空格按住期间全局禁止选中文字
+        spacePressed ? 'space-panning' : '',
         isPanning ? 'cursor-grabbing' : spacePressed ? 'cursor-grab' : '',
       ].join(' ')}
-      // 空格按住期间禁止文字选中，保证拖动一律是画布平移
-      style={{ userSelect: spacePressed ? 'none' : undefined }}
+      // 空格按下时在 capture 阶段接管指针，卡片/输入框上的拖动也一律平移画布
+      onPointerDownCapture={handleSpacePanDown}
+      onPointerMoveCapture={handleSpacePanMove}
+      onPointerUpCapture={handleSpacePanEnd}
+      onPointerCancelCapture={handleSpacePanEnd}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
@@ -811,8 +780,10 @@ function CanvasInner() {
         elevateNodesOnSelect={false}
         // 空格按住时卡片不可拖动，左键拖动改为平移画布
         nodesDraggable={!spacePressed}
-        // 空格按住时左键可平移；中键始终可平移；普通左键不平移
-        panOnDrag={spacePressed ? [0, 1] : [1]}
+        // 中键平移由 React Flow 负责；空格左键平移由上面的 capture 逻辑完成
+        panOnDrag={[1]}
+        // 删除键由 App 的全局快捷键统一处理，关闭库内部删除避免与 store 不一致
+        deleteKeyCode={null}
         onNodeClick={(event, node) => {
           // ghost 与分支输入条不可选中；聊天卡片与笔记都参与选中
           if (node.type !== 'card' && node.type !== 'note') return
@@ -851,7 +822,7 @@ function CanvasInner() {
             <button
               type="button"
               title={webSearchDisabled ? '仅 DeepSeek 服务商支持联网搜索' : '联网搜索'}
-              disabled={webSearchDisabled}
+              aria-disabled={webSearchDisabled}
               onClick={() => void toggleWebSearch()}
               className={[
                 'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors duration-150',
@@ -888,9 +859,6 @@ function CanvasInner() {
             </div>
           </Panel>
         )}
-        <Panel position="bottom-center">
-          <AskBar />
-        </Panel>
         <Panel position="bottom-right">
           <ZoomPanel />
         </Panel>

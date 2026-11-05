@@ -122,6 +122,8 @@ class AppSetting(Base):
     double_click_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     drag_drift_delay_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     drag_drift_distance: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # 滚轮逻辑：scroll-card（悬停卡片时滚动内容）/ zoom-canvas（始终缩放画布）
+    wheel_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 旧版长按设置列保留但不再使用（避免旧库删除列）
     long_press_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 卡片正文字号（px）；为空表示 14
@@ -141,4 +143,6 @@ class AppSetting(Base):
     time_format: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # 是否开启联网搜索；为空表示沿用环境变量默认值（默认关闭）
     web_search_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # 来源抽屉高度占卡片高度的比例；为空表示 0.25
+    sources_panel_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)

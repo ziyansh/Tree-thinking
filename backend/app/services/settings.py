@@ -38,6 +38,9 @@ MAX_DRAG_DRIFT_DELAY_MS = 500
 DEFAULT_DRAG_DRIFT_DISTANCE = 10
 MIN_DRAG_DRIFT_DISTANCE = 0
 MAX_DRAG_DRIFT_DISTANCE = 50
+# 滚轮逻辑：悬停卡片时滚动内容（scroll-card）/ 始终缩放画布（zoom-canvas）
+DEFAULT_WHEEL_MODE = "zoom-canvas"
+WHEEL_MODES = ("scroll-card", "zoom-canvas")
 # 卡片正文字号（px）：默认 14，范围 12–24
 DEFAULT_CARD_FONT_SIZE = 14
 MIN_CARD_FONT_SIZE = 12
@@ -57,6 +60,10 @@ DEFAULT_THEME_MODE = "system"
 THEME_MODES = ("system", "light", "dark")
 DEFAULT_TIME_FORMAT = "24h"
 TIME_FORMATS = ("24h", "12h")
+# 来源抽屉高度占卡片高度的比例：默认 0.25，范围 0.15–0.7
+DEFAULT_SOURCES_PANEL_RATIO = 0.25
+MIN_SOURCES_PANEL_RATIO = 0.15
+MAX_SOURCES_PANEL_RATIO = 0.7
 
 # 服务商：DeepSeek（默认）/ OpenAI
 DEFAULT_PROVIDER = "deepseek"
@@ -267,6 +274,9 @@ def effective(db: Session) -> dict:
             MIN_DRAG_DRIFT_DISTANCE,
             MAX_DRAG_DRIFT_DISTANCE,
         ),
+        "wheel_mode": _effective_choice(
+            row.wheel_mode if row else None, WHEEL_MODES, DEFAULT_WHEEL_MODE
+        ),
         "card_font_size": _effective_int(
             row.card_font_size if row else None,
             DEFAULT_CARD_FONT_SIZE,
@@ -295,6 +305,12 @@ def effective(db: Session) -> dict:
             row.time_format if row else None, TIME_FORMATS, DEFAULT_TIME_FORMAT
         ),
         "web_search_enabled": web_search_enabled,
+        "sources_panel_ratio": _effective_float(
+            row.sources_panel_ratio if row else None,
+            DEFAULT_SOURCES_PANEL_RATIO,
+            MIN_SOURCES_PANEL_RATIO,
+            MAX_SOURCES_PANEL_RATIO,
+        ),
     }
 
 
@@ -329,6 +345,7 @@ def dto(db: Session) -> dict:
         "doubleClickMs": values["double_click_ms"],
         "dragDriftDelayMs": values["drag_drift_delay_ms"],
         "dragDriftDistance": values["drag_drift_distance"],
+        "wheelMode": values["wheel_mode"],
         "cardFontSize": values["card_font_size"],
         "autosaveMinutes": values["autosave_minutes"],
         "undoSteps": values["undo_steps"],
@@ -339,6 +356,8 @@ def dto(db: Session) -> dict:
         "timeFormat": values["time_format"],
         # 联网搜索开关
         "webSearchEnabled": values["web_search_enabled"],
+        # 来源抽屉高度比例，前端用于所有卡片的抽屉高度
+        "sourcesPanelRatio": values["sources_panel_ratio"],
     }
 
 
@@ -448,6 +467,10 @@ def update(db: Session, patch: dict) -> dict:
             MIN_DRAG_DRIFT_DISTANCE,
             MAX_DRAG_DRIFT_DISTANCE,
         )
+    if patch.get("wheel_mode") is not None:
+        row.wheel_mode = _effective_choice(
+            patch["wheel_mode"], WHEEL_MODES, DEFAULT_WHEEL_MODE
+        )
     if patch.get("card_font_size") is not None:
         row.card_font_size = _effective_int(
             patch["card_font_size"],
@@ -483,6 +506,13 @@ def update(db: Session, patch: dict) -> dict:
         )
     if patch.get("web_search_enabled") is not None:
         row.web_search_enabled = bool(patch["web_search_enabled"])
+    if patch.get("sources_panel_ratio") is not None:
+        row.sources_panel_ratio = _effective_float(
+            patch["sources_panel_ratio"],
+            DEFAULT_SOURCES_PANEL_RATIO,
+            MIN_SOURCES_PANEL_RATIO,
+            MAX_SOURCES_PANEL_RATIO,
+        )
 
     db.commit()
     return dto(db)

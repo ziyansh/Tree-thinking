@@ -89,11 +89,11 @@ interface AttachmentChipsProps {
   onRemove?: (id: string) => void
   /** 紧凑模式：用于卡片左上角的附件条，缩略图更小 */
   compact?: boolean
-  /** 点击 chip 时回调（附件条中用于打开图片查看器或新窗口） */
+  /** 点击 chip 时回调（附件条中用于在新窗口打开原始文件） */
   onOpen?: (attachment: AttachmentDTO) => void
 }
 
-/** 横向可换行的附件条：图片显示缩略图，其它显示文件图标 */
+/** 横向可换行的附件条：所有附件统一显示文件图标 + 文件名 */
 export function AttachmentChips({ items, onRemove, compact, onOpen }: AttachmentChipsProps) {
   if (items.length === 0) return null
   return (
@@ -105,25 +105,14 @@ export function AttachmentChips({ items, onRemove, compact, onOpen }: Attachment
       {items.map((attachment) => (
         <div
           key={attachment.id}
+          title={attachment.name}
           className={[
             'flex min-w-0 items-center gap-1.5 rounded-lg border border-subtle bg-elevated px-1.5 py-1',
             onOpen ? 'cursor-pointer hover:border-accent' : '',
           ].join(' ')}
           onClick={() => onOpen?.(attachment)}
         >
-          {attachment.kind === 'image' ? (
-            <img
-              src={attachment.url}
-              alt={attachment.name}
-              className={
-                compact
-                  ? 'h-6 w-6 shrink-0 rounded object-cover'
-                  : 'h-7 w-7 shrink-0 rounded-md object-cover'
-              }
-            />
-          ) : (
-            <FileText size={compact ? 12 : 14} className="shrink-0 text-muted" />
-          )}
+          <FileText size={compact ? 12 : 14} className="shrink-0 text-muted" />
           <span className="truncate text-[11px] text-body" style={{ maxWidth: '120px' }}>
             {attachment.name}
           </span>

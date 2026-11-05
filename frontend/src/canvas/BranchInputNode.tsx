@@ -2,6 +2,7 @@ import { memo, useLayoutEffect, useRef, useState } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { useGraphStore } from '../store/graphStore'
 import type { BranchInputFlowNode } from './ghosts'
+import { useSpacePressed } from '../lib/spaceKey'
 
 /** 分支输入条：位于父卡片正下方，Enter 提交后才创建真正的子卡片 */
 function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
@@ -9,6 +10,8 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   const cancelBranchInput = useGraphStore((state) => state.cancelBranchInput)
   // 与全局卡片同宽；卡片缩放后输入条实时跟随
   const cardWidth = useGraphStore((state) => state.cardSize.width)
+  // 按住空格时滚轮交给画布缩放
+  const spacePressed = useSpacePressed()
 
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
@@ -62,7 +65,10 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
             cancelBranchInput(data.inputId)
           }
         }}
-        className="nodrag nowheel selectable-text min-w-0 flex-1 resize-none overflow-hidden bg-transparent leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
+        className={[
+          'nodrag selectable-text min-w-0 flex-1 resize-none overflow-hidden bg-transparent leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
+          spacePressed ? '' : 'nowheel',
+        ].join(' ')}
         style={{ fontSize: 'var(--card-font-size)' }}
       />
     </div>

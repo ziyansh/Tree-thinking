@@ -60,6 +60,7 @@ export type Preferences = Pick<
   | 'doubleClickMs'
   | 'dragDriftDelayMs'
   | 'dragDriftDistance'
+  | 'wheelMode'
   | 'cardFontSize'
   | 'autosaveMinutes'
   | 'undoSteps'
@@ -70,6 +71,7 @@ export type Preferences = Pick<
   | 'timeFormat'
   | 'provider'
   | 'webSearchEnabled'
+  | 'sourcesPanelRatio'
 >
 
 /** 与后端默认值保持一致，读取设置失败时沿用 */
@@ -81,6 +83,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   doubleClickMs: 300,
   dragDriftDelayMs: 0,
   dragDriftDistance: 10,
+  wheelMode: 'zoom-canvas',
   cardFontSize: 14,
   autosaveMinutes: 5,
   undoSteps: 10,
@@ -91,6 +94,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   timeFormat: '24h',
   provider: 'deepseek',
   webSearchEnabled: false,
+  sourcesPanelRatio: 0.25,
 }
 
 /** 从设置 DTO 中摘出偏好字段，保证 store 与后端返回值同形 */
@@ -103,6 +107,7 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     doubleClickMs: settings.doubleClickMs,
     dragDriftDelayMs: settings.dragDriftDelayMs,
     dragDriftDistance: settings.dragDriftDistance,
+    wheelMode: settings.wheelMode ?? 'zoom-canvas',
     cardFontSize: settings.cardFontSize,
     autosaveMinutes: settings.autosaveMinutes,
     undoSteps: settings.undoSteps,
@@ -113,6 +118,7 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     timeFormat: settings.timeFormat,
     provider: settings.provider,
     webSearchEnabled: settings.webSearchEnabled,
+    sourcesPanelRatio: settings.sourcesPanelRatio ?? 0.25,
   }
 }
 
@@ -126,6 +132,7 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     doubleClickMs: patch.doubleClickMs ?? base.doubleClickMs,
     dragDriftDelayMs: patch.dragDriftDelayMs ?? base.dragDriftDelayMs,
     dragDriftDistance: patch.dragDriftDistance ?? base.dragDriftDistance,
+    wheelMode: patch.wheelMode ?? base.wheelMode,
     cardFontSize: patch.cardFontSize ?? base.cardFontSize,
     autosaveMinutes: patch.autosaveMinutes ?? base.autosaveMinutes,
     undoSteps: patch.undoSteps ?? base.undoSteps,
@@ -136,6 +143,7 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     timeFormat: patch.timeFormat ?? base.timeFormat,
     provider: patch.provider ?? base.provider,
     webSearchEnabled: patch.webSearchEnabled ?? base.webSearchEnabled,
+    sourcesPanelRatio: patch.sourcesPanelRatio ?? base.sourcesPanelRatio,
   }
 }
 
@@ -152,10 +160,11 @@ function toFlowNode(node: NodeDTO): GraphFlowNode {
 /** 流式中断控制器按节点维护，不进入 store 状态 */
 const controllers = new Map<string, AbortController>()
 
-/** 撤销快照：动作发生前的整份节点数据与动作名 */
+/** 撤销快照：动作发生前的整份节点数据、动作名与当时的全局卡片尺寸 */
 interface UndoEntry {
   nodes: NodeDTO[]
   label: string
+  cardSize: { width: number; height: number }
 }
 
 /** 按画布隔离的撤销栈；模块级存储，避免进入 zustand 状态引起重渲染 */
@@ -379,7 +388,8 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         JSON.stringify(get().nodes.map((item) => item.data.node)),
       )
       const stack = undoStacks.get(projectId) ?? []
-      stack.push({ nodes: snapshot, label })
+      // 卡片尺寸一并快照，撤销「调整卡片大小」时可恢复全局尺寸
+      stack.push({ nodes: snapshot, label, cardSize: { ...get().cardSize } })
       const depth = Math.max(1, get().preferences.undoSteps)
       while (stack.length > depth) stack.shift()
       undoStacks.set(projectId, stack)
@@ -414,6 +424,17 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       }
 
       try {
+        // 先恢复全局卡片尺寸：与当前不同才提交，失败抛错交由下方统一处理
+        const currentSize = get().cardSize
+        if (
+          entry.cardSize.width !== currentSize.width ||
+          entry.cardSize.height !== currentSize.height
+        ) {
+          await get().updatePreferences({
+            cardWidth: entry.cardSize.width,
+            cardHeight: entry.cardSize.height,
+          })
+        }
         // 生成中的卡片先终止流式，避免删除后仍有事件写回已移除的节点
         for (const node of created) {
           if (node.status === 'streaming') abortStream(node.id)

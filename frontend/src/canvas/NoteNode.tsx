@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import type { PointerEvent as ReactPointerEvent } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Pin, Trash2 } from 'lucide-react'
 import {
@@ -13,6 +13,7 @@ import type { NoteFlowNode } from '../store/graphStore'
 import { CORNER_ZONES, EDGE_ZONES, IconButton } from './CardNode'
 import type { ResizeEdge } from './CardNode'
 import { formatModifiedTime } from '../lib/time'
+import { useSpacePressed } from '../lib/spaceKey'
 
 /** 笔记卡片：双击空白画布创建，标题/正文独立编辑，拥有自己的宽高 */
 function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
@@ -26,12 +27,30 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
   const isSelected = useGraphStore((state) => state.selectedNodeIds.includes(node.id))
   // 修改时间跟随设置中的时间制式，设置变更后立即重新格式化
   const timeFormat = useGraphStore((state) => state.preferences.timeFormat)
+  // 双击进入编辑：沿用设置中的双击间隔与漂移距离
+  const doubleClickMs = useGraphStore((state) => state.preferences.doubleClickMs)
+  const dragDriftDistance = useGraphStore((state) => state.preferences.dragDriftDistance)
+  // 滚轮逻辑：悬停笔记正文时滚动内容或缩放画布；按住空格时始终缩放
+  const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
+  const spacePressed = useSpacePressed()
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
 
   const [title, setTitle] = useState(node.question)
   const [content, setContent] = useState(node.answer)
+  // 标题与正文默认只读，双击才进入编辑，单击留给拖拽与选中
+  const [editingTitle, setEditingTitle] = useState(false)
+  const [editingContent, setEditingContent] = useState(false)
   // Esc 取消标题编辑时置位，避免随后的失焦再次提交
   const escapedRef = useRef(false)
+  // Esc 取消正文编辑时置位，避免随后的失焦提交
+  const skipContentCommitRef = useRef(false)
+  // 双击判定：记录按下坐标与上次点击时间
+  const titlePointerRef = useRef<{ x: number; y: number } | null>(null)
+  const contentPointerRef = useRef<{ x: number; y: number } | null>(null)
+  const lastTitleClickRef = useRef(0)
+  const lastContentClickRef = useRef(0)
+  const titleInputRef = useRef<HTMLInputElement | null>(null)
+  const contentInputRef = useRef<HTMLTextAreaElement | null>(null)
   // 缩放中的实时尺寸预览，松手后写入 store 并持久化
   const [sizeDraft, setSizeDraft] = useState<{ width: number; height: number } | null>(null)
 
@@ -43,6 +62,7 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
   const height = sizeDraft?.height ?? node.height ?? NOTE_DEFAULT_HEIGHT
 
   const commitTitle = () => {
+    setEditingTitle(false)
     if (escapedRef.current) {
       escapedRef.current = false
       return
@@ -54,8 +74,99 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
   }
 
   const commitContent = () => {
+    setEditingContent(false)
+    if (skipContentCommitRef.current) {
+      skipContentCommitRef.current = false
+      return
+    }
     if (content === node.answer) return
     void updateNoteContent(node.id, content)
+  }
+
+  // 进入编辑后聚焦并把光标放到末尾，避免从开头插入；同时清理上一次 Esc 留下的标记
+  useEffect(() => {
+    if (!editingTitle) return
+    escapedRef.current = false
+    const element = titleInputRef.current
+    element?.focus()
+    element?.setSelectionRange(element.value.length, element.value.length)
+  }, [editingTitle])
+
+  useEffect(() => {
+    if (!editingContent) return
+    skipContentCommitRef.current = false
+    const element = contentInputRef.current
+    element?.focus()
+    element?.setSelectionRange(element.value.length, element.value.length)
+  }, [editingContent])
+
+  /**
+   * 双击判定：与聊天卡片标题一致，按下与松开的位移超过漂移距离视为拖动，
+   * 不算点击；两次点击在设置的间隔内才进入编辑。
+   */
+  const handleTitlePointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    titlePointerRef.current = { x: event.clientX, y: event.clientY }
+  }
+
+  const handleTitlePointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const down = titlePointerRef.current
+    titlePointerRef.current = null
+    if (!down) return
+    const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y)
+    if (moved > dragDriftDistance) {
+      lastTitleClickRef.current = 0
+      return
+    }
+    const now = performance.now()
+    if (lastTitleClickRef.current && now - lastTitleClickRef.current <= doubleClickMs) {
+      lastTitleClickRef.current = 0
+      setEditingTitle(true)
+    } else {
+      lastTitleClickRef.current = now
+    }
+  }
+
+  const handleContentPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
+    contentPointerRef.current = { x: event.clientX, y: event.clientY }
+  }
+
+  const handleContentPointerUp = (event: ReactPointerEvent<HTMLElement>) => {
+    const down = contentPointerRef.current
+    contentPointerRef.current = null
+    if (!down) return
+    const moved = Math.hypot(event.clientX - down.x, event.clientY - down.y)
+    if (moved > dragDriftDistance) {
+      lastContentClickRef.current = 0
+      return
+    }
+    const now = performance.now()
+    if (lastContentClickRef.current && now - lastContentClickRef.current <= doubleClickMs) {
+      lastContentClickRef.current = 0
+      setEditingContent(true)
+    } else {
+      lastContentClickRef.current = now
+    }
+  }
+
+  /** 正文编辑：Tab 插入 4 个空格，Esc 放弃本次修改 */
+  const handleContentKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Tab') {
+      event.preventDefault()
+      const target = event.currentTarget
+      const start = target.selectionStart
+      const end = target.selectionEnd
+      const next = `${content.slice(0, start)}    ${content.slice(end)}`
+      setContent(next)
+      // 等 React 回写 value 后再恢复光标位置
+      requestAnimationFrame(() => target.setSelectionRange(start + 4, start + 4))
+      return
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      skipContentCommitRef.current = true
+      setContent(node.answer)
+      setEditingContent(false)
+    }
   }
 
   /** 四边/四角缩放：只改当前笔记的独立尺寸，最小 280×240，无上限 */
@@ -134,27 +245,39 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
 
       {/* 标题栏同时作为拖动手柄：空白处可拖动整张笔记 */}
       <div className="card-drag-handle flex shrink-0 items-start gap-2">
-        <input
-          value={title}
-          placeholder="笔记标题"
-          onChange={(event) => setTitle(event.target.value)}
-          onBlur={commitTitle}
-          onPointerDown={(event) => event.stopPropagation()}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              event.currentTarget.blur()
-            }
-            if (event.key === 'Escape') {
-              event.preventDefault()
-              escapedRef.current = true
-              setTitle(node.question)
-              event.currentTarget.blur()
-            }
-          }}
-          className="nodrag nopan selectable-text min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 font-semibold leading-snug text-accent outline-none placeholder:text-muted focus:bg-elevated"
-          style={{ fontSize: 'calc(var(--card-font-size) + 1px)' }}
-        />
+        {editingTitle ? (
+          <input
+            ref={titleInputRef}
+            value={title}
+            placeholder="笔记标题"
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={commitTitle}
+            onPointerDown={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                event.currentTarget.blur()
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                escapedRef.current = true
+                setTitle(node.question)
+                setEditingTitle(false)
+              }
+            }}
+            className="nodrag nopan selectable-text min-w-0 flex-1 rounded-md bg-transparent px-1 py-0.5 font-semibold leading-snug text-accent outline-none placeholder:text-muted focus:bg-elevated"
+            style={{ fontSize: 'calc(var(--card-font-size) + 1px)' }}
+          />
+        ) : (
+          <h3
+            onPointerDown={handleTitlePointerDown}
+            onPointerUp={handleTitlePointerUp}
+            className="min-w-0 flex-1 select-none break-words rounded-md px-1 py-0.5 font-semibold leading-snug text-accent"
+            style={{ fontSize: 'calc(var(--card-font-size) + 1px)' }}
+          >
+            {title || <span className="text-muted">笔记标题</span>}
+          </h3>
+        )}
         <div className="flex shrink-0 items-center gap-1">
           <IconButton title="删除笔记" danger onClick={() => void removeNode(node.id)}>
             <Trash2 size={14} />
@@ -169,15 +292,34 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
         </div>
       </div>
 
-      {/* 正文占满剩余高度，内部滚动不撑开笔记 */}
-      <textarea
-        value={content}
-        placeholder="记录你的想法…"
-        onChange={(event) => setContent(event.target.value)}
-        onBlur={commitContent}
-        className="nodrag nowheel nopan selectable-text mt-2 min-h-0 flex-1 resize-none rounded-lg border border-subtle bg-elevated px-2 py-1.5 leading-[1.65] text-body outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent"
-        style={{ fontSize: 'var(--card-font-size)' }}
-      />
+      {/* 正文：默认只读，双击进入编辑；编辑中 Tab 插入 4 个空格 */}
+      {editingContent ? (
+        <textarea
+          ref={contentInputRef}
+          value={content}
+          placeholder="记录你的想法…"
+          onChange={(event) => setContent(event.target.value)}
+          onBlur={commitContent}
+          onKeyDown={handleContentKeyDown}
+          className={[
+            'nodrag nopan selectable-text mt-2 min-h-0 flex-1 resize-none rounded-lg border border-subtle bg-elevated px-2 py-1.5 leading-[1.65] text-body outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent',
+            spacePressed ? '' : 'nowheel',
+          ].join(' ')}
+          style={{ fontSize: 'var(--card-font-size)' }}
+        />
+      ) : (
+        <div
+          onPointerDown={handleContentPointerDown}
+          onPointerUp={handleContentPointerUp}
+          className={[
+            'mt-2 min-h-0 flex-1 select-none overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-subtle px-2 py-1.5 leading-[1.65] text-body',
+            wheelMode === 'scroll-card' && !spacePressed ? 'nowheel' : '',
+          ].join(' ')}
+          style={{ fontSize: 'var(--card-font-size)' }}
+        >
+          {content || <span className="text-muted">双击编辑正文</span>}
+        </div>
+      )}
 
       {/* 四边与四角缩放命中区：仅提供光标与命中，不绘制高亮 */}
       {EDGE_ZONES.map((zone) => (

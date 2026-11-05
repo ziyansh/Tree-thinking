@@ -166,6 +166,13 @@ body {
   cursor: grabbing;
 }
 
+/* 空格按住平移期间禁止文字选中：卡片正文、标题、附件与输入框一律不可选 */
+.space-panning,
+.space-panning * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
 /* 主题色相滑块：彩虹渐变轨道 + 白色竖条滑块，仅作用于 .hue-slider */
 .hue-slider {
   -webkit-appearance: none;

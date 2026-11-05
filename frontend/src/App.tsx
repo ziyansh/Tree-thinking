@@ -43,7 +43,7 @@ function App() {
     })()
   }, [loadProjects, openProject, createProject, loadPreferences])
 
-  // 全局快捷键：Ctrl/Cmd+Z 撤销（输入类控件内交给浏览器原生撤销）、Ctrl/Cmd+S 保存
+  // 全局快捷键：Delete 删除选中卡片、Ctrl/Cmd+Z 撤销（输入类控件内交给浏览器原生撤销）、Ctrl/Cmd+S 保存
   useEffect(() => {
     const isEditable = (element: HTMLElement | null): boolean => {
       if (!element) return false
@@ -55,6 +55,17 @@ function App() {
       )
     }
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Delete') {
+        // 输入中、设置打开或有模态覆盖层时不删除
+        if (isEditable(document.activeElement as HTMLElement | null)) return
+        if (settingsOpen) return
+        if (document.querySelector('[data-modal-open="true"]')) return
+        const state = useGraphStore.getState()
+        if (state.selectedNodeIds.length === 0) return
+        event.preventDefault()
+        void state.deleteSelected()
+        return
+      }
       if (!(event.ctrlKey || event.metaKey)) return
       const key = event.key.toLowerCase()
       if (key === 'z') {
@@ -71,7 +82,7 @@ function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [])
+  }, [settingsOpen])
 
   // 自动保存：间隔按设置中的分钟数，0 或非正数不启用；切换画布时重置定时器
   useEffect(() => {

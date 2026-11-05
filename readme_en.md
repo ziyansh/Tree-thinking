@@ -1,27 +1,27 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.1.5** | [中文说明](readme.md)
+> Current version: **0.1.6** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
 ## Features
 
-- **Infinite left-to-right canvas** powered by React Flow: pan with Space + left drag, middle drag, or press-and-drag on empty space (drift delay/distance configurable); the wheel zooms, including while Space is held.
+- **Infinite left-to-right canvas** powered by React Flow: pan with Space + left drag, middle drag, or press-and-drag on empty space (drift delay/distance configurable); while Space is held, dragging anywhere — card text, titles, attachments, or an unfocused input — pans the canvas. Wheel behavior is configurable under Settings → Canvas → Pointer → Wheel logic: scroll the hovered card or zoom the canvas; zoom still works while Space is held.
 - **Card-based Q&A**: one card = one question + one answer; answers render as Markdown and scroll inside the card instead of stretching it.
-- **Selectable card text**: titles, Markdown answers, reasoning, input boxes, and note bodies can all be drag-selected; selecting text never moves the card, and the highlight uses a soft accent tone.
-- **Card sizes and notes**: chat cards share one global size, adjustable from all four edges and corners (minimum 280×240); note cards keep their own size. Double-click empty canvas to create a note, then edit its title and body.
+- **Selectable card text**: titles, Markdown answers, reasoning, and input boxes can be drag-selected; selecting text never moves the card. While Space is held, panning takes priority and no text is selected. Note titles and bodies become selectable after double-clicking into edit mode. The highlight uses a soft accent tone.
+- **Card sizes and notes**: chat cards share one global size, adjustable from all four edges and corners (minimum 280×240); note cards keep their own size. Double-click empty canvas to create a note; double-click its title or body to edit (single click is reserved for dragging and selection), and press Tab in the body editor to insert four spaces.
 - **Compact, single-choice suggestions**: after an answer completes, N suggestion cards (default 3, configurable 2–6) plus 1 custom-input card appear as a compact vertical stack on the right. Only one can be picked per round; picking one hides the whole group, and “换一个方向” (another direction) starts a new round. Suggestion cards and the branch input bar render on separate layers and never overlap.
 - **Branch input and isolated context**: branches are created from an input bar as wide as the card; long text wraps and grows the bar automatically. Press Enter to create the card. A request only contains the root-to-current path, so sibling branches never see each other.
 - **Branch edges**: the main chain stays left-to-right; direct branches connect from the parent's top/bottom center to the child, and all non-main branches of one parent share a single bus. Edges route around cards.
 - **Auto layout**: the root card keeps its current position and the main chain always stays on one horizontal line. In direct mode branch heads sit directly below their parent in the same column; in bus mode they sit in the next column to the right and share one bus. Row/column spacing is controlled by Settings → Canvas → Card spacing.
 - **Drag, pin, and multi-select**: any blank area of a card can be dragged while text and buttons never trigger a drag; a grab cursor is shown. Pinning locks a card in place (the root card is pinned by default); dragging moves the whole subtree. Ctrl-click toggles multi-select and batch delete, while Shift snaps to a 20px grid and nearby cards.
 - **Title editing**: double-click a card title to edit it (the interval is configurable); Enter or blur commits, Esc cancels.
-- **Undo and save**: each canvas keeps its own multi-step undo stack (Ctrl+Z, depth configurable); Ctrl+S saves manually and autosave is configurable. Saving does not clear undo history.
+- **Undo and save**: each canvas keeps its own multi-step undo stack (Ctrl+Z, depth configurable, including card-size changes); Ctrl+S saves manually and autosave is configurable. Saving does not clear undo history. Select one or more cards and press `Delete` to remove them quickly.
 - **Multiple canvases**: a collapsible left sidebar (240px / 48px) to create, switch, rename, and delete canvases. Each canvas has exactly one root question. After the first answer completes, the app asks the model for a canvas title; a manual rename is never overwritten.
 - **In-app settings**: the gear at the bottom-left opens a floating dialog with three tabs — Model service / Canvas / Appearance (save options live in Canvas). Each section has a heading, with a description on the left and the control on the right; bounded values use a slider plus a number input, and changes take effect immediately — no restart.
 - **Multiple providers**: the provider is a dropdown (DeepSeek / OpenAI-compatible); the latter works with any service that implements the OpenAI protocol. DeepSeek supports `deepseek-flash` / `deepseek-v4-pro`; the OpenAI-compatible option adds organization/project IDs, temperature, max output tokens, reasoning effort, and request timeout, and can point at a proxy.
-- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek only). When enabled, the app calls DeepSeek Search before answering and injects a summary; cards show “参考 N 篇资料” at the bottom-left, and clicking it opens a source popover (Esc or a second click closes it).
-- **Attachments**: the root question input and the “custom direction” box accept click-to-upload or drag-and-drop attachments (images and text). Cards show attachments at the top-left (more than three collapse into “附件 N”), and clicking an image opens a viewer with zoom and pan. Attachments are injected along the root-to-current path, so sibling branches never see them.
+- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek only), and a synced shortcut sits beside the attachment button in card inputs. When enabled, the app calls DeepSeek Search before answering and injects a summary. Cards show “参考 N 篇资料” at the bottom-left; clicking it slides up a draggable frosted-glass drawer inside the card (25% of the card height by default; the height is remembered and applied to every card). The drawer lists web links only — click a link to open the source; it closes only via its arrow or Esc.
+- **Attachments**: the root question input and the “custom direction” box accept click-to-upload or drag-and-drop files. Cards show every attachment as a file icon plus filename (more than three collapse into “附件 N”; clicking an item opens the original file in a new window). Text attachments are injected along the root-to-current path, so sibling branches never see them.
 - **Persistence**: canvases, cards, positions, and viewport are stored in local SQLite and restored after refresh.
 - **Appearance**: follow system / light / dark, plus accent hue, edge width and color; 12/24-hour time formats. Card body font size is adjustable (12–24px, default 14) and cards grow automatically when the font size increases.
 - **Modified time**: chat and note cards show the last modified time at the bottom-right outside the card (`yyyy-mm-dd hh:mm`, with AM/PM in 12-hour mode), updated as edits happen.
@@ -100,13 +100,21 @@ git config core.hooksPath .githooks
    - Type into the full-width input bar below a card and press Enter to create a custom branch; the bar can be reused;
    - “换一个方向” starts a new round of suggestions; the branch button at the card bottom opens the input bar again.
 4. **Compare branches**: any card can fork; branches never share content created after the fork.
-5. **Manage canvases**: switch, create, rename, delete from the left sidebar; the bottom input follows the selected card.
-6. **Create and edit notes**: double-click empty canvas to create a note; edit its title and body directly, and drag any edge or corner to resize it independently. Notes are excluded from auto layout and edges.
+5. **Manage canvases**: switch, create, rename, delete from the left sidebar; follow-up questions are entered directly on cards.
+6. **Create and edit notes**: double-click empty canvas to create a note; double-click its title or body to edit (single click is reserved for dragging), and press Tab in the body editor to insert four spaces. Drag any edge or corner to resize it independently. Notes are excluded from auto layout and edges.
 7. **Adjust appearance and interaction**: the Settings dialog at the bottom-left has three tabs:
    - **Model service**: provider (dropdown: DeepSeek / OpenAI-compatible), API key, base URL, model, thinking mode, suggestion count;
-   - **Canvas**: connection style (direct branch / shared bus), card spacing (80px by default, shared by new cards and auto layout), double-click interval, pointer drift delay and distance, autosave interval and undo depth;
+   - **Canvas**: connection style (direct branch / shared bus), card spacing (80px by default, shared by new cards and auto layout), wheel logic in the pointer section, double-click interval, pointer drift delay and distance, autosave interval and undo depth;
    - **Appearance**: follow system / light / dark, body font size (12–24px), accent hue (with a reset button), edge width and color, 12/24-hour clock.
-8. **Undo and save**: `Ctrl+Z` undoes the last action on the current canvas (stacks are per-canvas); `Ctrl+S` saves the current canvas; autosave runs on the configured interval, and saving never clears undo history.
+8. **Undo, save, and delete**: `Ctrl+Z` undoes the last action on the current canvas (stacks are per-canvas and include card-size changes); `Ctrl+S` saves the current canvas; autosave runs on the configured interval, and saving never clears undo history. Select one or more cards and press `Delete` to remove them quickly (the root question card still cannot be deleted).
+
+## Keyboard Action Priority
+
+When a single key triggers several eligible actions, the **most recently executed/opened action runs first**; pressing the key again falls back to earlier actions.
+
+For example, with reference drawers open on two cards, the first `Esc` closes the drawer that was opened last, and the second `Esc` closes the earlier one.
+
+This rule applies to every new shortcut and overlay. It is implemented by the shared Escape action stack (`frontend/src/lib/escapeStack.ts`); reuse it instead of registering a separate window-level Esc listener. See [docs/development.md](docs/development.md) for details.
 
 ## Project Layout
 
@@ -114,6 +122,7 @@ git config core.hooksPath .githooks
 Tree_thinking/
 ├─ start.bat                  # Windows one-click launcher
 ├─ readme.md / readme_en.md   # Chinese / English docs
+├─ docs/development.md        # development conventions (keyboard priority)
 ├─ backend/
 │  ├─ .venv/                  # isolated virtualenv (not committed)
 │  ├─ requirements.txt
@@ -146,8 +155,8 @@ Tree_thinking/
 - **Reset all data**: stop the backend, delete `backend/data/app.db`, and start again.
 - **Slow answers / no reasoning panel**: check the thinking-mode switch and the selected model in Settings.
 - **How do I switch themes**: open Settings → Appearance and choose follow system / light / dark; accent hue, edge width, and edge color are adjustable there too.
-- **How do I undo or save**: with no input focused, press `Ctrl+Z` to undo the last action on the current canvas and `Ctrl+S` to save. The autosave interval and undo depth live under Settings → Canvas.
-- **How do I create or resize a note**: double-click empty canvas to create one; drag any edge or corner handle to resize it independently. Click to edit the title and body; the delete button sits at the right of the title bar.
+- **How do I undo or save**: with no input focused, press `Ctrl+Z` to undo the last action on the current canvas (including card-size changes) and `Ctrl+S` to save. Select cards and press `Delete` for quick deletion. The autosave interval and undo depth live under Settings → Canvas.
+- **How do I create or resize a note**: double-click empty canvas to create one; drag any edge or corner handle to resize it independently. Double-click the title or body to edit; press Tab in the body editor to insert four spaces. The delete button sits at the right of the title bar.
 - **Change defaults only**: edit `backend/.env` and restart the backend; settings saved in the UI take precedence.
 - **`.env` is ignored / the commit hook blocks a commit**: this is expected — environment files and suspected keys must not enter the repository. Keep the real key in a local, ignored `.env` and commit only key-free templates such as `.env.example`; the hook prints the offending file, so remove any `sk-` key or non-empty `DEEPSEEK_API_KEY` from it and commit again.
 
@@ -155,7 +164,23 @@ Tree_thinking/
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
 
-### 0.1.5 — 2026-11-04
+### 0.1.6 — 2026-11-05
+- Added: while Space is held, dragging anywhere — card text, titles, attachments, or an unfocused input — pans the canvas without selecting text.
+- Added: a web-search shortcut beside the attachment button in card inputs, synced with the canvas-top toggle; hovering shows “仅支持 DeepSeek API” on other providers.
+- Added: select one or more cards and press `Delete` for quick deletion (the root question card remains protected).
+- Added: undo now restores card-size changes.
+- Improved: the “custom direction” input becomes a toggle-style expanded composer. Once clicked it stays open; only clicking another card or a suggestion collapses it, while clicking empty canvas does not.
+- Improved: attachments are unified as “file icon + filename”; images no longer show thumbnails or a viewer, and every attachment opens the original file in a new window when clicked.
+- Improved: the reference drawer lists web links only, without fetched titles, summaries, or page content.
+- Added: note titles and bodies now require a double-click to enter edit mode, leaving single-click for dragging and selection; pressing Tab in the body editor inserts four spaces.
+- Added: a new “Wheel logic” setting is the first item under Settings → Canvas → Pointer, offering “scroll the hovered card” or “zoom the canvas” (zoom by default); while Space is held, the wheel always zooms the canvas.
+- Fixed: wheel zoom works again when the pointer is over card answers or reasoning (including while Space is held).
+- Improved: references now open as an in-card draggable frosted-glass drawer (25% of the card height by default, resizable and remembered globally) that never covers the bottom action row and closes only via its arrow or Esc.
+- Improved: unified keyboard priority — when one key matches several actions, the most recently executed/opened action runs first (see “Keyboard Action Priority”).
+- Removed: the global bottom-center follow-up input bar; all follow-ups now happen on cards.
+- Bumped the version to 0.1.6.
+
+### 0.1.5 — 2026-11-05
 - Fixed: a card created from the branch input now uses the backend's unified position (matching Card spacing, without an extra blank row).
 - Fixed: suggestion cards now display in full, wrap automatically, and size themselves to their content.
 - Fixed: removed the “Empty canvas” subtitle from sidebar canvas entries.

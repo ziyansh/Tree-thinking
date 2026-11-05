@@ -74,6 +74,7 @@ _EXTRA_COLUMNS = {
         "double_click_ms": "INTEGER",
         "drag_drift_delay_ms": "INTEGER",
         "drag_drift_distance": "INTEGER",
+        "wheel_mode": "VARCHAR(16)",
         "long_press_ms": "INTEGER",
         "card_font_size": "INTEGER",
         "autosave_minutes": "INTEGER",
@@ -85,6 +86,8 @@ _EXTRA_COLUMNS = {
         "time_format": "VARCHAR(8)",
         # 联网搜索开关
         "web_search_enabled": "BOOLEAN",
+        # 来源抽屉高度比例（旧库补列）
+        "sources_panel_ratio": "FLOAT",
     },
 }
 

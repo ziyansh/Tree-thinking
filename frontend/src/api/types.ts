@@ -110,6 +110,9 @@ export type ConnectionStyle = 'direct' | 'bus'
 /** 时间制式：24 小时制 / 12 小时制 */
 export type TimeFormat = '24h' | '12h'
 
+/** 滚轮逻辑：悬停卡片时滚动内容 / 始终缩放画布 */
+export type WheelMode = 'scroll-card' | 'zoom-canvas'
+
 /** 模型服务商：DeepSeek / OpenAI */
 export type ModelProvider = 'deepseek' | 'openai'
 
@@ -154,6 +157,8 @@ export interface SettingsDTO {
   dragDriftDelayMs: number
   /** 判定为拖动的最小位移（默认 10px，范围 0–50） */
   dragDriftDistance: number
+  /** 滚轮逻辑（默认 zoom-canvas） */
+  wheelMode: WheelMode
   /** 卡片正文字号（默认 14，范围 12–24） */
   cardFontSize: number
   /** 自动保存间隔分钟数（默认 5，0 表示关闭） */
@@ -172,6 +177,8 @@ export interface SettingsDTO {
   timeFormat: TimeFormat
   /** 是否开启联网搜索（默认关闭，仅 DeepSeek 服务商可用） */
   webSearchEnabled: boolean
+  /** 参考资料抽屉高度占卡片高度的比例（默认 0.25，范围 0.15–0.7） */
+  sourcesPanelRatio: number
 }
 
 /** 更新设置入参：只提交要改的字段；apiKey 留空表示保持原 Key */
@@ -199,6 +206,7 @@ export interface SettingsPatch {
   doubleClickMs?: number
   dragDriftDelayMs?: number
   dragDriftDistance?: number
+  wheelMode?: WheelMode
   cardFontSize?: number
   autosaveMinutes?: number
   undoSteps?: number
@@ -209,4 +217,6 @@ export interface SettingsPatch {
   timeFormat?: TimeFormat
   /** 是否开启联网搜索 */
   webSearchEnabled?: boolean
+  /** 参考资料抽屉高度占卡片高度的比例（0.15–0.7） */
+  sourcesPanelRatio?: number
 }

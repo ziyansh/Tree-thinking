@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronRight, Paperclip } from 'lucide-react'
 import type { AttachmentDTO, NodeDTO } from '../api/types'
 import { AttachmentChips } from './AttachmentComposer'
-import { ImageViewer } from './ImageViewer'
+import { useSpacePressed } from '../lib/spaceKey'
 
 interface AttachmentBarProps {
   node: NodeDTO
@@ -12,15 +12,13 @@ interface AttachmentBarProps {
 export function AttachmentBar({ node }: AttachmentBarProps) {
   const [pinned, setPinned] = useState(false)
   const [hover, setHover] = useState(false)
-  const [viewer, setViewer] = useState<AttachmentDTO | null>(null)
+  const spacePressed = useSpacePressed()
   const attachments = node.attachments
   if (attachments.length === 0) return null
 
-  /** 图片用查看器打开，其它附件在新窗口打开 */
-  const open = (attachment: AttachmentDTO) => {
-    if (attachment.kind === 'image') setViewer(attachment)
-    else window.open(attachment.url, '_blank', 'noreferrer')
-  }
+  /** 所有附件统一在新窗口打开原始文件 */
+  const open = (attachment: AttachmentDTO) =>
+    window.open(attachment.url, '_blank', 'noreferrer')
 
   const expanded = pinned || hover
 
@@ -46,13 +44,12 @@ export function AttachmentBar({ node }: AttachmentBarProps) {
             <ChevronRight size={12} className={expanded ? 'rotate-90' : ''} />
           </button>
           {expanded && (
-            <div className="nodrag nowheel absolute top-full left-0 z-30 mt-1 w-full rounded-xl border border-subtle bg-panel p-2 shadow-2xl">
+            <div className={`nodrag ${spacePressed ? '' : 'nowheel'} absolute top-full left-0 z-30 mt-1 w-full rounded-xl border border-subtle bg-panel p-2 shadow-2xl`}>
               <AttachmentChips items={attachments} compact onOpen={open} />
             </div>
           )}
         </>
       )}
-      {viewer && <ImageViewer src={viewer.url} name={viewer.name} onClose={() => setViewer(null)} />}
     </div>
   )
 }

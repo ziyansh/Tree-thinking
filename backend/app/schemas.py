@@ -299,6 +299,8 @@ class SettingsPatch(CamelModel):
     double_click_ms: int | None = None
     drag_drift_delay_ms: int | None = None
     drag_drift_distance: int | None = None
+    # 滚轮逻辑：scroll-card（悬停卡片时滚动内容）/ zoom-canvas（始终缩放画布）
+    wheel_mode: str | None = None
     # 外观：卡片正文字号（12–24，非法值返回 422）
     card_font_size: int | None = None
     # 保存：自动保存间隔（分钟，0=关闭）与撤销栈深度（最小 1）
@@ -312,6 +314,8 @@ class SettingsPatch(CamelModel):
     time_format: Literal["24h", "12h"] | None = None
     # 联网搜索开关
     web_search_enabled: bool | None = None
+    # 来源抽屉高度比例（服务层夹到 0.15–0.7）
+    sources_panel_ratio: float | None = None
 
     @field_validator("edge_color")
     @classmethod

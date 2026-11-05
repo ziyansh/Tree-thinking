@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
@@ -18,8 +18,11 @@ import {
 import { useGraphStore } from '../store/graphStore'
 import type { CardNodeData, CardFlowNode } from '../store/graphStore'
 import { formatModifiedTime } from '../lib/time'
+import { useEscapeHandler } from '../lib/escapeStack'
+import { useSpacePressed } from '../lib/spaceKey'
 import { AttachmentBar } from './AttachmentBar'
 import { AttachmentChips, useAttachmentUploads, useFileDropZone } from './AttachmentComposer'
+import { WebSearchToggle } from './WebSearchToggle'
 
 /** Markdown 正文样式：颜色只取自主题令牌，避免卡片被长回答撑高 */
 const MARKDOWN_CLASS = [
@@ -120,9 +123,16 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
   const isSelected = useGraphStore((state) => state.selectedNodeIds.includes(node.id))
   // 修改时间跟随设置中的时间制式，设置变更后立即重新格式化
   const timeFormat = useGraphStore((state) => state.preferences.timeFormat)
+  // 参考资料抽屉高度比例与设置更新入口
+  const sourcesPanelRatio = useGraphStore((state) => state.preferences.sourcesPanelRatio)
+  const updatePreferences = useGraphStore((state) => state.updatePreferences)
   // 标题双击编辑使用设置里的双击间隔与漂移距离
   const doubleClickMs = useGraphStore((state) => state.preferences.doubleClickMs)
   const dragDriftDistance = useGraphStore((state) => state.preferences.dragDriftDistance)
+  // 滚轮逻辑：悬停卡片时滚动内容或缩放画布；按住空格时始终让滚轮缩放画布
+  const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
+  const spacePressed = useSpacePressed()
+  const wheelScrollClass = wheelMode === 'scroll-card' && !spacePressed ? 'nowheel' : ''
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
 
   const [draft, setDraft] = useState('')
@@ -130,6 +140,8 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
   const [copied, setCopied] = useState(false)
   const [reasoningOpen, setReasoningOpen] = useState(false)
   const [sourcesOpen, setSourcesOpen] = useState(false)
+  /** 抽屉拖拽中的高度比例预览，松手后清空并持久化 */
+  const [sourcesPanelPreviewRatio, setSourcesPanelPreviewRatio] = useState<number | null>(null)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   /** 上一次点击标题的时间，用于手动判定双击 */
@@ -140,16 +152,16 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
   const attachments = useAttachmentUploads()
   const dropZone = useFileDropZone((files) => void attachments.addFiles(files))
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  /** 正文容器：抽屉高度不能超过它的实际高度 */
+  const sourcesContainerRef = useRef<HTMLDivElement | null>(null)
 
-  // 来源面板展开时按 Esc 收起
-  useEffect(() => {
-    if (!sourcesOpen) return
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSourcesOpen(false)
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [sourcesOpen])
+  // 抽屉展开时统一走 Escape 栈，多浮层叠加时总是先关闭最后打开的那个
+  useEscapeHandler(sourcesOpen, () => setSourcesOpen(false))
+
+  /** 抽屉高度：拖拽预览优先，其次取设置中的比例 */
+  const sourcesPanelHeight = Math.round(
+    cardSize.height * (sourcesPanelPreviewRatio ?? sourcesPanelRatio),
+  )
 
   const isStreaming = node.status === 'streaming'
   const isError = node.status === 'error'
@@ -234,6 +246,8 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
   const startResize =
     (edge: ResizeEdge) => (event: ReactPointerEvent<HTMLDivElement>) => {
       if (event.button !== 0) return
+      // 每次拖动只压一次快照，撤销可整体恢复卡片尺寸
+      useGraphStore.getState().pushUndo('调整卡片大小')
       // 阻止冒泡与默认行为，避免触发 React Flow 的节点拖动与选中
       event.preventDefault()
       event.stopPropagation()
@@ -268,6 +282,53 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
       target.addEventListener('pointerup', handleEnd)
       target.addEventListener('pointercancel', handleEnd)
     }
+
+  /**
+   * 参考资料抽屉拖拽条：向上拖增大、向下拖减小，
+   * 范围限定在卡片高度的 15%–70%，且不超过正文容器高度；松手后持久化比例
+   */
+  const startSourcesDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    // 阻止触发卡片拖动与选中
+    event.preventDefault()
+    event.stopPropagation()
+
+    const target = event.currentTarget
+    const pointerId = event.pointerId
+    const startY = event.clientY
+    const startHeight = Math.round(cardSize.height * sourcesPanelRatio)
+    const containerHeight = sourcesContainerRef.current?.clientHeight ?? cardSize.height
+    let latestHeight = startHeight
+
+    const clampHeight = (height: number) =>
+      Math.max(
+        cardSize.height * 0.15,
+        Math.min(cardSize.height * 0.7, Math.min(containerHeight, height)),
+      )
+
+    target.setPointerCapture(pointerId)
+
+    const handleMove = (moveEvent: PointerEvent) => {
+      latestHeight = Math.round(clampHeight(startHeight + (startY - moveEvent.clientY)))
+      setSourcesPanelPreviewRatio(latestHeight / cardSize.height)
+    }
+
+    const handleEnd = () => {
+      target.removeEventListener('pointermove', handleMove)
+      target.removeEventListener('pointerup', handleEnd)
+      target.removeEventListener('pointercancel', handleEnd)
+      if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
+      setSourcesPanelPreviewRatio(null)
+      // 折算成比例写入设置，失败时 store 回滚，这里只告警
+      void updatePreferences({ sourcesPanelRatio: latestHeight / cardSize.height }).catch((err) =>
+        console.warn('保存参考资料抽屉高度失败', err),
+      )
+    }
+
+    target.addEventListener('pointermove', handleMove)
+    target.addEventListener('pointerup', handleEnd)
+    target.addEventListener('pointercancel', handleEnd)
+  }
 
   // 卡片外发光完全由主题令牌派生：选中为强调色描边+光晕，流式为 20% 强调色描边
   const boxShadow = isError
@@ -308,32 +369,6 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
 
       {/* 附件条固定在标题行之前 */}
       <AttachmentBar node={node} />
-
-      {/* 来源悬浮窗：向上弹出，不撑开卡片尺寸 */}
-      {sourcesOpen && node.sources.length > 0 && (
-        <div className="nodrag nowheel absolute bottom-full left-0 z-30 mb-2 max-h-[300px] w-full overflow-y-auto rounded-xl border border-subtle bg-panel p-3 shadow-2xl">
-          {node.sources.map((source, index) => (
-            <div key={`${source.url}-${index}`} className="mb-3 last:mb-0">
-              <a
-                href={source.url}
-                target="_blank"
-                rel="noreferrer"
-                className="block break-words text-[13px] font-medium text-accent hover:underline"
-              >
-                {source.title || source.url}
-              </a>
-              {(source.siteName || source.date) && (
-                <p className="mt-0.5 text-[11px] text-muted">
-                  {[source.siteName, source.date].filter(Boolean).join(' · ')}
-                </p>
-              )}
-              <p className="mt-1 whitespace-pre-wrap text-[13px] leading-[1.6] text-body">
-                {source.summary || source.snippet}
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
 
       <div className="card-drag-handle flex shrink-0 items-start gap-2">
         {editingTitle ? (
@@ -409,7 +444,7 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
             <span>{isStreaming ? '思考中…' : '思考过程'}</span>
           </button>
           {reasoningOpen && (
-            <div className="nodrag nowheel selectable-text mt-2 inline-block max-h-[200px] max-w-full overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-[1.6] text-muted">
+            <div className={`nodrag ${wheelScrollClass} selectable-text mt-2 inline-block max-h-[200px] max-w-full overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-[1.6] text-muted`}>
               {node.reasoning}
             </div>
           )}
@@ -468,6 +503,7 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
                   void attachments.addFiles(files)
                 }}
               />
+              <WebSearchToggle />
             </div>
             <button
               type="button"
@@ -481,18 +517,59 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
         </div>
       ) : (
         <>
-          {/* 正文占据剩余高度，内容超出后内部滚动，绝不撑开卡片；
-              容器留白可拖动卡片，正文本身标了 nodrag 以支持选字 */}
-          <div className="nowheel mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
-            {node.answer ? (
-              <div className={MARKDOWN_CLASS} style={{ fontSize: 'var(--card-font-size)' }}>
-                <Markdown remarkPlugins={[remarkGfm]}>{node.answer}</Markdown>
+          {/* 正文容器同时承载参考资料抽屉：抽屉绝对定位在底部，不撑开卡片也不覆盖操作行 */}
+          <div ref={sourcesContainerRef} className="relative mt-3 min-h-0 flex-1">
+            {/* 正文占据剩余高度，内容超出后内部滚动，绝不撑开卡片；
+                容器留白可拖动卡片，正文本身标了 nodrag 以支持选字 */}
+            <div className={`${wheelScrollClass} h-full overflow-y-auto pr-1`}>
+              {node.answer ? (
+                <div className={MARKDOWN_CLASS} style={{ fontSize: 'var(--card-font-size)' }}>
+                  <Markdown remarkPlugins={[remarkGfm]}>{node.answer}</Markdown>
+                </div>
+              ) : (
+                !isStreaming && <p className="text-[13px] text-muted">暂无回答</p>
+              )}
+              {isStreaming && (
+                <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-accent align-middle" />
+              )}
+            </div>
+
+            {sourcesOpen && node.sources.length > 0 && (
+              <div
+                className={`nodrag ${spacePressed ? '' : 'nowheel'} absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-lg`}
+                style={{
+                  height: sourcesPanelHeight,
+                  maxHeight: '100%',
+                  background: 'color-mix(in srgb, var(--bg-panel) 82%, transparent)',
+                  backdropFilter: 'blur(10px)',
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+              >
+                {/* 拖拽条：上下拖动调整抽屉高度 */}
+                <div
+                  onPointerDown={startSourcesDrag}
+                  className="flex h-3 shrink-0 cursor-ns-resize items-center justify-center"
+                >
+                  <span className="h-1 w-10 rounded-full bg-strong" />
+                </div>
+                <p className="shrink-0 px-3 pb-1 text-[11px] text-muted">
+                  参考资料 · {node.sources.length} 篇
+                </p>
+                <div className={`${spacePressed ? '' : 'nowheel'} min-h-0 flex-1 overflow-y-auto px-3 pb-3`}>
+                  {node.sources.map((source, index) => (
+                    <a
+                      key={`${source.url}-${index}`}
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mb-2 block break-all text-[12px] leading-[1.5] text-accent hover:underline last:mb-0"
+                    >
+                      {source.url}
+                    </a>
+                  ))}
+                </div>
               </div>
-            ) : (
-              !isStreaming && <p className="text-[13px] text-muted">暂无回答</p>
-            )}
-            {isStreaming && (
-              <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-accent align-middle" />
             )}
           </div>
 

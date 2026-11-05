@@ -10,8 +10,10 @@ import type {
   SettingsPatch,
   ThemeMode,
   TimeFormat,
+  WheelMode,
 } from '../api/types'
 import { useGraphStore } from '../store/graphStore'
+import { useEscapeHandler } from '../lib/escapeStack'
 
 interface SettingsDialogProps {
   open: boolean
@@ -50,6 +52,7 @@ interface SettingsForm {
   doubleClickMs: number
   dragDriftDelayMs: number
   dragDriftDistance: number
+  wheelMode: WheelMode
   cardFontSize: number
   autosaveMinutes: number
   undoSteps: number
@@ -84,6 +87,7 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     doubleClickMs: data.doubleClickMs,
     dragDriftDelayMs: data.dragDriftDelayMs,
     dragDriftDistance: data.dragDriftDistance,
+    wheelMode: data.wheelMode,
     cardFontSize: data.cardFontSize,
     autosaveMinutes: data.autosaveMinutes,
     undoSteps: data.undoSteps,
@@ -440,6 +444,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     doubleClickMs: 300,
     dragDriftDelayMs: 0,
     dragDriftDistance: 10,
+    wheelMode: 'zoom-canvas',
     cardFontSize: 14,
     autosaveMinutes: 5,
     undoSteps: 10,
@@ -450,15 +455,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     timeFormat: '24h',
   })
 
-  // Esc 关闭
-  useEffect(() => {
-    if (!open) return
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [open, onClose])
+  // Esc 关闭统一走 Escape 栈：多浮层叠加时只关闭最上层
+  useEscapeHandler(open, onClose)
 
   // 打开时拉取最新设置初始化全部表单，关闭时丢弃未保存的草稿
   useEffect(() => {
@@ -514,6 +512,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         doubleClickMs: form.doubleClickMs,
         dragDriftDelayMs: form.dragDriftDelayMs,
         dragDriftDistance: form.dragDriftDistance,
+        wheelMode: form.wheelMode,
         cardFontSize: form.cardFontSize,
         autosaveMinutes: form.autosaveMinutes,
         undoSteps: form.undoSteps,
@@ -558,6 +557,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-label="设置"
+        data-modal-open="true"
         className="flex h-[760px] w-[1040px] max-h-[calc(100vh-48px)] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-subtle bg-panel shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
@@ -850,6 +850,20 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     </Section>
 
                     <Section title="指针">
+                      <Row
+                        label="滚轮逻辑"
+                        hint="鼠标悬停在画布上时的滚轮行为；按住空格时始终缩放画布；默认缩放画布"
+                      >
+                        <ChoiceGroup
+                          value={form.wheelMode}
+                          options={[
+                            { value: 'scroll-card', label: '悬停时滑动卡片' },
+                            { value: 'zoom-canvas', label: '悬停时缩放画布' },
+                          ]}
+                          onChange={(wheelMode) => setForm({ ...form, wheelMode })}
+                        />
+                      </Row>
+
                       <Row label="双击间隔" hint="两次点击在该间隔内算双击；默认 300，范围 100–1000">
                         <SliderNumber
                           value={form.doubleClickMs}

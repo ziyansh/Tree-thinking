@@ -23,6 +23,8 @@ def test_settings_defaults(client):
     assert data["doubleClickMs"] == 300
     assert data["dragDriftDelayMs"] == 0
     assert data["dragDriftDistance"] == 10
+    # 滚轮逻辑默认始终缩放画布
+    assert data["wheelMode"] == "zoom-canvas"
     # 旧的长按设置不再暴露
     assert "longPressMs" not in data
     assert data["cardFontSize"] == 14
@@ -36,6 +38,23 @@ def test_settings_defaults(client):
     assert data["openaiMaxTokens"] == 0
     assert data["openaiReasoningEffort"] == "default"
     assert data["openaiTimeoutSeconds"] == 60
+    # 来源抽屉高度比例默认 0.25
+    assert data["sourcesPanelRatio"] == 0.25
+
+
+def test_settings_sources_panel_ratio_clamp(client):
+    """来源抽屉高度比例超出 0.15–0.7 时夹到边界。"""
+    too_big = client.put("/api/settings", json={"sourcesPanelRatio": 0.9})
+    assert too_big.status_code == 200
+    assert too_big.json()["sourcesPanelRatio"] == 0.7
+
+    too_small = client.put("/api/settings", json={"sourcesPanelRatio": 0.1})
+    assert too_small.status_code == 200
+    assert too_small.json()["sourcesPanelRatio"] == 0.15
+
+    # 落库后再次读取保持一致
+    data = client.get("/api/settings").json()
+    assert data["sourcesPanelRatio"] == 0.15
 
 
 def test_settings_update_and_mask(client):

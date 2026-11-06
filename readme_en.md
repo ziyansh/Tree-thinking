@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.1.6** | [中文说明](readme.md)
+> Current version: **0.2.0** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -20,7 +20,7 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 - **Multiple canvases**: a collapsible left sidebar (240px / 48px) to create, switch, rename, and delete canvases. Each canvas has exactly one root question. After the first answer completes, the app asks the model for a canvas title; a manual rename is never overwritten.
 - **In-app settings**: the gear at the bottom-left opens a floating dialog with three tabs — Model service / Canvas / Appearance (save options live in Canvas). Each section has a heading, with a description on the left and the control on the right; bounded values use a slider plus a number input, and changes take effect immediately — no restart.
 - **Multiple providers**: the provider is a dropdown (DeepSeek / OpenAI-compatible); the latter works with any service that implements the OpenAI protocol. DeepSeek supports `deepseek-flash` / `deepseek-v4-pro`; the OpenAI-compatible option adds organization/project IDs, temperature, max output tokens, reasoning effort, and request timeout, and can point at a proxy.
-- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek only), and a synced shortcut sits beside the attachment button in card inputs. When enabled, the app calls DeepSeek Search before answering and injects a summary. Cards show “参考 N 篇资料” at the bottom-left; clicking it slides up a draggable frosted-glass drawer inside the card (25% of the card height by default; the height is remembered and applied to every card). The drawer lists web links only — click a link to open the source; it closes only via its arrow or Esc.
+- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek only), and a synced shortcut sits beside the attachment button in card inputs. When enabled, the app calls DeepSeek Search before answering and injects a summary. Cards show “参考 N 篇资料” at the bottom-left; clicking it slides up a draggable frosted-glass drawer inside the card (25% of the card height by default; the height is remembered and applied to every card). The drawer lists numbered page titles linked to the originals, and `[n]` markers in answers render as clickable citation badges; the drawer closes only via its arrow or Esc.
 - **Attachments**: the root question input and the “custom direction” box accept click-to-upload or drag-and-drop files. Cards show every attachment as a file icon plus filename (more than three collapse into “附件 N”; clicking an item opens the original file in a new window). Text attachments are injected along the root-to-current path, so sibling branches never see them.
 - **Persistence**: canvases, cards, positions, and viewport are stored in local SQLite and restored after refresh.
 - **Appearance**: follow system / light / dark, plus accent hue, edge width and color; 12/24-hour time formats. Card body font size is adjustable (12–24px, default 14) and cards grow automatically when the font size increases.
@@ -163,6 +163,26 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.2.0 — 2026-11-06
+- Motion: introduced a unified duration and easing scale (120–150ms for high-frequency feedback, 200ms for local changes, 280ms for hierarchy changes) plus press-scale feedback on every button; all animations can be interrupted by the next action.
+- Motion: the settings dialog now fades in its overlay and lifts its panel into view, plays a 180ms exit before unmounting, and fades tab content on switch.
+- Motion: newly created cards and notes play a one-shot 220ms entrance (no bounce); dragged cards scale to 1.01 and hovered cards lift by 1px.
+- Motion: the reasoning section expands/collapses smoothly with 0fr ↔ 1fr; the references drawer rises from the bottom, follows the pointer while dragging, and transitions height over 220ms otherwise.
+- Motion: canvas panning (blank-area drag or Space + drag) coasts with pointer velocity after release and stops immediately on the next press; auto-arrange now interpolates positions frame by frame over 280ms so edges move in sync, and dragging takes over at any time.
+- Motion: toasts rise and fade in, then fade out before unmounting; attachment chips and error banners animate in.
+- Settings: Canvas → Display gains a “Canvas pan inertia” toggle (off by default); when enabled, an “Inertia coefficient” slider + number input appears (0.1–1.0, default 0.5).
+- Settings: new “Canvas style” choice — None / Dots. Dots renders a regular dot grid, and holding Shift while panning snaps the viewport to the dot spacing.
+- Fixed: wheel zoom could run while pan inertia was still gliding; zooming now stops inertia immediately.
+- Fixed: after expanding one “custom direction” composer, clicking another custom-direction composer now collapses the previous one (treated as a focus change).
+- Performance: fixed card-drag stutter — removed scale/translate animations from dragging and hovering, using shadow for the lift instead; drag offsets are coalesced per animation frame so high-refresh pointer events no longer trigger per-event re-renders.
+- Sidebar: the new-canvas “+” icon is now a labeled “新建画布” button in the expanded sidebar (the collapsed rail keeps the icon).
+- Reference drawer: entries are numbered page titles linking to the originals; the entry arrow now points up when expanded.
+- Web citations: the search prompt asks the model to mark citations as `[n]`, and answers render those numbers as clickable citation badges that open the matching source.
+- Performance: canvas animations are scheduled with a 60fps cap (dragging, pan inertia, auto-arrange), so high-refresh displays no longer trigger redundant state writes; streamed answers batch text at ~30fps to keep Markdown re-parsing from stealing animation frames; the settings dialog no longer uses a full-screen backdrop blur or scale animation, and dragging disables shadow transitions and large glass blurs.
+- Accessibility: honors the system “Reduce motion” setting and downgrades translation, scaling, inertia, and auto-arrange interpolation to a 120ms cross-fade.
+- The sidebar still expands/collapses without animation to avoid pushing the entire canvas viewport.
+- Bumped the version to 0.2.0.
 
 ### 0.1.6 — 2026-11-05
 - Added: while Space is held, dragging anywhere — card text, titles, attachments, or an unfocused input — pans the canvas without selecting text.

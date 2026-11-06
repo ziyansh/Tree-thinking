@@ -7,18 +7,22 @@ import type { InputGhostNode } from './ghosts'
 import { AttachmentChips, useAttachmentUploads, useFileDropZone } from './AttachmentComposer'
 import { WebSearchToggle } from './WebSearchToggle'
 import { useSpacePressed } from '../lib/spaceKey'
+import { setActiveGhostInput, useActiveGhostInput } from '../lib/ghostInputFocus'
 
 /**
  * 自定义方向输入箭头：收起时为单行输入，聚焦后展开为多行输入 + 附件区，
  * 提交后清空文本与附件但保留自身，可反复新增子分支。
  */
 function GhostInputNodeInner({
+  id,
   data,
   positionAbsoluteX,
   positionAbsoluteY,
 }: NodeProps<InputGhostNode>) {
   const createBranch = useGraphStore((state) => state.createBranch)
   const isStreaming = useGraphStore((state) => state.isStreamingIds.length > 0)
+  // 哪一个自定义输入框当前持有焦点：切换到另一个时收起当前输入框
+  const activeInputId = useActiveGhostInput()
 
   const [focused, setFocused] = useState(false)
   const [draft, setDraft] = useState('')
@@ -45,6 +49,11 @@ function GhostInputNodeInner({
       }
     })
   }, [focused])
+
+  // 切换到另一个自定义输入框也算切换焦点：立即收起当前输入框
+  useEffect(() => {
+    if (activeInputId !== null && activeInputId !== id) setFocused(false)
+  }, [activeInputId, id])
 
   // 展开态按内容自动增高，至少保持 3 行（60px）；收起态恢复单行高度
   useLayoutEffect(() => {
@@ -79,12 +88,15 @@ function GhostInputNodeInner({
 
   return (
     <div
-      onFocus={() => setFocused(true)}
+      onFocus={() => {
+        setActiveGhostInput(id)
+        setFocused(true)
+      }}
       onDragOver={dropZone.onDragOver}
       onDragLeave={dropZone.onDragLeave}
       onDrop={dropZone.onDrop}
       className={[
-        'relative flex rounded-lg border bg-ghost-bg transition-colors duration-150',
+        'relative flex rounded-lg border bg-ghost-bg transition-[width,min-height,border-color,background-color] duration-200 ease-out',
         focused
           ? 'min-h-[120px] w-[460px] flex-col gap-1.5 p-2.5'
           : 'min-h-[44px] w-[280px] items-center gap-1.5 px-2.5 py-1',
@@ -98,7 +110,7 @@ function GhostInputNodeInner({
     >
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       {focused ? (
-        <>
+        <div className="tab-panel-in flex min-h-0 flex-1 flex-col gap-1.5">
           <span className="shrink-0 text-[10px] leading-none text-muted/70">自定义方向</span>
           <textarea
             ref={textareaRef}
@@ -165,7 +177,7 @@ function GhostInputNodeInner({
               <Send size={14} />
             </button>
           </div>
-        </>
+        </div>
       ) : (
         <>
           <span className="shrink-0 text-[10px] leading-none text-muted/70">自定义方向</span>

@@ -88,6 +88,10 @@ _EXTRA_COLUMNS = {
         "web_search_enabled": "BOOLEAN",
         # 来源抽屉高度比例（旧库补列）
         "sources_panel_ratio": "FLOAT",
+        # 画布拖动惯性与背景样式（旧库补列）
+        "pan_inertia_enabled": "BOOLEAN",
+        "pan_inertia_coefficient": "FLOAT",
+        "canvas_style": "VARCHAR(16)",
     },
 }
 

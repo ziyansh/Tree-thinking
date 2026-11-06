@@ -6,7 +6,6 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   Check,
-  ChevronDown,
   ChevronRight,
   Copy,
   GitBranch,
@@ -38,11 +37,29 @@ const MARKDOWN_CLASS = [
   '[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-elevated [&_pre]:p-3',
   '[&_pre_code]:bg-transparent [&_pre_code]:p-0',
   '[&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-subtle [&_blockquote]:pl-3 [&_blockquote]:text-muted',
-  '[&_a]:text-accent [&_a]:underline [&_table]:my-2 [&_table]:w-full [&_table]:border-collapse',
+  '[&_a:not(.citation-badge)]:text-accent [&_a:not(.citation-badge)]:underline [&_table]:my-2 [&_table]:w-full [&_table]:border-collapse',
   '[&_th]:border [&_th]:border-subtle [&_th]:px-2 [&_th]:py-1 [&_th]:text-left',
   '[&_td]:border [&_td]:border-subtle [&_td]:px-2 [&_td]:py-1',
   '[&_hr]:my-3 [&_hr]:border-subtle',
 ].join(' ')
+
+/** 把模型输出的 [n] / 【n】 引用标记转成指向来源序号的 Markdown 链接 */
+function withCitationLinks(answer: string, sourceCount: number): string {
+  if (sourceCount <= 0) return answer
+  // 跳过代码块与行内代码，避免把数组下标等 [n] 误当成引用
+  return answer
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part.replace(/(?:\[|【)\s*(\d{1,2})\s*(?:\]|】)/g, (match, raw: string) => {
+            const sourceIndex = Number(raw)
+            if (sourceIndex < 1 || sourceIndex > sourceCount) return match
+            return `[${sourceIndex}](#source-${sourceIndex})`
+          }),
+    )
+    .join('')
+}
 
 interface IconButtonProps {
   title: string
@@ -105,7 +122,7 @@ export const CORNER_ZONES: { edge: ResizeEdge; position: string; cursor: string 
   { edge: 'bottom-right', position: 'bottom-0 right-0', cursor: 'cursor-nwse-resize' },
 ]
 
-function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
+function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const { node }: CardNodeData = data
   const regenerate = useGraphStore((state) => state.regenerate)
   const regenerateSuggestions = useGraphStore((state) => state.regenerateSuggestions)
@@ -134,6 +151,9 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
   const spacePressed = useSpacePressed()
   const wheelScrollClass = wheelMode === 'scroll-card' && !spacePressed ? 'nowheel' : ''
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
+  /** 新建 1.2 秒内的卡片播放一次入场动画；旧卡片与项目载入不播 */
+  const createdAtMs = node.createdAt ? Date.parse(node.createdAt) : Number.NaN
+  const entering = !dragging && Number.isFinite(createdAtMs) && Date.now() - createdAtMs < 1200
 
   const [draft, setDraft] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -142,6 +162,8 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
   const [sourcesOpen, setSourcesOpen] = useState(false)
   /** 抽屉拖拽中的高度比例预览，松手后清空并持久化 */
   const [sourcesPanelPreviewRatio, setSourcesPanelPreviewRatio] = useState<number | null>(null)
+  /** 拖拽抽屉时禁用高度过渡，保证跟手 */
+  const [sourcesDragging, setSourcesDragging] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
   /** 上一次点击标题的时间，用于手动判定双击 */
@@ -295,6 +317,7 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
 
     const target = event.currentTarget
     const pointerId = event.pointerId
+    setSourcesDragging(true)
     const startY = event.clientY
     const startHeight = Math.round(cardSize.height * sourcesPanelRatio)
     const containerHeight = sourcesContainerRef.current?.clientHeight ?? cardSize.height
@@ -318,6 +341,7 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
       target.removeEventListener('pointerup', handleEnd)
       target.removeEventListener('pointercancel', handleEnd)
       if (target.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId)
+      setSourcesDragging(false)
       setSourcesPanelPreviewRatio(null)
       // 折算成比例写入设置，失败时 store 回滚，这里只告警
       void updatePreferences({ sourcesPanelRatio: latestHeight / cardSize.height }).catch((err) =>
@@ -335,14 +359,19 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
     ? '0 2px 12px color-mix(in srgb, var(--bg-canvas) 80%, transparent)'
     : isSelected
       ? '0 0 0 1px var(--accent), 0 0 24px var(--accent-dim)'
-      : isStreaming
-        ? '0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent), 0 2px 12px color-mix(in srgb, var(--bg-canvas) 80%, transparent)'
-        : '0 2px 10px color-mix(in srgb, var(--bg-canvas) 75%, transparent)'
+      : dragging
+        ? '0 12px 28px rgba(0, 0, 0, 0.28)'
+        : isStreaming
+          ? '0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent), 0 2px 12px color-mix(in srgb, var(--bg-canvas) 80%, transparent)'
+          : '0 2px 10px color-mix(in srgb, var(--bg-canvas) 75%, transparent)'
 
   return (
     <div
       className={[
+        // 拖动性能优先：只过渡边框与阴影，不对卡片做 scale / translate（大卡片易掉帧）
         'group card-drag-handle relative flex flex-col rounded-xl border bg-card p-4 transition-[border-color,box-shadow] duration-150 ease-out',
+        // 新建卡片播放一次入场动画
+        entering ? 'card-enter' : '',
         node.pinned ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
         isError
           ? 'border-danger'
@@ -350,7 +379,13 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
             ? 'border-accent'
             : 'border-subtle hover:border-accent',
       ].join(' ')}
-      style={{ width: cardSize.width, height: cardSize.height, boxShadow }}
+      style={{
+        width: cardSize.width,
+        height: cardSize.height,
+        boxShadow,
+        // 拖动中关闭阴影过渡，避免每帧重绘大面积阴影
+        transition: dragging ? 'none' : undefined,
+      }}
     >
       {/* 修改时间放在卡片外部右下角：绝对定位不撑开节点尺寸，也不拦截画布操作 */}
       {modifiedTime && (
@@ -440,14 +475,24 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
             onClick={() => setReasoningOpen((open) => !open)}
             className="nodrag flex w-full items-center gap-1 text-left text-[13px] text-muted transition-colors duration-150 hover:text-body"
           >
-            {reasoningOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <ChevronRight
+              size={14}
+              className={`transition-transform duration-200 ease-out ${reasoningOpen ? 'rotate-90' : ''}`}
+            />
             <span>{isStreaming ? '思考中…' : '思考过程'}</span>
           </button>
-          {reasoningOpen && (
-            <div className={`nodrag ${wheelScrollClass} selectable-text mt-2 inline-block max-h-[200px] max-w-full overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-[1.6] text-muted`}>
-              {node.reasoning}
+          {/* 展开/收起用 0fr ↔ 1fr 过渡，任意时刻可再次点击打断 */}
+          <div
+            className={`grid overflow-hidden transition-[grid-template-rows] duration-200 ease-out ${
+              reasoningOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+            }`}
+          >
+            <div className="min-h-0">
+              <div className={`nodrag ${wheelScrollClass} selectable-text mt-2 inline-block max-h-[200px] max-w-full overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-[1.6] text-muted`}>
+                {node.reasoning}
+              </div>
             </div>
-          )}
+          </div>
         </div>
       )}
 
@@ -524,24 +569,57 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
             <div className={`${wheelScrollClass} h-full overflow-y-auto pr-1`}>
               {node.answer ? (
                 <div className={MARKDOWN_CLASS} style={{ fontSize: 'var(--card-font-size)' }}>
-                  <Markdown remarkPlugins={[remarkGfm]}>{node.answer}</Markdown>
+                  <Markdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      // 引用角标：把 #source-n 渲染成可点击的小徽标
+                      a: ({ href, children }) => {
+                        const prefix = '#source-'
+                        if (href?.startsWith(prefix)) {
+                          const index = Number(href.slice(prefix.length))
+                          const source = node.sources[index - 1]
+                          if (source) {
+                            return (
+                              <a
+                                href={source.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={source.title || source.url}
+                                className="citation-badge"
+                              >
+                                {index}
+                              </a>
+                            )
+                          }
+                        }
+                        return <a href={href}>{children}</a>
+                      },
+                    }}
+                  >
+                    {withCitationLinks(node.answer, node.sources.length)}
+                  </Markdown>
                 </div>
               ) : (
                 !isStreaming && <p className="text-[13px] text-muted">暂无回答</p>
               )}
               {isStreaming && (
-                <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-accent align-middle" />
+                <span className="ml-0.5 streaming-caret inline-block h-4 w-[2px] bg-accent align-middle" />
               )}
             </div>
 
             {sourcesOpen && node.sources.length > 0 && (
               <div
-                className={`nodrag ${spacePressed ? '' : 'nowheel'} absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-lg`}
+                className={`nodrag ${spacePressed ? '' : 'nowheel'} drawer-in absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-lg`}
                 style={{
                   height: sourcesPanelHeight,
                   maxHeight: '100%',
-                  background: 'color-mix(in srgb, var(--bg-panel) 82%, transparent)',
-                  backdropFilter: 'blur(10px)',
+                  // 拖拽时跟手，非拖拽时高度变化（打开/设置调整）用 220ms 过渡
+                  transition: sourcesDragging ? 'none' : 'height 220ms var(--motion-ease-out)',
+                  // 拖拽或空格平移时关闭毛玻璃，避免逐帧重算背景模糊
+                  background: sourcesDragging || spacePressed
+                    ? 'var(--bg-panel)'
+                    : 'color-mix(in srgb, var(--bg-panel) 82%, transparent)',
+                  backdropFilter: sourcesDragging || spacePressed ? 'none' : 'blur(10px)',
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
@@ -557,24 +635,34 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
                   参考资料 · {node.sources.length} 篇
                 </p>
                 <div className={`${spacePressed ? '' : 'nowheel'} min-h-0 flex-1 overflow-y-auto px-3 pb-3`}>
-                  {node.sources.map((source, index) => (
-                    <a
-                      key={`${source.url}-${index}`}
-                      href={source.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mb-2 block break-all text-[12px] leading-[1.5] text-accent hover:underline last:mb-0"
-                    >
-                      {source.url}
-                    </a>
-                  ))}
+                  {node.sources.map((source, index) => {
+                    // 优先展示网页标题，缺失时回落到站点名或链接
+                    const title = source.title.trim() || source.siteName || source.url
+                    return (
+                      <a
+                        key={`${source.url}-${index}`}
+                        href={source.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={source.url}
+                        className="mb-2 flex items-start gap-2 text-[12px] leading-[1.5] last:mb-0"
+                      >
+                        <span className="w-4 shrink-0 text-right tabular-nums text-muted">
+                          {index + 1}.
+                        </span>
+                        <span className="min-w-0 break-words text-accent hover:underline">
+                          {title}
+                        </span>
+                      </a>
+                    )
+                  })}
                 </div>
               </div>
             )}
           </div>
 
           {isError && (
-            <div className="mt-3 flex shrink-0 items-start justify-between gap-3 rounded-lg border border-danger px-3 py-2">
+            <div className="error-in mt-3 flex shrink-0 items-start justify-between gap-3 rounded-lg border border-danger px-3 py-2">
               <p className="min-w-0 break-words text-[13px] leading-[1.6] text-danger">
                 {node.error || '回答失败，请稍后重试'}
               </p>
@@ -603,7 +691,11 @@ function CardNodeInner({ data }: NodeProps<CardFlowNode>) {
                   className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
                 >
                   参考 {node.sources.length} 篇资料
-                  <ChevronRight size={12} className={sourcesOpen ? 'rotate-90' : ''} />
+                  <ChevronRight
+                    size={12}
+                    // 收起时指向右，展开时指向上
+                    className={`transition-transform duration-200 ease-out ${sourcesOpen ? '-rotate-90' : ''}`}
+                  />
                 </button>
               )}
               <div className="flex items-center gap-2">

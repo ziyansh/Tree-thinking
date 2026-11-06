@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { RotateCcw, X } from 'lucide-react'
 import { api } from '../api/client'
 import type {
+  CanvasStyle,
   ConnectionStyle,
   ModelProvider,
   ReasoningEffort,
@@ -61,6 +62,9 @@ interface SettingsForm {
   edgeColor: string
   themeMode: ThemeMode
   timeFormat: TimeFormat
+  canvasStyle: CanvasStyle
+  panInertiaEnabled: boolean
+  panInertiaCoefficient: number
 }
 
 /** 用后端设置初始化表单（apiKey 始终留空） */
@@ -96,6 +100,9 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     edgeColor: data.edgeColor,
     themeMode: data.themeMode,
     timeFormat: data.timeFormat,
+    canvasStyle: data.canvasStyle,
+    panInertiaEnabled: data.panInertiaEnabled,
+    panInertiaCoefficient: data.panInertiaCoefficient,
   }
 }
 
@@ -420,6 +427,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  // 关闭时保留 180ms 播放退场动画，结束再卸载
+  const [mounted, setMounted] = useState(open)
   const updatePreferences = useGraphStore((state) => state.updatePreferences)
 
   const [form, setForm] = useState<SettingsForm>({
@@ -453,10 +462,23 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     edgeColor: '#3a3f4a',
     themeMode: 'system',
     timeFormat: '24h',
+    canvasStyle: 'none',
+    panInertiaEnabled: false,
+    panInertiaCoefficient: 0.5,
   })
 
   // Esc 关闭统一走 Escape 栈：多浮层叠加时只关闭最上层
   useEscapeHandler(open, onClose)
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true)
+      return
+    }
+    if (!mounted) return
+    const timer = window.setTimeout(() => setMounted(false), 180)
+    return () => window.clearTimeout(timer)
+  }, [open, mounted])
 
   // 打开时拉取最新设置初始化全部表单，关闭时丢弃未保存的草稿
   useEffect(() => {
@@ -521,6 +543,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         edgeColor: form.edgeColor,
         themeMode: form.themeMode,
         timeFormat: form.timeFormat,
+        canvasStyle: form.canvasStyle,
+        panInertiaEnabled: form.panInertiaEnabled,
+        panInertiaCoefficient: form.panInertiaCoefficient,
       }
       if (form.apiKey.trim()) patch.apiKey = form.apiKey.trim()
       if (form.openaiApiKey.trim()) patch.openaiApiKey = form.openaiApiKey.trim()
@@ -542,14 +567,17 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     }
   }
 
-  if (!open) return null
+  if (!mounted) return null
+
+  const closing = !open
 
   const activeLabel = TABS.find((tab) => tab.id === activeTab)?.label ?? '设置'
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="dialog-overlay fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'color-mix(in srgb, var(--bg-canvas) 72%, transparent)' }}
+      data-closing={closing ? 'true' : undefined}
       onClick={onClose}
       role="presentation"
     >
@@ -558,7 +586,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         aria-modal="true"
         aria-label="设置"
         data-modal-open="true"
-        className="flex h-[760px] w-[1040px] max-h-[calc(100vh-48px)] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-subtle bg-panel shadow-2xl"
+        className="dialog-panel flex h-[760px] w-[1040px] max-h-[calc(100vh-48px)] max-w-[calc(100vw-48px)] overflow-hidden rounded-xl border border-subtle bg-panel shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
         <aside className="flex w-[200px] flex-none flex-col border-r border-subtle bg-card">
@@ -597,7 +625,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
             </button>
           </header>
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+          <div key={activeTab} className="tab-panel-in min-h-0 flex-1 overflow-y-auto px-8 py-6">
             {loading ? (
               <p className="py-6 text-center text-[14px] text-muted">正在读取设置…</p>
             ) : (
@@ -845,6 +873,47 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           min={16}
                           max={1200}
                           step={1}
+                        />
+                      </Row>
+                    </Section>
+
+                    <Section title="显示">
+                      <Row
+                        label="画布拖动惯性"
+                        hint="拖动画布松手后按指针速度继续滑行；默认关闭"
+                      >
+                        <Toggle
+                          label="启用画布惯性"
+                          checked={form.panInertiaEnabled}
+                          onChange={(panInertiaEnabled) => setForm({ ...form, panInertiaEnabled })}
+                        />
+                      </Row>
+
+                      {form.panInertiaEnabled && (
+                        <Row label="惯性系数" hint="0.1–1.0，值越大松手后滑行越远；默认 0.5">
+                          <SliderNumber
+                            value={form.panInertiaCoefficient}
+                            onChange={(panInertiaCoefficient) =>
+                              setForm({ ...form, panInertiaCoefficient })
+                            }
+                            min={0.1}
+                            max={1}
+                            step={0.05}
+                          />
+                        </Row>
+                      )}
+
+                      <Row
+                        label="画布样式"
+                        hint="无：纯色背景；点状：规律点阵，按住 Shift 平移时吸附到点阵"
+                      >
+                        <ChoiceGroup
+                          value={form.canvasStyle}
+                          options={[
+                            { value: 'none', label: '无' },
+                            { value: 'dots', label: '点状' },
+                          ]}
+                          onChange={(canvasStyle) => setForm({ ...form, canvasStyle })}
                         />
                       </Row>
                     </Section>

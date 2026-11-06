@@ -64,6 +64,14 @@ TIME_FORMATS = ("24h", "12h")
 DEFAULT_SOURCES_PANEL_RATIO = 0.25
 MIN_SOURCES_PANEL_RATIO = 0.15
 MAX_SOURCES_PANEL_RATIO = 0.7
+# 画布拖动惯性：默认关闭，系数默认 0.5，范围 0.1–1.0
+DEFAULT_PAN_INERTIA_ENABLED = False
+DEFAULT_PAN_INERTIA_COEFFICIENT = 0.5
+MIN_PAN_INERTIA_COEFFICIENT = 0.1
+MAX_PAN_INERTIA_COEFFICIENT = 1.0
+# 画布背景样式：none（无）/ dots（点状）
+DEFAULT_CANVAS_STYLE = "none"
+CANVAS_STYLES = ("none", "dots")
 
 # 服务商：DeepSeek（默认）/ OpenAI
 DEFAULT_PROVIDER = "deepseek"
@@ -311,6 +319,20 @@ def effective(db: Session) -> dict:
             MIN_SOURCES_PANEL_RATIO,
             MAX_SOURCES_PANEL_RATIO,
         ),
+        "pan_inertia_enabled": (
+            bool(row.pan_inertia_enabled)
+            if row and row.pan_inertia_enabled is not None
+            else DEFAULT_PAN_INERTIA_ENABLED
+        ),
+        "pan_inertia_coefficient": _effective_float(
+            row.pan_inertia_coefficient if row else None,
+            DEFAULT_PAN_INERTIA_COEFFICIENT,
+            MIN_PAN_INERTIA_COEFFICIENT,
+            MAX_PAN_INERTIA_COEFFICIENT,
+        ),
+        "canvas_style": _effective_choice(
+            row.canvas_style if row else None, CANVAS_STYLES, DEFAULT_CANVAS_STYLE
+        ),
     }
 
 
@@ -358,6 +380,10 @@ def dto(db: Session) -> dict:
         "webSearchEnabled": values["web_search_enabled"],
         # 来源抽屉高度比例，前端用于所有卡片的抽屉高度
         "sourcesPanelRatio": values["sources_panel_ratio"],
+        # 画布拖动惯性与背景样式
+        "panInertiaEnabled": values["pan_inertia_enabled"],
+        "panInertiaCoefficient": values["pan_inertia_coefficient"],
+        "canvasStyle": values["canvas_style"],
     }
 
 
@@ -512,6 +538,19 @@ def update(db: Session, patch: dict) -> dict:
             DEFAULT_SOURCES_PANEL_RATIO,
             MIN_SOURCES_PANEL_RATIO,
             MAX_SOURCES_PANEL_RATIO,
+        )
+    if patch.get("pan_inertia_enabled") is not None:
+        row.pan_inertia_enabled = bool(patch["pan_inertia_enabled"])
+    if patch.get("pan_inertia_coefficient") is not None:
+        row.pan_inertia_coefficient = _effective_float(
+            patch["pan_inertia_coefficient"],
+            DEFAULT_PAN_INERTIA_COEFFICIENT,
+            MIN_PAN_INERTIA_COEFFICIENT,
+            MAX_PAN_INERTIA_COEFFICIENT,
+        )
+    if patch.get("canvas_style") is not None:
+        row.canvas_style = _effective_choice(
+            patch["canvas_style"], CANVAS_STYLES, DEFAULT_CANVAS_STYLE
         )
 
     db.commit()

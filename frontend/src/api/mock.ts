@@ -160,6 +160,9 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   timeFormat: '24h',
   webSearchEnabled: false,
   sourcesPanelRatio: 0.25,
+  panInertiaEnabled: false,
+  panInertiaCoefficient: 0.5,
+  canvasStyle: 'none',
 }
 
 /** 全局卡片尺寸的最小值（与后端一致，无上限） */
@@ -702,6 +705,11 @@ export const mockApi: ApiClient = {
     if (patch.sourcesPanelRatio !== undefined) {
       settings.sourcesPanelRatio = Math.min(0.7, Math.max(0.15, patch.sourcesPanelRatio))
     }
+    if (patch.panInertiaEnabled !== undefined) settings.panInertiaEnabled = patch.panInertiaEnabled
+    if (patch.panInertiaCoefficient !== undefined) {
+      settings.panInertiaCoefficient = Math.min(1, Math.max(0.1, patch.panInertiaCoefficient))
+    }
+    if (patch.canvasStyle !== undefined) settings.canvasStyle = patch.canvasStyle
     saveSettingsState(settings)
     return { ...settings }
   },

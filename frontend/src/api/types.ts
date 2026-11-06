@@ -113,6 +113,9 @@ export type TimeFormat = '24h' | '12h'
 /** 滚轮逻辑：悬停卡片时滚动内容 / 始终缩放画布 */
 export type WheelMode = 'scroll-card' | 'zoom-canvas'
 
+/** 画布背景样式：无 / 点状 */
+export type CanvasStyle = 'none' | 'dots'
+
 /** 模型服务商：DeepSeek / OpenAI */
 export type ModelProvider = 'deepseek' | 'openai'
 
@@ -179,6 +182,12 @@ export interface SettingsDTO {
   webSearchEnabled: boolean
   /** 参考资料抽屉高度占卡片高度的比例（默认 0.25，范围 0.15–0.7） */
   sourcesPanelRatio: number
+  /** 画布拖动惯性开关（默认关闭） */
+  panInertiaEnabled: boolean
+  /** 画布拖动惯性系数（默认 0.5，范围 0.1–1.0） */
+  panInertiaCoefficient: number
+  /** 画布背景样式（默认 none） */
+  canvasStyle: CanvasStyle
 }
 
 /** 更新设置入参：只提交要改的字段；apiKey 留空表示保持原 Key */
@@ -219,4 +228,10 @@ export interface SettingsPatch {
   webSearchEnabled?: boolean
   /** 参考资料抽屉高度占卡片高度的比例（0.15–0.7） */
   sourcesPanelRatio?: number
+  /** 画布拖动惯性开关 */
+  panInertiaEnabled?: boolean
+  /** 画布拖动惯性系数（0.1–1.0） */
+  panInertiaCoefficient?: number
+  /** 画布背景样式 */
+  canvasStyle?: CanvasStyle
 }

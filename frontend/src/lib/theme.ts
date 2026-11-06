@@ -5,8 +5,9 @@ export type ResolvedTheme = 'light' | 'dark'
 
 /** 画布点阵颜色，取值与 theme.css 中的 --dot-color 保持一致 */
 export const DOT_COLORS: Record<ResolvedTheme, string> = {
-  dark: '#1a1c22',
-  light: '#d5d7dd',
+  // 点状画布需要清晰可见，使用比纯色背景略亮的灰
+  dark: '#2c313c',
+  light: '#c4c7cf',
 }
 
 /** 运行时外观需要的设置字段 */

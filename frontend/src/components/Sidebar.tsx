@@ -118,16 +118,21 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex items-center justify-between px-3 pb-2 pt-3">
+          <div className="px-3 pb-2 pt-3">
             <span className="text-[13px] text-muted">画布</span>
-            <IconButton title="新建画布" onClick={() => void createProject()}>
-              <Plus size={14} />
-            </IconButton>
+            <button
+              type="button"
+              onClick={() => void createProject()}
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-subtle bg-elevated px-2 py-1.5 text-[12px] text-body transition-colors duration-150 hover:border-strong hover:text-ink"
+            >
+              <Plus size={13} />
+              新建画布
+            </button>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
             {projects.length === 0 ? (
-              <p className="px-1 py-2 text-[12px] text-muted">还没有画布，点 + 新建</p>
+              <p className="px-1 py-2 text-[12px] text-muted">还没有画布，点上方「新建画布」</p>
             ) : (
               <div className="flex flex-col gap-1">
                 {projects.map((project) => {

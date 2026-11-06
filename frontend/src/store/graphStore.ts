@@ -72,6 +72,9 @@ export type Preferences = Pick<
   | 'provider'
   | 'webSearchEnabled'
   | 'sourcesPanelRatio'
+  | 'panInertiaEnabled'
+  | 'panInertiaCoefficient'
+  | 'canvasStyle'
 >
 
 /** 与后端默认值保持一致，读取设置失败时沿用 */
@@ -95,6 +98,9 @@ const DEFAULT_PREFERENCES: Preferences = {
   provider: 'deepseek',
   webSearchEnabled: false,
   sourcesPanelRatio: 0.25,
+  panInertiaEnabled: false,
+  panInertiaCoefficient: 0.5,
+  canvasStyle: 'none',
 }
 
 /** 从设置 DTO 中摘出偏好字段，保证 store 与后端返回值同形 */
@@ -119,6 +125,9 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     provider: settings.provider,
     webSearchEnabled: settings.webSearchEnabled,
     sourcesPanelRatio: settings.sourcesPanelRatio ?? 0.25,
+    panInertiaEnabled: settings.panInertiaEnabled ?? false,
+    panInertiaCoefficient: settings.panInertiaCoefficient ?? 0.5,
+    canvasStyle: settings.canvasStyle ?? 'none',
   }
 }
 
@@ -144,6 +153,9 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     provider: patch.provider ?? base.provider,
     webSearchEnabled: patch.webSearchEnabled ?? base.webSearchEnabled,
     sourcesPanelRatio: patch.sourcesPanelRatio ?? base.sourcesPanelRatio,
+    panInertiaEnabled: patch.panInertiaEnabled ?? base.panInertiaEnabled,
+    panInertiaCoefficient: patch.panInertiaCoefficient ?? base.panInertiaCoefficient,
+    canvasStyle: patch.canvasStyle ?? base.canvasStyle,
   }
 }
 
@@ -885,18 +897,62 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       controllers.set(nodeId, controller)
       previous?.abort()
 
+      // 流式文本按 ~30fps 批量写回：避免每个 token 都重新解析整段 Markdown，
+      // 把 React 渲染预算留给界面动画，保证动画稳定在 60fps。
+      let pendingAnswer = ''
+      let pendingReasoning = ''
+      let flushTimer: number | null = null
+
+      const flush = () => {
+        if (flushTimer !== null) {
+          window.clearTimeout(flushTimer)
+          flushTimer = null
+        }
+        if (pendingReasoning) {
+          const chunk = pendingReasoning
+          pendingReasoning = ''
+          patchNode(nodeId, (node) => ({ ...node, reasoning: node.reasoning + chunk }))
+        }
+        if (pendingAnswer) {
+          const chunk = pendingAnswer
+          pendingAnswer = ''
+          patchNode(nodeId, (node) => ({ ...node, answer: node.answer + chunk }))
+        }
+      }
+
+      const scheduleFlush = () => {
+        if (flushTimer !== null) return
+        flushTimer = window.setTimeout(flush, 32)
+      }
+
+      const dropPending = () => {
+        if (flushTimer !== null) {
+          window.clearTimeout(flushTimer)
+          flushTimer = null
+        }
+        pendingAnswer = ''
+        pendingReasoning = ''
+      }
+
       try {
         await streamAnswer(
           nodeId,
           {
             onSources: (sources) => patchNode(nodeId, (node) => ({ ...node, sources })),
-            onReasoning: (reasoning) =>
-              patchNode(nodeId, (node) => ({ ...node, reasoning: node.reasoning + reasoning })),
-            onDelta: (delta) =>
-              patchNode(nodeId, (node) => ({ ...node, answer: node.answer + delta })),
-            onSuggestions: (suggestions) =>
-              patchNode(nodeId, (node) => ({ ...node, suggestions })),
+            onReasoning: (reasoning) => {
+              pendingReasoning += reasoning
+              scheduleFlush()
+            },
+            onDelta: (delta) => {
+              pendingAnswer += delta
+              scheduleFlush()
+            },
+            onSuggestions: (suggestions) => {
+              flush()
+              patchNode(nodeId, (node) => ({ ...node, suggestions }))
+            },
             onDone: () => {
+              flush()
               patchNode(nodeId, (node) => ({ ...node, status: 'done' }))
               // 首轮回答完成且画布仍是默认名时，尝试让模型自动命名
               const state = get()
@@ -912,14 +968,17 @@ export const useGraphStore = create<GraphState>()((set, get) => {
                 void get().autoNameProject(projectId)
               }
             },
-            onError: (error) =>
-              patchNode(nodeId, (node) => ({ ...node, status: 'error', error })),
+            onError: (error) => {
+              flush()
+              patchNode(nodeId, (node) => ({ ...node, status: 'error', error }))
+            },
           },
           controller.signal,
         )
       } finally {
         // 新一轮请求已接管时不清理（避免覆盖新流的状态）
         if (controllers.get(nodeId) === controller) {
+          flush()
           controllers.delete(nodeId)
           removeStreamingId(nodeId)
           patchNode(nodeId, (node) =>
@@ -929,6 +988,9 @@ export const useGraphStore = create<GraphState>()((set, get) => {
                 : { ...node, status: 'error', error: '回答被中断，请重试' }
               : node,
           )
+        } else {
+          // 旧流被新流替换：丢弃旧缓冲区，避免写进新回答
+          dropPending()
         }
       }
     },

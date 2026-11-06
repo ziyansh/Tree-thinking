@@ -16,7 +16,7 @@ import { formatModifiedTime } from '../lib/time'
 import { useSpacePressed } from '../lib/spaceKey'
 
 /** 笔记卡片：双击空白画布创建，标题/正文独立编辑，拥有自己的宽高 */
-function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
+function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
   const { node } = data
   const updateNoteTitle = useGraphStore((state) => state.updateNoteTitle)
   const updateNoteContent = useGraphStore((state) => state.updateNoteContent)
@@ -34,6 +34,9 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
   const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
   const spacePressed = useSpacePressed()
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
+  /** 新建 1.2 秒内的笔记播放一次入场动画 */
+  const createdAtMs = node.createdAt ? Date.parse(node.createdAt) : Number.NaN
+  const entering = !dragging && Number.isFinite(createdAtMs) && Date.now() - createdAtMs < 1200
 
   const [title, setTitle] = useState(node.question)
   const [content, setContent] = useState(node.answer)
@@ -225,16 +228,25 @@ function NoteNodeInner({ data }: NodeProps<NoteFlowNode>) {
 
   const boxShadow = isSelected
     ? '0 0 0 1px var(--accent), 0 0 24px var(--accent-dim)'
-    : '0 2px 10px color-mix(in srgb, var(--bg-canvas) 75%, transparent)'
+    : dragging
+      ? '0 12px 28px rgba(0, 0, 0, 0.28)'
+      : '0 2px 10px color-mix(in srgb, var(--bg-canvas) 75%, transparent)'
 
   return (
     <div
       className={[
         'group card-drag-handle relative flex flex-col rounded-xl border bg-card p-3 transition-[border-color,box-shadow] duration-150 ease-out',
+        entering ? 'card-enter' : '',
         node.pinned ? 'cursor-default' : 'cursor-grab active:cursor-grabbing',
         isSelected ? 'border-accent' : 'border-subtle hover:border-accent',
       ].join(' ')}
-      style={{ width, height, boxShadow }}
+      style={{
+        width,
+        height,
+        boxShadow,
+        // 拖动中关闭阴影过渡，避免逐帧重绘
+        transition: dragging ? 'none' : undefined,
+      }}
     >
       {/* 修改时间放在卡片外部右下角：绝对定位不撑开节点尺寸，也不拦截画布操作 */}
       {modifiedTime && (

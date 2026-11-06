@@ -107,7 +107,7 @@ export function AttachmentChips({ items, onRemove, compact, onOpen }: Attachment
           key={attachment.id}
           title={attachment.name}
           className={[
-            'flex min-w-0 items-center gap-1.5 rounded-lg border border-subtle bg-elevated px-1.5 py-1',
+            'chip-in flex min-w-0 items-center gap-1.5 rounded-lg border border-subtle bg-elevated px-1.5 py-1',
             onOpen ? 'cursor-pointer hover:border-accent' : '',
           ].join(' ')}
           onClick={() => onOpen?.(attachment)}

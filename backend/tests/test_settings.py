@@ -40,6 +40,30 @@ def test_settings_defaults(client):
     assert data["openaiTimeoutSeconds"] == 60
     # 来源抽屉高度比例默认 0.25
     assert data["sourcesPanelRatio"] == 0.25
+    # 画布惯性默认关闭，系数 0.5；背景默认无
+    assert data["panInertiaEnabled"] is False
+    assert data["panInertiaCoefficient"] == 0.5
+    assert data["canvasStyle"] == "none"
+
+
+def test_settings_canvas_motion_clamp(client):
+    """惯性系数超出 0.1–1.0 时夹到边界，画布样式可切换并持久化。"""
+    too_big = client.put(
+        "/api/settings",
+        json={"panInertiaEnabled": True, "panInertiaCoefficient": 1.8},
+    )
+    assert too_big.status_code == 200
+    assert too_big.json()["panInertiaEnabled"] is True
+    assert too_big.json()["panInertiaCoefficient"] == 1.0
+
+    too_small = client.put("/api/settings", json={"panInertiaCoefficient": 0.05})
+    assert too_small.status_code == 200
+    assert too_small.json()["panInertiaCoefficient"] == 0.1
+
+    style = client.put("/api/settings", json={"canvasStyle": "dots"})
+    assert style.status_code == 200
+    assert style.json()["canvasStyle"] == "dots"
+    assert client.get("/api/settings").json()["canvasStyle"] == "dots"
 
 
 def test_settings_sources_panel_ratio_clamp(client):

@@ -145,4 +145,9 @@ class AppSetting(Base):
     web_search_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # 来源抽屉高度占卡片高度的比例；为空表示 0.25
     sources_panel_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 画布拖动惯性：是否启用与系数（0.1–1.0）；为空表示关闭、系数 0.5
+    pan_inertia_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    pan_inertia_coefficient: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 画布背景样式：none（无）/ dots（点状）；为空表示 none
+    canvas_style: Mapped[str | None] = mapped_column(String(16), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)

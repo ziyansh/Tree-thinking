@@ -316,6 +316,11 @@ class SettingsPatch(CamelModel):
     web_search_enabled: bool | None = None
     # 来源抽屉高度比例（服务层夹到 0.15–0.7）
     sources_panel_ratio: float | None = None
+    # 画布拖动惯性：开关与系数（服务层夹到 0.1–1.0）
+    pan_inertia_enabled: bool | None = None
+    pan_inertia_coefficient: float | None = None
+    # 画布背景样式：none / dots
+    canvas_style: Literal["none", "dots"] | None = None
 
     @field_validator("edge_color")
     @classmethod

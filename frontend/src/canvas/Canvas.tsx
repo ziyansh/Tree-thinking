@@ -43,6 +43,30 @@ const edgeTypes = {
 /** ghost 卡片尺寸，与 GhostNode / GhostInputNode 的 280×44 保持一致 */
 const GHOST_SIZE = { width: 280, height: 44 }
 
+/** 点状画布的网格步长（px），Shift 平移吸附与背景点阵一致 */
+const CANVAS_DOT_GAP = 24
+
+/**
+ * 以 60Hz 上限调度一次回调：高刷新率屏幕会跳过多余的帧，
+ * 避免同一份状态在一帧内被重复写回。
+ */
+function scheduleAt60(
+  callback: () => void,
+  frameRef: { current: number | null },
+  lastAtRef: { current: number },
+): void {
+  frameRef.current = window.requestAnimationFrame(() => {
+    const now = performance.now()
+    if (now - lastAtRef.current < 16) {
+      scheduleAt60(callback, frameRef, lastAtRef)
+      return
+    }
+    lastAtRef.current = now
+    frameRef.current = null
+    callback()
+  })
+}
+
 /** 画布点阵颜色：按解析后的主题取值，跟随系统时监听系统深浅色切换 */
 function useDotColor(): string {
   const themeMode = useGraphStore((state) => state.preferences.themeMode)
@@ -67,6 +91,12 @@ interface PanePointerState {
   startY: number
   currentX: number
   currentY: number
+  /** 最近一次移动的时间与坐标，用于松手时换算惯性速度 */
+  lastX: number
+  lastY: number
+  lastTime: number
+  velocityX: number
+  velocityY: number
   monitoring: boolean
   panning: boolean
   timer: number | null
@@ -187,6 +217,8 @@ function CanvasInner() {
   const spacePressed = useSpacePressed()
   /** 是否正在自定义平移：用于切换抓取光标 */
   const [isPanning, setIsPanning] = useState(false)
+  /** 自动整理插值中：给节点加合成层提示，减少逐帧重绘 */
+  const [layoutAnimating, setLayoutAnimating] = useState(false)
   /** 空白处指针状态：按下坐标、延迟计时与是否已进入平移 */
   const pointerRef = useRef<PanePointerState | null>(null)
   /** 平移开始时的视口，位移按屏幕像素累加 */
@@ -202,6 +234,11 @@ function CanvasInner() {
     rootId: string
     positions: Map<string, { x: number; y: number }>
   } | null>(null)
+  /** 拖动坐标更新按帧合并：高刷新率指针事件只触发一次重渲染 */
+  const dragFrameRef = useRef<number | null>(null)
+  const dragPendingRef = useRef<{ x: number; y: number } | null>(null)
+  /** 上一次拖动写回的时间：把更新频率限制在 60Hz */
+  const dragFrameAtRef = useRef(0)
   /** 拖拽结束时间：抑制拖拽后的 click 把多选收缩成单选 */
   const lastDragEndRef = useRef(0)
   /** 空格手动平移：记录起始指针与按下时的视口 */
@@ -210,9 +247,90 @@ function CanvasInner() {
     startX: number
     startY: number
     viewport: { x: number; y: number; zoom: number }
+    lastX: number
+    lastY: number
+    lastTime: number
+    velocityX: number
+    velocityY: number
   } | null>(null)
+  /** 平移惯性动画帧 */
+  const inertiaRef = useRef<number | null>(null)
+  /** 自动整理位置动画帧与取消标记 */
+  const layoutAnimationRef = useRef<number | null>(null)
+  const layoutCanceledRef = useRef(false)
 
   // 空格按住时左键可平移（由 capture 逻辑接管）；平时只有中键平移，左键空白用于拖动/点击判定
+
+  /** 系统减弱动态时禁用惯性滑行与自动整理插值 */
+  const prefersReducedMotion = useCallback(
+    () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    [],
+  )
+
+  /** 停止当前平移惯性动画 */
+  const stopInertia = useCallback(() => {
+    if (inertiaRef.current !== null) {
+      window.cancelAnimationFrame(inertiaRef.current)
+      inertiaRef.current = null
+    }
+  }, [])
+
+  /** 松手后按指针速度继续滑行，速度指数衰减，再次按下立即停止 */
+  const startInertia = useCallback(
+    (velocityX: number, velocityY: number) => {
+      if (!preferences.panInertiaEnabled || prefersReducedMotion()) return
+      // 惯性系数缩放松手速度：越大滑行越远
+      let vx = velocityX * preferences.panInertiaCoefficient
+      let vy = velocityY * preferences.panInertiaCoefficient
+      if (Math.hypot(vx, vy) < 0.12) return
+      const viewport = getViewport()
+      let x = viewport.x
+      let y = viewport.y
+      let last = performance.now()
+      let lastFrameAt = 0
+      const step = (now: number) => {
+        // 高刷新率屏幕上把惯性计算限制在 60Hz，避免多余的状态写回
+        if (now - lastFrameAt < 16) {
+          inertiaRef.current = window.requestAnimationFrame(step)
+          return
+        }
+        lastFrameAt = now
+        const dt = Math.min(now - last, 32)
+        last = now
+        x += vx * dt
+        y += vy * dt
+        // 每 16ms 衰减到 94%，约 300ms 内停下
+        const decay = Math.pow(0.94, dt / 16)
+        vx *= decay
+        vy *= decay
+        void setViewport({ x, y, zoom: viewport.zoom }, { duration: 0 })
+        if (Math.hypot(vx, vy) > 0.05) {
+          inertiaRef.current = window.requestAnimationFrame(step)
+        } else {
+          inertiaRef.current = null
+        }
+      }
+      inertiaRef.current = window.requestAnimationFrame(step)
+    },
+    [
+      getViewport,
+      prefersReducedMotion,
+      preferences.panInertiaCoefficient,
+      preferences.panInertiaEnabled,
+      setViewport,
+    ],
+  )
+
+  /** 点状画布 + Shift：把视口位移吸附到点阵步长，保证点阵落在整数网格 */
+  const snapPan = useCallback(
+    (x: number, y: number, zoom: number, shift: boolean) => {
+      if (!shift || preferences.canvasStyle !== 'dots') return { x, y }
+      const step = CANVAS_DOT_GAP * zoom
+      if (step <= 0) return { x, y }
+      return { x: Math.round(x / step) * step, y: Math.round(y / step) * step }
+    },
+    [preferences.canvasStyle],
+  )
 
   // 空白处拖动：按下后经过漂移延迟开始检测，位移超过漂移距离才进入平移
   const startPan = useCallback(
@@ -237,6 +355,8 @@ function CanvasInner() {
 
   const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      // 新的按压立即终止上一次平移惯性
+      stopInertia()
       suppressPaneClickRef.current = false
       if (event.button !== 0 || spacePressed) return
       // 只在真正的画布空白处启动指针判定；点到卡片/输入框时清除未完成的双击记录
@@ -251,6 +371,11 @@ function CanvasInner() {
         startY: event.clientY,
         currentX: event.clientX,
         currentY: event.clientY,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        lastTime: performance.now(),
+        velocityX: 0,
+        velocityY: 0,
         // 延迟为 0 时按下即开始检测
         monitoring: preferences.dragDriftDelayMs <= 0,
         panning: false,
@@ -271,7 +396,7 @@ function CanvasInner() {
 
       pointerRef.current = state
     },
-    [preferences.dragDriftDelayMs, preferences.dragDriftDistance, spacePressed, startPan],
+    [preferences.dragDriftDelayMs, preferences.dragDriftDistance, spacePressed, startPan, stopInertia],
   )
 
   const handlePointerMove = useCallback(
@@ -295,17 +420,26 @@ function CanvasInner() {
 
       const start = panStartViewportRef.current
       if (!start) return
-      // viewport 的 x/y 为屏幕像素位移，直接叠加指针位移即可
-      void setViewport(
-        {
-          x: start.x + (event.clientX - state.startX),
-          y: start.y + (event.clientY - state.startY),
-          zoom: start.zoom,
-        },
-        { duration: 0 },
+      // 记录最近的指针速度，松手后用于惯性滑行
+      const now = performance.now()
+      const dt = now - state.lastTime
+      if (dt > 0) {
+        state.velocityX = state.velocityX * 0.6 + ((event.clientX - state.lastX) / dt) * 0.4
+        state.velocityY = state.velocityY * 0.6 + ((event.clientY - state.lastY) / dt) * 0.4
+      }
+      state.lastX = event.clientX
+      state.lastY = event.clientY
+      state.lastTime = now
+      // viewport 的 x/y 为屏幕像素位移，直接叠加指针位移即可；点状画布下 Shift 吸附网格
+      const target = snapPan(
+        start.x + (event.clientX - state.startX),
+        start.y + (event.clientY - state.startY),
+        start.zoom,
+        event.shiftKey,
       )
+      void setViewport({ x: target.x, y: target.y, zoom: start.zoom }, { duration: 0 })
     },
-    [preferences.dragDriftDistance, setViewport, startPan],
+    [preferences.dragDriftDistance, setViewport, snapPan, startPan],
   )
 
   const handlePointerEnd = useCallback(
@@ -321,6 +455,7 @@ function CanvasInner() {
         }
         setIsPanning(false)
         suppressPaneClickRef.current = true
+        startInertia(state.velocityX, state.velocityY)
       } else {
         const moved = Math.hypot(
           event.clientX - state.startX,
@@ -352,6 +487,7 @@ function CanvasInner() {
       preferences.doubleClickMs,
       preferences.dragDriftDistance,
       screenToFlowPosition,
+      startInertia,
     ],
   )
 
@@ -361,6 +497,8 @@ function CanvasInner() {
       if (!spacePressed) return
       // 只响应左键与中键
       if (event.button !== 0 && event.button !== 1) return
+      // 空格平移接管前，先停掉上一次惯性
+      stopInertia()
       event.preventDefault()
       event.stopPropagation()
 
@@ -378,6 +516,11 @@ function CanvasInner() {
         startX: event.clientX,
         startY: event.clientY,
         viewport: getViewport(),
+        lastX: event.clientX,
+        lastY: event.clientY,
+        lastTime: performance.now(),
+        velocityX: 0,
+        velocityY: 0,
       }
       // 清空点击记录并抑制随后的空白点击，避免误清空选择
       lastClickRef.current = null
@@ -385,7 +528,7 @@ function CanvasInner() {
       suppressPaneClickRef.current = true
       setIsPanning(true)
     },
-    [getViewport, spacePressed],
+    [getViewport, spacePressed, stopInertia],
   )
 
   const handleSpacePanMove = useCallback(
@@ -393,29 +536,46 @@ function CanvasInner() {
       const state = spacePanRef.current
       if (!state || event.pointerId !== state.pointerId) return
       event.stopPropagation()
+      // 记录最近的指针速度，松手后用于惯性滑行
+      const now = performance.now()
+      const dt = now - state.lastTime
+      if (dt > 0) {
+        state.velocityX = state.velocityX * 0.6 + ((event.clientX - state.lastX) / dt) * 0.4
+        state.velocityY = state.velocityY * 0.6 + ((event.clientY - state.lastY) / dt) * 0.4
+      }
+      state.lastX = event.clientX
+      state.lastY = event.clientY
+      state.lastTime = now
+      // 点状画布下 Shift 吸附到点阵步长
+      const target = snapPan(
+        state.viewport.x + (event.clientX - state.startX),
+        state.viewport.y + (event.clientY - state.startY),
+        state.viewport.zoom,
+        event.shiftKey,
+      )
       void setViewport(
-        {
-          x: state.viewport.x + (event.clientX - state.startX),
-          y: state.viewport.y + (event.clientY - state.startY),
-          zoom: state.viewport.zoom,
-        },
+        { x: target.x, y: target.y, zoom: state.viewport.zoom },
         { duration: 0 },
       )
     },
-    [setViewport],
+    [setViewport, snapPan],
   )
 
-  const handleSpacePanEnd = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    const state = spacePanRef.current
-    if (!state || event.pointerId !== state.pointerId) return
-    event.stopPropagation()
-    spacePanRef.current = null
-    const element = containerRef.current
-    if (element?.hasPointerCapture(state.pointerId)) {
-      element.releasePointerCapture(state.pointerId)
-    }
-    setIsPanning(false)
-  }, [])
+  const handleSpacePanEnd = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const state = spacePanRef.current
+      if (!state || event.pointerId !== state.pointerId) return
+      event.stopPropagation()
+      spacePanRef.current = null
+      const element = containerRef.current
+      if (element?.hasPointerCapture(state.pointerId)) {
+        element.releasePointerCapture(state.pointerId)
+      }
+      setIsPanning(false)
+      startInertia(state.velocityX, state.velocityY)
+    },
+    [startInertia],
+  )
 
   // 由 parentId 派生 ghost 箭头（建议 + 自定义输入），坐标依赖当前卡片尺寸
   const ghosts = useMemo(
@@ -576,6 +736,9 @@ function CanvasInner() {
   const handleNodeDragStart = useCallback((_event: MouseEvent | TouchEvent, node: Node) => {
     // ghost 与分支输入条不可拖动；聊天卡片与笔记都参与拖动同步
     if (node.type !== 'card' && node.type !== 'note') return
+    // 用户接管：停止自动整理插值与平移惯性
+    layoutCanceledRef.current = true
+    stopInertia()
     const state = useGraphStore.getState()
     const dragged = state.nodes.find((item) => item.id === node.id)?.data.node
     if (!dragged || dragged.pinned) return
@@ -605,6 +768,24 @@ function CanvasInner() {
       if (card) positions.set(id, { x: card.position.x, y: card.position.y })
     }
     dragOriginRef.current = { rootId: node.id, positions }
+    dragPendingRef.current = null
+    dragFrameAtRef.current = 0
+  }, [stopInertia])
+
+  /** 把待处理的拖动偏移写回 store；调用频率由 scheduleAt60 控制 */
+  const applyDragOffset = useCallback(() => {
+    dragFrameRef.current = null
+    const origin = dragOriginRef.current
+    const offset = dragPendingRef.current
+    if (!origin || !offset) return
+    useGraphStore.setState((state) => ({
+      nodes: state.nodes.map((item) => {
+        const start = origin.positions.get(item.id)
+        if (!start) return item
+        // 整组施加同一偏移，保持子树内部相对位置不变
+        return { ...item, position: { x: start.x + offset.x, y: start.y + offset.y } }
+      }),
+    }))
   }, [])
 
   // 拖动过程中按位移同步更新集合内全部坐标，只改本地状态，避免逐帧发请求
@@ -646,22 +827,25 @@ function CanvasInner() {
       }
     }
 
-    useGraphStore.setState((state) => ({
-      nodes: state.nodes.map((item) => {
-        const start = origin.positions.get(item.id)
-        if (!start) return item
-        // 整组施加同一偏移，保持子树内部相对位置不变
-        return { ...item, position: { x: start.x + offsetX, y: start.y + offsetY } }
-      }),
-    }))
-  }, [])
+    dragPendingRef.current = { x: offsetX, y: offsetY }
+    if (dragFrameRef.current === null) {
+      scheduleAt60(() => applyDragOffset(), dragFrameRef, dragFrameAtRef)
+    }
+  }, [applyDragOffset])
 
   // 松手后批量保存本次移动的所有节点坐标
   const handleNodeDragStop = useCallback(
     (_event: MouseEvent | TouchEvent, _node: Node) => {
       const origin = dragOriginRef.current
-      dragOriginRef.current = null
       if (!origin) return
+      // 把最后一帧尚未写回的坐标补齐，再保存
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current)
+        dragFrameRef.current = null
+      }
+      applyDragOffset()
+      dragPendingRef.current = null
+      dragOriginRef.current = null
       // 记录结束时间，避免拖拽后触发的 click 把多选恢复成单选
       lastDragEndRef.current = performance.now()
 
@@ -673,11 +857,13 @@ function CanvasInner() {
         }),
       )
     },
-    [savePosition],
+    [applyDragOffset, savePosition],
   )
 
   // 自动重排：只在聊天卡片参与布局（ghost 跟随父卡片占位），笔记保持原位
   const handleAutoLayout = useCallback(async () => {
+    // 动画进行中忽略重复点击，避免两段插值互相覆盖
+    if (layoutAnimationRef.current !== null) return
     const state = useGraphStore.getState()
     const positions = computeAutoLayout(
       state.nodes,
@@ -689,11 +875,75 @@ function CanvasInner() {
     // 整理会改变全部坐标，先压入撤销快照
     state.pushUndo('自动整理')
 
-    // 逐节点写回坐标（并发）；savePosition 内部失败只告警，不影响其它节点
-    await Promise.all(
-      [...positions].map(([id, position]) => state.savePosition(id, position.x, position.y)),
-    )
-  }, [])
+    // 减弱动态时直接落位，不播放位移动画
+    if (prefersReducedMotion()) {
+      await Promise.all(
+        [...positions].map(([id, position]) => state.savePosition(id, position.x, position.y)),
+      )
+      return
+    }
+
+    // 记录起点：逐帧写回插值坐标，连线会跟随节点位置同步更新
+    const starts = new Map<string, { x: number; y: number }>()
+    for (const id of positions.keys()) {
+      const card = state.nodes.find((item) => item.id === id)
+      if (card) starts.set(id, { ...card.position })
+    }
+    layoutCanceledRef.current = false
+    setLayoutAnimating(true)
+
+    try {
+      await new Promise<void>((resolve) => {
+        const startedAt = performance.now()
+        let lastFrameAt = 0
+        const duration = 280
+        const tick = (now: number) => {
+          if (layoutCanceledRef.current) {
+            layoutAnimationRef.current = null
+            resolve()
+            return
+          }
+          // 高刷新率屏幕上把插值计算限制在 60Hz
+          if (now - lastFrameAt < 16) {
+            layoutAnimationRef.current = window.requestAnimationFrame(tick)
+            return
+          }
+          lastFrameAt = now
+          const progress = Math.min(1, (now - startedAt) / duration)
+          const eased = 1 - Math.pow(1 - progress, 3)
+          useGraphStore.setState((current) => ({
+            nodes: current.nodes.map((item) => {
+              const target = positions.get(item.id)
+              const start = starts.get(item.id)
+              if (!target || !start) return item
+              return {
+                ...item,
+                position: {
+                  x: start.x + (target.x - start.x) * eased,
+                  y: start.y + (target.y - start.y) * eased,
+                },
+              }
+            }),
+          }))
+          if (progress < 1) {
+            layoutAnimationRef.current = window.requestAnimationFrame(tick)
+          } else {
+            layoutAnimationRef.current = null
+            resolve()
+          }
+        }
+        layoutAnimationRef.current = window.requestAnimationFrame(tick)
+      })
+
+      // 被用户拖拽打断时保留当前位置，不覆盖用户操作
+      if (layoutCanceledRef.current) return
+      await Promise.all(
+        [...positions].map(([id, position]) => state.savePosition(id, position.x, position.y)),
+      )
+    } finally {
+      setLayoutAnimating(false)
+    }
+  }, [prefersReducedMotion])
 
   // 联网搜索仅 DeepSeek 服务商支持；失败时 store 会回滚，这里只告警
   const webSearchDisabled = preferences.provider !== 'deepseek'
@@ -740,6 +990,9 @@ function CanvasInner() {
   useEffect(() => {
     return () => {
       if (viewportTimerRef.current !== null) window.clearTimeout(viewportTimerRef.current)
+      if (inertiaRef.current !== null) window.cancelAnimationFrame(inertiaRef.current)
+      if (layoutAnimationRef.current !== null) window.cancelAnimationFrame(layoutAnimationRef.current)
+      if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current)
     }
   }, [])
 
@@ -751,6 +1004,7 @@ function CanvasInner() {
         // 空格按住期间全局禁止选中文字
         spacePressed ? 'space-panning' : '',
         isPanning ? 'cursor-grabbing' : spacePressed ? 'cursor-grab' : '',
+        layoutAnimating ? 'layout-animating' : '',
       ].join(' ')}
       // 空格按下时在 capture 阶段接管指针，卡片/输入框上的拖动也一律平移画布
       onPointerDownCapture={handleSpacePanDown}
@@ -761,6 +1015,8 @@ function CanvasInner() {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
       onPointerCancel={handlePointerEnd}
+      // 滚轮缩放前立即停止平移惯性，避免缩放和滑行同时进行
+      onWheelCapture={stopInertia}
     >
       <ReactFlow
         nodes={allNodes}
@@ -808,7 +1064,10 @@ function CanvasInner() {
         onNodeDragStop={handleNodeDragStop}
         onMoveEnd={handleMoveEnd}
       >
-        <Background gap={24} color={dotColor} />
+        {/* 画布样式：无 = 纯色背景；点状 = 规律点阵 */}
+        {preferences.canvasStyle === 'dots' && (
+          <Background gap={CANVAS_DOT_GAP} color={dotColor} size={1.5} />
+        )}
         <Panel position="top-left">
           <div className="flex items-center gap-2">
             <button
@@ -840,7 +1099,7 @@ function CanvasInner() {
         </Panel>
         {selectedNodeIds.length > 1 && (
           <Panel position="top-center">
-            <div className="flex items-center gap-2 rounded-lg border border-subtle bg-panel px-3 py-1.5">
+            <div className="panel-pop flex items-center gap-2 rounded-lg border border-subtle bg-panel px-3 py-1.5">
               <span className="text-[12px] text-muted">已选 {selectedNodeIds.length} 张</span>
               <button
                 type="button"

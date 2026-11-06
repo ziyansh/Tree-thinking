@@ -35,7 +35,7 @@
 
   /* 连线、画布点阵与 ghost 建议箭头 */
   --edge: #3a3f4a;
-  --dot-color: #1a1c22;
+  --dot-color: #2c313c;
   --ghost-bg: rgba(255, 255, 255, 0.03);
   --ghost-border: rgba(255, 255, 255, 0.07);
 
@@ -73,7 +73,7 @@
 
   /* 连线、画布点阵与 ghost 建议箭头 */
   --edge: #a7abb6;
-  --dot-color: #d5d7dd;
+  --dot-color: #c4c7cf;
   --ghost-bg: rgba(0, 0, 0, 0.03);
   --ghost-border: rgba(0, 0, 0, 0.08);
 
@@ -229,4 +229,313 @@ body {
 .hue-slider:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+
+/* ---------- 动效系统（v0.2.0） ---------- */
+/* 统一时长与曲线：高频反馈短促、层级变化舒展，全部可从当前值中断 */
+:root {
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 280ms;
+  --motion-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* 按钮按压：统一表达“收到操作”，不做回弹过冲 */
+button:not(:disabled) {
+  transition-property: color, background-color, border-color, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: var(--motion-ease-out);
+}
+
+button:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+/* 设置弹窗：遮罩淡入，面板从中心轻微抬升；关闭从当前值反向 */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.dialog-overlay {
+  animation: overlay-in var(--motion-base) var(--motion-ease-out);
+}
+
+.dialog-panel {
+  animation: panel-in var(--motion-slow) var(--motion-ease-out);
+}
+
+.dialog-overlay[data-closing='true'] {
+  animation: overlay-out 180ms var(--motion-ease-in) both;
+}
+
+.dialog-overlay[data-closing='true'] .dialog-panel {
+  animation: panel-out 180ms var(--motion-ease-in) both;
+}
+
+/* toast：从下方 8px 上浮出现，离开时向上淡出 */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+}
+
+.toast-in {
+  animation: toast-in 220ms var(--motion-ease-out) both;
+}
+
+.toast-out {
+  animation: toast-out 160ms var(--motion-ease-in) both;
+}
+
+/* 设置选项卡切换：内容轻微淡入，不做横向位移 */
+@keyframes tab-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.tab-panel-in {
+  animation: tab-in 160ms var(--motion-ease-out);
+}
+
+/* 新建卡片入场：仅做 6px 位移 + 淡入，避免大卡片缩放掉帧 */
+@keyframes card-in {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.card-enter {
+  animation: card-in 220ms var(--motion-ease-out);
+}
+
+/* 参考资料抽屉：自卡片底部升起 */
+@keyframes drawer-in {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.drawer-in {
+  animation: drawer-in 220ms var(--motion-ease-out);
+}
+
+/* 错误条与附件 chip 出现 */
+@keyframes error-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.error-in {
+  animation: error-in 200ms var(--motion-ease-out);
+}
+
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+.chip-in {
+  animation: chip-in 160ms var(--motion-ease-out);
+}
+
+/* 流式光标：低幅呼吸，避免强烈闪烁 */
+@keyframes caret-breathe {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.streaming-caret {
+  animation: caret-breathe 1.2s ease-in-out infinite;
+}
+
+/* 多选工具条 */
+@keyframes panel-pop {
+  from {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.panel-pop {
+  animation: panel-pop 180ms var(--motion-ease-out);
+}
+
+/* 拖动 / 自动整理期间把节点提升为合成层，避免逐帧重绘卡片内容 */
+.react-flow__node.dragging,
+.layout-animating .react-flow__node {
+  will-change: transform;
+}
+
+/* 正文引用角标：点击打开对应搜索资料 */
+.citation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  vertical-align: super;
+  transition:
+    background-color 150ms var(--motion-ease-out),
+    color 150ms var(--motion-ease-out);
+}
+
+.citation-badge:hover {
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+/* 减弱动态：禁用位移、缩放与惯性，仅保留 120ms 淡入淡出 */
+@keyframes reduced-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes reduced-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active {
+    transform: none;
+  }
+
+  .card-enter,
+  .drawer-in,
+  .error-in,
+  .chip-in,
+  .panel-pop,
+  .tab-panel-in {
+    animation: reduced-fade-in 120ms linear both;
+  }
+
+  .dialog-overlay,
+  .dialog-panel {
+    animation: reduced-fade-in 120ms linear both;
+  }
+
+  .dialog-overlay[data-closing='true'],
+  .dialog-overlay[data-closing='true'] .dialog-panel {
+    animation: reduced-fade-out 120ms linear both;
+  }
+
+  .toast-in {
+    animation: reduced-fade-in 120ms linear both;
+  }
+
+  .toast-out {
+    animation: reduced-fade-out 120ms linear both;
+  }
+
+  .streaming-caret {
+    animation: none;
+    opacity: 1;
+  }
 }

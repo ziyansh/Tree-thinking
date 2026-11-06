@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Canvas } from './canvas/Canvas'
 import { Sidebar } from './components/Sidebar'
 import { SettingsDialog } from './components/SettingsDialog'
+import { Toast } from './components/Toast'
 import { useGraphStore } from './store/graphStore'
 
 // StrictMode 下 effect 会执行两次，用模块级标记避免重复建画布
@@ -100,11 +101,7 @@ function App() {
         <Canvas />
       </div>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      {toast && (
-        <div className="pointer-events-none fixed bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-full border border-subtle bg-panel px-4 py-1.5 text-[12px] text-ink shadow-lg">
-          {toast}
-        </div>
-      )}
+      <Toast message={toast} />
     </div>
   )
 }

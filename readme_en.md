@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.2.0** | [中文说明](readme.md)
+> Current version: **0.2.1** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -32,20 +32,34 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 
 - Python 3.10+
 - Node.js 18+ (developed and verified on Node 25)
-- Windows 10/11 (the one-click script is a Windows batch file)
+- Windows 10/11 or macOS 12+ (Intel / Apple Silicon)
+- Linux can also use `start.sh`; the project is developed on Windows, and macOS/Linux have not been tested on real hardware yet
 
 ### One-click start (recommended)
 
-Double-click `start.bat` in the repository root. It will:
+**Windows**: double-click `start.bat` in the repository root.
+
+**macOS**: run this in the repository root:
+
+```bash
+bash start.sh
+# or run chmod +x start.sh once, then ./start.sh
+```
+
+Both launchers:
 
 1. Create `backend/.venv` and install backend dependencies if missing;
 2. Run `npm install` if `frontend/node_modules` is missing;
 3. Copy `.env.example` to `backend/.env` if the file does not exist;
-4. Launch backend and frontend in two new windows and open the browser after ~8 seconds.
+4. Start backend and frontend, wait until ready, and open the browser. The macOS launcher writes logs to `.runtime/`, and `Ctrl+C` stops both services.
 
-> API configuration is no longer part of the startup script. On first use, click the gear at the bottom-left of the page and fill in your API key — saving applies immediately.
+> API configuration is not part of the startup script. On first use, click the gear at the bottom-left of the page and fill in your API key — saving applies immediately.
+
+> When moving between Windows and macOS, delete `backend/.venv` and `frontend/node_modules` first, then run the launcher again so dependencies are reinstalled for the current platform.
 
 ### Manual start
+
+**Windows (PowerShell)**
 
 ```powershell
 # Terminal 1: backend
@@ -60,7 +74,24 @@ npm install
 npm run dev
 ```
 
+**macOS / Linux (zsh / bash)**
+
+```bash
+# Terminal 1: backend
+cd backend
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --port 8000 --reload
+
+# Terminal 2: frontend
+cd frontend
+npm install
+npm run dev
+```
+
 Open `http://localhost:5173`. Vite proxies `/api` to `http://127.0.0.1:8000`.
+
+Paths: the database and upload directories default to repo-relative `backend/data/...` on both Windows and macOS; `DB_PATH` / `UPLOAD_DIR` also accept `~` (e.g. `~/tree-thinking/app.db`), so no platform-specific separators are needed.
 
 ## Configuration
 
@@ -120,7 +151,7 @@ This rule applies to every new shortcut and overlay. It is implemented by the sh
 
 ```
 Tree_thinking/
-├─ start.bat                  # Windows one-click launcher
+├─ start.bat / start.sh       # Windows / macOS one-click launchers
 ├─ readme.md / readme_en.md   # Chinese / English docs
 ├─ docs/development.md        # development conventions (keyboard priority)
 ├─ backend/
@@ -163,6 +194,11 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.2.1 — 2026-11-08
+- Added a macOS / Linux one-command launcher `start.sh`: it creates `backend/.venv`, installs backend and frontend dependencies, copies `.env`, checks ports 8000/5173, waits until the services are ready, and opens the browser; `Ctrl+C` stops both services and logs go to `.runtime/`.
+- The bilingual README now documents macOS requirements, the one-command flow, and `.venv/bin/python` manual commands; database and upload paths remain repo-relative and `pathlib`-based on both Windows and macOS.
+- Bumped the version to 0.2.1.
 
 ### 0.2.0 — 2026-11-06
 - Motion: introduced a unified duration and easing scale (120–150ms for high-frequency feedback, 200ms for local changes, 280ms for hierarchy changes) plus press-scale feedback on every button; all animations can be interrupted by the next action.

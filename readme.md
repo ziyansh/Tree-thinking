@@ -1,6 +1,6 @@
 # 树状对话画布（Tree Thinking）
 
-> 当前版本：**0.2.0** ｜ [English README](readme_en.md)
+> 当前版本：**0.2.1** ｜ [English README](readme_en.md)
 
 把线性聊天变成一棵可以无限延伸的思维树：每一次问答都是画布上的一张卡片，卡片右侧长出候选追问箭头，点选任意箭头就沿着该方向生成新卡片。所有分支独立保存上下文，随时可以回头比较不同思路。
 
@@ -32,20 +32,34 @@
 
 - Python 3.10+
 - Node.js 18+（本项目在 Node 25 下开发验证）
-- Windows 10/11（一键脚本为 Windows 批处理）
+- Windows 10/11 或 macOS 12+（Intel / Apple Silicon）
+- Linux 也可使用 `start.sh`；当前开发环境为 Windows，macOS / Linux 尚未实机验证
 
 ### 一键启动（推荐）
 
-双击仓库根目录的 `start.bat`。脚本会：
+**Windows**：双击仓库根目录的 `start.bat`。
+
+**macOS**：在仓库根目录执行：
+
+```bash
+bash start.sh
+# 也可以先 chmod +x start.sh，之后用 ./start.sh
+```
+
+两个脚本都会：
 
 1. 缺少 `backend/.venv` 时自动创建并安装后端依赖；
 2. 缺少 `frontend/node_modules` 时自动 `npm install`；
 3. 缺少 `backend/.env` 时从 `.env.example` 复制默认配置；
-4. 各开一个窗口启动后端与前端，等待约 8 秒后打开浏览器。
+4. 启动后端与前端，等待就绪后打开浏览器。macOS 版日志写入 `.runtime/`，按 `Ctrl+C` 会同时停止两个服务。
 
-> API 配置不再在启动脚本里进行：首次打开页面后，点击左下角「设置」填写 API Key，保存即生效。
+> API 配置不在启动脚本里进行：首次打开页面后，点击左下角「设置」填写 API Key，保存即生效。
+
+> 从 Windows 迁移到 macOS（或反向）时，请先删除 `backend/.venv` 与 `frontend/node_modules`，再运行脚本，让依赖按当前平台重新安装。
 
 ### 手动启动
+
+**Windows（PowerShell）**
 
 ```powershell
 # 终端 1：后端
@@ -60,7 +74,24 @@ npm install
 npm run dev
 ```
 
+**macOS / Linux（zsh / bash）**
+
+```bash
+# 终端 1：后端
+cd backend
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --port 8000 --reload
+
+# 终端 2：前端
+cd frontend
+npm install
+npm run dev
+```
+
 打开 `http://localhost:5173`。Vite 已把 `/api` 代理到 `http://127.0.0.1:8000`。
+
+路径说明：数据库与上传目录默认是相对仓库根目录的 `backend/data/...`，Windows 与 macOS 相同；`DB_PATH` / `UPLOAD_DIR` 支持 `~`（如 `~/tree-thinking/app.db`），无需手写不同平台的路径分隔符。
 
 ## 配置
 
@@ -120,7 +151,7 @@ git config core.hooksPath .githooks
 
 ```
 Tree_thinking/
-├─ start.bat                  # Windows 一键启动
+├─ start.bat / start.sh       # Windows / macOS 一键启动
 ├─ readme.md / readme_en.md   # 中文 / 英文说明
 ├─ docs/development.md        # 开发约定（含单键多动作优先级）
 ├─ backend/
@@ -161,6 +192,11 @@ Tree_thinking/
 - **`.env` 被忽略 / 提交被钩子拦截**：这是预期行为，环境变量文件与疑似 Key 不应入库。请把真实 Key 留在本地被忽略的 `.env` 中，只提交 `.env.example` 这类不含密钥的模板；钩子会列出命中文件，在该文件移除 `sk-` 开头的 Key 或非空的 `DEEPSEEK_API_KEY` 后重新提交。
 
 ## 更新日志（Changelog）
+
+### 0.2.1 — 2026-11-08
+- 新增 macOS / Linux 一键启动脚本 `start.sh`：自动创建 `backend/.venv`、安装前后端依赖、复制 `.env`、检查 8000/5173 端口、等待服务就绪并打开浏览器，`Ctrl+C` 同时停止前后端；日志写入 `.runtime/`。
+- README 中英补充 macOS 环境要求、一条命令启动与 `.venv/bin/python` 手动命令；数据库与上传目录继续使用仓库根相对路径与 `pathlib`，Windows / macOS 共用。
+- 版本号升级至 0.2.1。
 
 ### 0.2.0 — 2026-11-06
 - 动效：建立统一时长与曲线体系（高频 120–150ms、局部 200ms、层级 280ms），所有按钮增加按压缩放反馈；动画均可被后续操作打断。

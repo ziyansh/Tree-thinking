@@ -14,6 +14,7 @@ dist/
 
 # 日志与操作系统文件
 *.log
+.runtime/
 .DS_Store
 
 # 本地文档缓存

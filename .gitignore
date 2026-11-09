@@ -38,3 +38,10 @@ Reference_Doc/
 # 密钥/证书
 *.key
 *.pem
+
+#Trae 相关文件
+.trae/
+.documents/
+.screenshots/
+.pytest_cache/
+.githooks/

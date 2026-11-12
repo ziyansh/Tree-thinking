@@ -163,6 +163,7 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   panInertiaEnabled: false,
   panInertiaCoefficient: 0.5,
   canvasStyle: 'none',
+  searchLimit: 0,
 }
 
 /** 全局卡片尺寸的最小值（与后端一致，无上限） */
@@ -710,6 +711,9 @@ export const mockApi: ApiClient = {
       settings.panInertiaCoefficient = Math.min(1, Math.max(0.1, patch.panInertiaCoefficient))
     }
     if (patch.canvasStyle !== undefined) settings.canvasStyle = patch.canvasStyle
+    if (patch.searchLimit !== undefined) {
+      settings.searchLimit = Math.min(50, Math.max(0, Math.round(patch.searchLimit)))
+    }
     saveSettingsState(settings)
     return { ...settings }
   },

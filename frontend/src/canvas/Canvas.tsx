@@ -332,6 +332,47 @@ function CanvasInner() {
     [preferences.canvasStyle],
   )
 
+  /**
+   * macOS / Windows 触控板：双指滑动平移画布，捏合（浏览器会带 ctrlKey）交给 React Flow 缩放。
+   * 鼠标滚轮保持「滚轮逻辑」设置中的缩放行为，因此这里只拦截步长细小的触控板事件。
+   * React 的 wheel 监听是 passive 的无法 preventDefault，改用原生监听 + 捕获阶段。
+   */
+  useEffect(() => {
+    const element = containerRef.current
+    if (!element) return
+
+    const handleWheel = (event: WheelEvent) => {
+      stopInertia()
+      // 空格按住时滚轮始终缩放画布，交给 React Flow
+      if (spacePressed) return
+      // 触控板捏合：ctrlKey 由浏览器自动附带，交给 React Flow 的缩放
+      if (event.ctrlKey || event.metaKey) return
+      const target = event.target as Element | null
+      // 卡片正文、思考过程、参考资料抽屉等可滚动区域保持原生滚动
+      if (target?.closest('.nowheel')) return
+
+      // 触控板双指滑动：deltaMode 为像素且步长细小；鼠标滚轮通常是 ±100
+      const isTrackpad =
+        event.deltaMode === 0 && (Math.abs(event.deltaX) > 0 || Math.abs(event.deltaY) < 40)
+      if (!isTrackpad) return
+
+      event.preventDefault()
+      event.stopPropagation()
+      const viewport = getViewport()
+      void setViewport(
+        {
+          x: viewport.x - event.deltaX,
+          y: viewport.y - event.deltaY,
+          zoom: viewport.zoom,
+        },
+        { duration: 0 },
+      )
+    }
+
+    element.addEventListener('wheel', handleWheel, { passive: false, capture: true })
+    return () => element.removeEventListener('wheel', handleWheel, { capture: true })
+  }, [getViewport, setViewport, spacePressed, stopInertia])
+
   // 空白处拖动：按下后经过漂移延迟开始检测，位移超过漂移距离才进入平移
   const startPan = useCallback(
     (state: PanePointerState) => {
@@ -1015,8 +1056,6 @@ function CanvasInner() {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
       onPointerCancel={handlePointerEnd}
-      // 滚轮缩放前立即停止平移惯性，避免缩放和滑行同时进行
-      onWheelCapture={stopInertia}
     >
       <ReactFlow
         nodes={allNodes}

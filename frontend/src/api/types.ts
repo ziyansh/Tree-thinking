@@ -188,6 +188,8 @@ export interface SettingsDTO {
   panInertiaCoefficient: number
   /** 画布背景样式（默认 none） */
   canvasStyle: CanvasStyle
+  /** 模型搜索上限：注入模型的资料条数，0 表示不设限 */
+  searchLimit: number
 }
 
 /** 更新设置入参：只提交要改的字段；apiKey 留空表示保持原 Key */
@@ -234,4 +236,6 @@ export interface SettingsPatch {
   panInertiaCoefficient?: number
   /** 画布背景样式 */
   canvasStyle?: CanvasStyle
+  /** 模型搜索上限（0 表示不设限，服务层夹到 0–50） */
+  searchLimit?: number
 }

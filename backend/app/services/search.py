@@ -8,10 +8,16 @@ import logging
 
 import httpx
 
-# 每次搜索请求的结果条数
-SEARCH_COUNT = 10
 # 摘要截断长度，避免把超长正文塞进系统提示词
 SUMMARY_MAX_CHARS = 800
+
+
+def _limit_of(runtime: dict) -> int:
+    """读取「模型搜索上限」：0 表示不设限，非法值按 0 处理。"""
+    try:
+        return max(0, int(runtime.get("search_limit") or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _endpoint(base_url: str) -> str:
@@ -36,14 +42,20 @@ def _normalize(item: dict) -> dict:
 
 
 async def search_web(query: str, runtime: dict) -> list[dict]:
-    """根据运行时设置发起联网搜索，返回最多 10 条归一化结果。"""
+    """根据运行时设置发起联网搜索。
+
+    返回条数由「模型搜索上限」决定：0 表示不设限（不传 count，由服务端决定），
+    大于 0 时请求并截断到该数量。
+    """
+    limit = _limit_of(runtime)
     url = _endpoint(runtime.get("base_url") or "")
     payload = {
         "query": query,
-        "count": SEARCH_COUNT,
         "need_content": False,
         "ori_question": query,
     }
+    if limit > 0:
+        payload["count"] = limit
     headers = {"Authorization": f"Bearer {runtime.get('api_key') or ''}"}
 
     try:
@@ -67,8 +79,9 @@ async def search_web(query: str, runtime: dict) -> list[dict]:
     if not isinstance(results, list):
         return []
 
-    return [
+    normalized = [
         _normalize(item)
-        for item in results[:SEARCH_COUNT]
+        for item in results
         if isinstance(item, dict)
     ]
+    return normalized[:limit] if limit > 0 else normalized

@@ -92,6 +92,8 @@ _EXTRA_COLUMNS = {
         "pan_inertia_enabled": "BOOLEAN",
         "pan_inertia_coefficient": "FLOAT",
         "canvas_style": "VARCHAR(16)",
+        # 模型搜索上限（旧库补列）
+        "search_limit": "INTEGER",
     },
 }
 

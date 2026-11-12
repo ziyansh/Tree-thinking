@@ -87,7 +87,7 @@ def _sources_prompt(sources: list[dict]) -> str:
         "不要在正文中粘贴链接或网址，前端会把序号渲染成可点击的引用角标。"
         "没有使用资料时不必标注。"
     ]
-    for index, item in enumerate(sources[:10], start=1):
+    for index, item in enumerate(sources, start=1):
         lines.append(
             f"{index}. 标题：{item.get('title') or '无'}\n"
             f"   站点：{item.get('siteName') or '无'}\n"

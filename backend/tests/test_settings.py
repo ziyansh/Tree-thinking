@@ -44,6 +44,17 @@ def test_settings_defaults(client):
     assert data["panInertiaEnabled"] is False
     assert data["panInertiaCoefficient"] == 0.5
     assert data["canvasStyle"] == "none"
+    # 模型搜索上限默认 0（不设限）
+    assert data["searchLimit"] == 0
+
+
+def test_settings_search_limit_clamp(client):
+    """模型搜索上限允许 0（不设限），负数归 0，超出 50 夹到上限。"""
+    assert client.put("/api/settings", json={"searchLimit": 0}).json()["searchLimit"] == 0
+    assert client.put("/api/settings", json={"searchLimit": -3}).json()["searchLimit"] == 0
+    assert client.put("/api/settings", json={"searchLimit": 8}).json()["searchLimit"] == 8
+    assert client.put("/api/settings", json={"searchLimit": 999}).json()["searchLimit"] == 50
+    assert client.get("/api/settings").json()["searchLimit"] == 50
 
 
 def test_settings_canvas_motion_clamp(client):

@@ -1,5 +1,6 @@
 """联网搜索测试：设置开关、来源注入 SSE 与落库、异常降级、服务商限制。"""
 
+import asyncio
 import json
 
 from app.models import ConversationNode
@@ -141,6 +142,67 @@ def test_answer_search_failure_keeps_flow(client, session_factory, monkeypatch):
 async def _boom():
     """模拟搜索内部异常（用于替换 search_web）。"""
     raise RuntimeError("搜索服务不可用")
+
+
+def _fake_search_client(captured: dict):
+    """构造假的 httpx.AsyncClient，记录请求 payload 并返回 12 条结果。"""
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {
+                "results": [
+                    {"title": f"标题{i}", "url": f"https://example.com/{i}"}
+                    for i in range(12)
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def post(self, url, json=None, headers=None):
+            captured["payload"] = json
+            return FakeResponse()
+
+    return FakeClient
+
+
+def test_search_respects_limit_setting(monkeypatch):
+    """默认不设限时不发送 count 且不截断；设置上限后请求并截断到该数量。"""
+    from app.services import search as search_service
+
+    captured: dict = {}
+    monkeypatch.setattr(search_service.httpx, "AsyncClient", _fake_search_client(captured))
+
+    runtime = {"api_key": "sk-test", "base_url": "https://api.deepseek.com"}
+    unlimited = asyncio.run(search_service.search_web("测试", runtime))
+    assert "count" not in captured["payload"]
+    assert len(unlimited) == 12
+
+    limited = asyncio.run(search_service.search_web("测试", {**runtime, "search_limit": 5}))
+    assert captured["payload"]["count"] == 5
+    assert len(limited) == 5
+
+
+def test_sources_prompt_keeps_all_sources():
+    """来源超过 10 条时系统提示词不再截断。"""
+    from app.api.nodes import _sources_prompt
+
+    sources = [
+        {"title": f"标题{i}", "url": f"https://example.com/{i}", "siteName": "站点"}
+        for i in range(12)
+    ]
+    prompt = _sources_prompt(sources)
+    assert "1. 标题：标题0" in prompt
+    assert "12. 标题：标题11" in prompt
 
 
 def test_answer_skips_search_for_other_provider(client, monkeypatch):

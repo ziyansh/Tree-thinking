@@ -75,6 +75,7 @@ export type Preferences = Pick<
   | 'panInertiaEnabled'
   | 'panInertiaCoefficient'
   | 'canvasStyle'
+  | 'searchLimit'
 >
 
 /** 与后端默认值保持一致，读取设置失败时沿用 */
@@ -101,6 +102,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   panInertiaEnabled: false,
   panInertiaCoefficient: 0.5,
   canvasStyle: 'none',
+  searchLimit: 0,
 }
 
 /** 从设置 DTO 中摘出偏好字段，保证 store 与后端返回值同形 */
@@ -128,6 +130,7 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     panInertiaEnabled: settings.panInertiaEnabled ?? false,
     panInertiaCoefficient: settings.panInertiaCoefficient ?? 0.5,
     canvasStyle: settings.canvasStyle ?? 'none',
+    searchLimit: settings.searchLimit ?? 0,
   }
 }
 
@@ -156,6 +159,7 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     panInertiaEnabled: patch.panInertiaEnabled ?? base.panInertiaEnabled,
     panInertiaCoefficient: patch.panInertiaCoefficient ?? base.panInertiaCoefficient,
     canvasStyle: patch.canvasStyle ?? base.canvasStyle,
+    searchLimit: patch.searchLimit ?? base.searchLimit,
   }
 }
 

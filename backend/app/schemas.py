@@ -321,6 +321,8 @@ class SettingsPatch(CamelModel):
     pan_inertia_coefficient: float | None = None
     # 画布背景样式：none / dots
     canvas_style: Literal["none", "dots"] | None = None
+    # 模型搜索上限：注入模型的资料条数，0 表示不设限（服务层夹到 0–50）
+    search_limit: int | None = None
 
     @field_validator("edge_color")
     @classmethod

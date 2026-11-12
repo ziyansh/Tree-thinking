@@ -150,4 +150,6 @@ class AppSetting(Base):
     pan_inertia_coefficient: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 画布背景样式：none（无）/ dots（点状）；为空表示 none
     canvas_style: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # 模型搜索上限（注入模型的资料条数）；0 表示不设限
+    search_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)

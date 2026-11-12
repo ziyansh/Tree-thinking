@@ -72,6 +72,9 @@ MAX_PAN_INERTIA_COEFFICIENT = 1.0
 # 画布背景样式：none（无）/ dots（点状）
 DEFAULT_CANVAS_STYLE = "none"
 CANVAS_STYLES = ("none", "dots")
+# 模型搜索上限：注入模型的资料条数，0 表示不设限
+DEFAULT_SEARCH_LIMIT = 0
+MAX_SEARCH_LIMIT = 50
 
 # 服务商：DeepSeek（默认）/ OpenAI
 DEFAULT_PROVIDER = "deepseek"
@@ -333,6 +336,12 @@ def effective(db: Session) -> dict:
         "canvas_style": _effective_choice(
             row.canvas_style if row else None, CANVAS_STYLES, DEFAULT_CANVAS_STYLE
         ),
+        "search_limit": _effective_int(
+            row.search_limit if row else None,
+            DEFAULT_SEARCH_LIMIT,
+            DEFAULT_SEARCH_LIMIT,
+            MAX_SEARCH_LIMIT,
+        ),
     }
 
 
@@ -384,6 +393,8 @@ def dto(db: Session) -> dict:
         "panInertiaEnabled": values["pan_inertia_enabled"],
         "panInertiaCoefficient": values["pan_inertia_coefficient"],
         "canvasStyle": values["canvas_style"],
+        # 模型搜索上限（0 = 不设限）
+        "searchLimit": values["search_limit"],
     }
 
 
@@ -551,6 +562,13 @@ def update(db: Session, patch: dict) -> dict:
     if patch.get("canvas_style") is not None:
         row.canvas_style = _effective_choice(
             patch["canvas_style"], CANVAS_STYLES, DEFAULT_CANVAS_STYLE
+        )
+    if patch.get("search_limit") is not None:
+        row.search_limit = _effective_int(
+            patch["search_limit"],
+            DEFAULT_SEARCH_LIMIT,
+            DEFAULT_SEARCH_LIMIT,
+            MAX_SEARCH_LIMIT,
         )
 
     db.commit()

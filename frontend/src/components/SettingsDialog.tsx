@@ -65,6 +65,7 @@ interface SettingsForm {
   canvasStyle: CanvasStyle
   panInertiaEnabled: boolean
   panInertiaCoefficient: number
+  searchLimit: number
 }
 
 /** 用后端设置初始化表单（apiKey 始终留空） */
@@ -103,6 +104,7 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     canvasStyle: data.canvasStyle,
     panInertiaEnabled: data.panInertiaEnabled,
     panInertiaCoefficient: data.panInertiaCoefficient,
+    searchLimit: data.searchLimit,
   }
 }
 
@@ -166,7 +168,14 @@ function NumberBox({
       step={step}
       disabled={disabled}
       value={display}
-      onChange={(event) => setDraft(event.target.value)}
+      onChange={(event) => {
+        const raw = event.target.value
+        setDraft(raw)
+        // 输入合法数字时即时同步，避免「改完直接点保存」因未失焦而丢失修改
+        if (raw.trim() !== '' && Number.isFinite(Number(raw))) {
+          onChange(normalizeNumber(raw, value, min, max, step))
+        }
+      }}
       onBlur={commit}
       className={className}
     />
@@ -465,6 +474,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     canvasStyle: 'none',
     panInertiaEnabled: false,
     panInertiaCoefficient: 0.5,
+    searchLimit: 0,
   })
 
   // Esc 关闭统一走 Escape 栈：多浮层叠加时只关闭最上层
@@ -546,6 +556,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         canvasStyle: form.canvasStyle,
         panInertiaEnabled: form.panInertiaEnabled,
         panInertiaCoefficient: form.panInertiaCoefficient,
+        searchLimit: form.searchLimit,
       }
       if (form.apiKey.trim()) patch.apiKey = form.apiKey.trim()
       if (form.openaiApiKey.trim()) patch.openaiApiKey = form.openaiApiKey.trim()
@@ -843,6 +854,19 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           onChange={(suggestionCount) => setForm({ ...form, suggestionCount })}
                           min={2}
                           max={6}
+                        />
+                      </Row>
+
+                      <Row
+                        label="模型搜索上限"
+                        hint="联网搜索时注入模型的资料条数上限；默认 0 表示不设限"
+                      >
+                        <NumberInput
+                          value={form.searchLimit}
+                          onChange={(searchLimit) => setForm({ ...form, searchLimit })}
+                          min={0}
+                          max={50}
+                          step={1}
                         />
                       </Row>
                     </Section>

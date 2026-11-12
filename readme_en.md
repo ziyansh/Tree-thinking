@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.2.1** | [中文说明](readme.md)
+> Current version: **0.2.2** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -20,7 +20,7 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 - **Multiple canvases**: a collapsible left sidebar (240px / 48px) to create, switch, rename, and delete canvases. Each canvas has exactly one root question. After the first answer completes, the app asks the model for a canvas title; a manual rename is never overwritten.
 - **In-app settings**: the gear at the bottom-left opens a floating dialog with three tabs — Model service / Canvas / Appearance (save options live in Canvas). Each section has a heading, with a description on the left and the control on the right; bounded values use a slider plus a number input, and changes take effect immediately — no restart.
 - **Multiple providers**: the provider is a dropdown (DeepSeek / OpenAI-compatible); the latter works with any service that implements the OpenAI protocol. DeepSeek supports `deepseek-flash` / `deepseek-v4-pro`; the OpenAI-compatible option adds organization/project IDs, temperature, max output tokens, reasoning effort, and request timeout, and can point at a proxy.
-- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek only), and a synced shortcut sits beside the attachment button in card inputs. When enabled, the app calls DeepSeek Search before answering and injects a summary. Cards show “参考 N 篇资料” at the bottom-left; clicking it slides up a draggable frosted-glass drawer inside the card (25% of the card height by default; the height is remembered and applied to every card). The drawer lists numbered page titles linked to the originals, and `[n]` markers in answers render as clickable citation badges; the drawer closes only via its arrow or Esc.
+- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek only), and a synced shortcut sits beside the attachment button in card inputs. When enabled, the app calls DeepSeek Search before answering and injects a summary; the number of sources can be capped under Settings → Model service → General → “Model search limit” (default 0 means unlimited). Cards show “参考 N 篇资料” at the bottom-left; clicking it slides up a draggable frosted-glass drawer inside the card (25% of the card height by default; the height is remembered and applied to every card). The drawer lists numbered page titles linked to the originals, and `[n]` markers in answers render as clickable citation badges; the drawer closes only via its arrow or Esc.
 - **Attachments**: the root question input and the “custom direction” box accept click-to-upload or drag-and-drop files. Cards show every attachment as a file icon plus filename (more than three collapse into “附件 N”; clicking an item opens the original file in a new window). Text attachments are injected along the root-to-current path, so sibling branches never see them.
 - **Persistence**: canvases, cards, positions, and viewport are stored in local SQLite and restored after refresh.
 - **Appearance**: follow system / light / dark, plus accent hue, edge width and color; 12/24-hour time formats. Card body font size is adjustable (12–24px, default 14) and cards grow automatically when the font size increases.
@@ -194,6 +194,12 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.2.2 — 2026-11-12
+- Search: removed the hard-coded 10-result cap (search previously truncated both the request and the prompt); added Settings → Model service → General → “Model search limit”, default 0 (unlimited), accepting 1–50.
+- Canvas: macOS / Windows trackpad support — two-finger scroll pans the canvas, pinch zooms it, and the mouse wheel still follows the “Wheel logic” setting; scrollable areas such as card answers, reasoning, and the references drawer keep native scrolling.
+- Settings: numeric inputs now sync valid values as you type, so clicking Save right after editing no longer loses the change.
+- Bumped the version to 0.2.2.
 
 ### 0.2.1 — 2026-11-08
 - Added a macOS / Linux one-command launcher `start.sh`: it creates `backend/.venv`, installs backend and frontend dependencies, copies `.env`, checks ports 8000/5173, waits until the services are ready, and opens the browser; `Ctrl+C` stops both services and logs go to `.runtime/`.

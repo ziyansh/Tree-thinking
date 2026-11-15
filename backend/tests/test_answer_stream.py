@@ -116,3 +116,70 @@ def test_answer_without_api_key(client, session_factory, monkeypatch):
     node = _load_node(session_factory, node_id)
     assert node.status == "error"
     assert node.error == data["message"]
+
+
+def test_prompt_survives_title_edit_and_answer_uses_prompt(client, monkeypatch):
+    """标题改名不影响原始提问，重新生成仍以原始提问作为上下文。"""
+    node_id = _create_node_with_question(client, "原始提问内容")
+
+    updated = client.patch(f"/api/nodes/{node_id}", json={"title": "自定义标题"}).json()
+    assert updated["question"] == "自定义标题"
+    assert updated["prompt"] == "原始提问内容"
+
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test-key")
+    captured: dict = {}
+
+    async def fake_stream_chat(messages, runtime=None):
+        captured["last"] = messages[-1]["content"]
+        yield "delta", "好"
+
+    async def fake_generate(node, count=None, used_texts=None, runtime=None):
+        return []
+
+    monkeypatch.setattr(llm, "stream_chat", fake_stream_chat)
+    monkeypatch.setattr("app.api.nodes.suggestions.generate_suggestions", fake_generate)
+
+    client.post(f"/api/nodes/{node_id}/answer")
+    # 上下文使用原始提问，而不是改名后的标题
+    assert captured["last"] == "原始提问内容"
+
+
+def test_stop_generation_restores_root_input(client):
+    """停止生成：根卡片回到输入态并清空回答，原始提问保留。"""
+    node_id = _create_node_with_question(client, "会被停止的提问")
+
+    stopped = client.post(f"/api/nodes/{node_id}/stop").json()
+    assert stopped["status"] == "input"
+    assert stopped["answer"] == ""
+    assert stopped["prompt"] == "会被停止的提问"
+
+
+def test_node_to_dto_falls_back_when_prompt_is_null():
+    """旧库补列后 prompt 为 NULL：DTO 转换不报错，并回落到标题。"""
+    from datetime import datetime
+
+    from app.services.graph import node_to_dto
+
+    stamp = datetime(2026, 1, 1)
+    node = ConversationNode(
+        id="node-legacy",
+        project_id="project-1",
+        parent_id=None,
+        question="旧数据问题",
+        prompt=None,
+        answer="",
+        reasoning="",
+        origin="root",
+        status="input",
+        suggestions="[]",
+        suggestions_consumed=False,
+        pinned=False,
+        node_type="chat",
+        x=0,
+        y=0,
+        sources="[]",
+        attachments="[]",
+        created_at=stamp,
+        updated_at=stamp,
+    )
+    assert node_to_dto(node)["prompt"] == "旧数据问题"

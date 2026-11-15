@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import type { DragEvent as ReactDragEvent } from 'react'
+import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react'
 import { FileText, X } from 'lucide-react'
 import { api } from '../api/client'
 import type { AttachmentDTO } from '../api/types'
@@ -19,11 +19,11 @@ export interface AttachmentUploads {
 }
 
 /** 本地维护待提交的附件列表：负责大小/数量校验、逐个上传与失败提示 */
-export function useAttachmentUploads(): AttachmentUploads {
-  const [items, setItems] = useState<AttachmentDTO[]>([])
+export function useAttachmentUploads(initialItems: AttachmentDTO[] = []): AttachmentUploads {
+  const [items, setItems] = useState<AttachmentDTO[]>(initialItems)
   const [uploading, setUploading] = useState(false)
   /** 与 items 同步的引用，保证连续调用 addFiles 时数量判断基于最新列表 */
-  const itemsRef = useRef<AttachmentDTO[]>([])
+  const itemsRef = useRef<AttachmentDTO[]>(initialItems)
   /** 进行中的上传数量，并发上传时用计数器避免提前解除上传态 */
   const pendingRef = useRef(0)
 
@@ -142,6 +142,49 @@ export interface FileDropZoneHandlers {
   onDragOver: (event: ReactDragEvent<HTMLElement>) => void
   onDragLeave: (event: ReactDragEvent<HTMLElement>) => void
   onDrop: (event: ReactDragEvent<HTMLElement>) => void
+}
+
+/** 粘贴为附件的文本长度阈值：超过该长度转成 .txt 附件，避免撑爆输入框 */
+const PASTE_TEXT_LIMIT = 2000
+
+/**
+ * 剪贴板粘贴：文件（含资源管理器 / Finder 复制的文件、截图）直接上传为附件；
+ * 超长文本转成 .txt 附件；普通短文本不拦截，保持浏览器默认粘贴行为。
+ */
+export function usePasteAttachments(uploads: AttachmentUploads) {
+  return (event: ReactClipboardEvent<HTMLElement>) => {
+    const clipboard = event.clipboardData
+    if (!clipboard) return
+
+    // 从文件管理器复制的文件：clipboardData.files 里是完整的 File 对象
+    const files = Array.from(clipboard.files ?? [])
+    // 截图等场景只有 items 里有文件，补齐后按名称 + 大小 + 时间戳去重
+    for (const item of clipboard.items) {
+      if (item.kind !== 'file') continue
+      const file = item.getAsFile()
+      if (!file) continue
+      const exists = files.some(
+        (current) =>
+          current.name === file.name &&
+          current.size === file.size &&
+          current.lastModified === file.lastModified,
+      )
+      if (!exists) files.push(file)
+    }
+    if (files.length > 0) {
+      event.preventDefault()
+      void uploads.addFiles(files)
+      return
+    }
+
+    const text = clipboard.getData('text/plain')
+    if (text && text.length > PASTE_TEXT_LIMIT) {
+      event.preventDefault()
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const file = new File([text], `pasted-${stamp}.txt`, { type: 'text/plain' })
+      void uploads.addFiles([file])
+    }
+  }
 }
 
 /** 文件拖拽投放：返回高亮状态与事件处理器（仅处理拖入文件的情况） */

@@ -388,6 +388,55 @@ button:not(:disabled):active {
   animation: drawer-in 220ms var(--motion-ease-out);
 }
 
+/* 提问抽屉：自卡片顶部展开 */
+@keyframes drawer-top-in {
+  from {
+    opacity: 0;
+    translate: 0 -8px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.drawer-top-in {
+  animation: drawer-top-in 200ms var(--motion-ease-out);
+}
+
+/* 提问抽屉：浮在卡片上方自下向上拉起 */
+@keyframes drawer-pull-up {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.drawer-pull-up {
+  animation: drawer-pull-up 200ms var(--motion-ease-out);
+}
+
+/* 输入区失焦收起：淡出 + 轻微上移 */
+@keyframes composer-out {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+  to {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+}
+
+.composer-out {
+  animation: composer-out 160ms var(--motion-ease-in) both;
+  pointer-events: none;
+}
+
 /* 错误条与附件 chip 出现 */
 @keyframes error-in {
   from {
@@ -456,6 +505,19 @@ button:not(:disabled):active {
   will-change: transform;
 }
 
+/* KaTeX 公式：块级公式过长时内部横向滚动，避免撑开卡片 */
+.katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+  margin: 0.5em 0;
+}
+
+.katex {
+  color: var(--text-body);
+}
+
 /* 正文引用角标：点击打开对应搜索资料 */
 .citation-badge {
   display: inline-flex;
@@ -509,11 +571,17 @@ button:not(:disabled):active {
 
   .card-enter,
   .drawer-in,
+  .drawer-top-in,
+  .drawer-pull-up,
   .error-in,
   .chip-in,
   .panel-pop,
   .tab-panel-in {
     animation: reduced-fade-in 120ms linear both;
+  }
+
+  .composer-out {
+    animation: reduced-fade-out 120ms linear both;
   }
 
   .dialog-overlay,

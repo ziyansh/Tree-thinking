@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.2.2** | [中文说明](readme.md)
+> Current version: **0.2.4** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -194,6 +194,22 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.2.4 — 2026-11-13
+- Added: a “View my prompt” icon in the card title bar opens a drawer from the card top showing the user's original prompt; double-click to edit in a composer matching “custom direction”, with the circular button meaning “Resubmit”.
+- Added: the backend now stores the original prompt in a `prompt` field, so renaming the title, regenerating, and copying no longer affect it.
+- Improved: “Regenerate answer” checks for downstream cards and asks “重新生成将会丢失后续卡片内容，请问是否继续？”; confirming deletes those branches and resubmits, and the whole step is undoable.
+- Improved: the card's “换一个方向” action is now “重新提问” and opens the same prompt drawer.
+- Added: a “Stop generating” button appears while streaming; it aborts the request immediately. The root card returns to input mode with its prompt prefilled, while other cards are deleted and their input stage is restored.
+- Improved: the “New branch” input now matches the “custom direction” composer (attachments, thinking, web search, send) and plays a collapse animation when it loses focus.
+- Added: pasting images uploads them as attachments; pasting text longer than 2000 characters is converted into a `.txt` attachment.
+- Fixed: “Copy question and answer” now copies the original prompt plus the plain answer instead of the renamed title.
+- Bumped the version to 0.2.4.
+
+### 0.2.3 — 2026-11-13
+- Added: math rendering in answers via KaTeX, supporting `$...$`, `$$...$$`, `\(...\)`, and `\[...\]`; long display equations scroll horizontally inside the card, and citation badges plus code blocks are unaffected.
+- Added: a “Deep thinking” toggle in the canvas toolbar between Auto layout and Web search, synced with the thinking-mode option under Settings → Model service and the shortcut in card inputs (including the custom-direction composer); hovering shows “仅支持 DeepSeek API” on other providers.
+- Bumped the version to 0.2.3.
 
 ### 0.2.2 — 2026-11-12
 - Search: removed the hard-coded 10-result cap (search previously truncated both the request and the prompt); added Settings → Model service → General → “Model search limit”, default 0 (unlimited), accepting 1–50.

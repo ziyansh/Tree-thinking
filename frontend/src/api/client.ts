@@ -92,6 +92,10 @@ export interface ApiClient {
       y?: number
       pinned?: boolean
       title?: string
+      /** 用户原始提问（卡片顶部抽屉编辑后重新提交） */
+      prompt?: string
+      /** 重新提交时整体覆盖附件 id 列表 */
+      attachments?: string[]
       content?: string
       width?: number
       height?: number
@@ -109,6 +113,8 @@ export interface ApiClient {
   /** 保存当前画布快照，返回保存时间 */
   saveProject(projectId: string): Promise<{ savedAt: string }>
   setNodeQuestion(id: string, question: string, attachments?: string[]): Promise<NodeDTO>
+  /** 停止生成：根卡片回退到输入态；其余卡片由前端删除 */
+  stopNode(id: string): Promise<NodeDTO>
   generateSuggestions(id: string, count?: number): Promise<SuggestionDTO[]>
   /** 新增空分支卡片：后端按当前卡片尺寸计算坐标，返回输入态节点 */
   createBranch(nodeId: string): Promise<NodeDTO>
@@ -171,6 +177,9 @@ const realApi: ApiClient = {
       method: 'POST',
       body: JSON.stringify({ question, attachments }),
     }),
+
+  stopNode: (id) =>
+    request<NodeDTO>(`/nodes/${id}/stop`, { method: 'POST', body: JSON.stringify({}) }),
 
   // 重新生成候选方向，已生成子卡片的建议由后端保留
   generateSuggestions: (id, count) =>

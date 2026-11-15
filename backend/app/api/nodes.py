@@ -66,6 +66,9 @@ def _persist_answer(
         node = db.get(ConversationNode, node_id)
         if node is None:
             return
+        # 用户已「停止生成」把卡片退回输入态时，迟到的流式结果不再覆盖
+        if node.status == "input":
+            return
         node.answer = answer
         node.reasoning = reasoning
         node.status = status
@@ -117,6 +120,11 @@ def patch_node(node_id: str, payload: NodePatch, db: Session = Depends(get_db)) 
         node.pinned = payload.pinned
     if payload.title is not None:
         node.question = payload.title
+    if payload.prompt is not None:
+        node.prompt = payload.prompt.strip()
+    if payload.attachments is not None:
+        metas = attachments.resolve_ids(payload.attachments)
+        node.attachments = json.dumps(metas, ensure_ascii=False)
     if payload.suggestions_consumed is not None:
         node.suggestions_consumed = payload.suggestions_consumed
     if payload.suggestions is not None:
@@ -163,6 +171,7 @@ def create_branch(node_id: str, db: Session = Depends(get_db)) -> dict:
         project_id=parent.project_id,
         parent_id=parent.id,
         question="",
+        prompt="",
         answer="",
         reasoning="",
         origin="user",
@@ -185,6 +194,8 @@ def set_question(node_id: str, payload: NodeQuestion, db: Session = Depends(get_
         raise HTTPException(status_code=400, detail="该节点已有回答，不能重复写入问题")
 
     node.question = payload.question.strip()
+    # 首次提交时原始提问与标题相同；之后标题可单独改名
+    node.prompt = node.question
     # 附件按本次提交整体覆盖；空数组表示该节点不附附件
     metas = attachments.resolve_ids(payload.attachments)
     node.attachments = json.dumps(metas, ensure_ascii=False)
@@ -194,11 +205,32 @@ def set_question(node_id: str, payload: NodeQuestion, db: Session = Depends(get_
     return node_to_dto(node)
 
 
+@router.post("/{node_id}/stop")
+def stop_generation(node_id: str, db: Session = Depends(get_db)) -> dict:
+    """停止生成：元问题卡片回退到输入态；其余卡片由前端删除。
+
+    前端中断 SSE 后调用，把根卡片恢复成「等待用户输入」，
+    清空本次已生成的内容，便于用户修改后重新提交。
+    """
+    node = get_node_or_404(db, node_id)
+    if node.parent_id is None and node.node_type == "chat":
+        node.status = "input"
+        node.answer = ""
+        node.reasoning = ""
+        node.error = None
+        node.sources = "[]"
+        node.suggestions = "[]"
+        db.commit()
+        db.refresh(node)
+    return node_to_dto(node)
+
+
 @router.post("/{node_id}/answer")
 async def answer_node(node_id: str, db: Session = Depends(get_db)):
     """流式回答：以 SSE 推送 sources / reasoning / delta / done / error，并把结果落库。"""
     node = get_node_or_404(db, node_id)
-    question = (node.question or "").strip()
+    # 重新提交时以「原始提问」为准，标题只影响画布显示
+    question = (node.prompt or node.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="该节点还没有问题，请先输入问题后再请求回答")
 

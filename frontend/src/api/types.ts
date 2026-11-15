@@ -47,6 +47,8 @@ export interface NodeDTO {
   projectId: string
   parentId: string | null
   question: string
+  /** 用户原始提问；标题改名后仍保留，用于重新提交与复制 */
+  prompt: string
   answer: string
   reasoning: string
   origin: NodeOrigin

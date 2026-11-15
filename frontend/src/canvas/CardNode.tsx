@@ -1,17 +1,22 @@
-import { memo, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 import {
   Check,
   ChevronRight,
   Copy,
   GitBranch,
+  MessageSquareText,
   Paperclip,
   Pin,
   RefreshCw,
+  Square,
   Trash2,
 } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
@@ -19,9 +24,12 @@ import type { CardNodeData, CardFlowNode } from '../store/graphStore'
 import { formatModifiedTime } from '../lib/time'
 import { useEscapeHandler } from '../lib/escapeStack'
 import { useSpacePressed } from '../lib/spaceKey'
+import { bumpUiLayer } from '../lib/uiLayers'
 import { AttachmentBar } from './AttachmentBar'
-import { AttachmentChips, useAttachmentUploads, useFileDropZone } from './AttachmentComposer'
+import { AttachmentChips, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
 import { WebSearchToggle } from './WebSearchToggle'
+import { ThinkingToggle } from './ThinkingToggle'
+import { PromptDrawer } from './PromptDrawer'
 
 /** Markdown 正文样式：颜色只取自主题令牌，避免卡片被长回答撑高 */
 const MARKDOWN_CLASS = [
@@ -43,21 +51,41 @@ const MARKDOWN_CLASS = [
   '[&_hr]:my-3 [&_hr]:border-subtle',
 ].join(' ')
 
-/** 把模型输出的 [n] / 【n】 引用标记转成指向来源序号的 Markdown 链接 */
-function withCitationLinks(answer: string, sourceCount: number): string {
-  if (sourceCount <= 0) return answer
-  // 跳过代码块与行内代码，避免把数组下标等 [n] 误当成引用
-  return answer
-    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
-    .map((part, index) =>
-      index % 2 === 1
-        ? part
-        : part.replace(/(?:\[|【)\s*(\d{1,2})\s*(?:\]|】)/g, (match, raw: string) => {
-            const sourceIndex = Number(raw)
-            if (sourceIndex < 1 || sourceIndex > sourceCount) return match
-            return `[${sourceIndex}](#source-${sourceIndex})`
-          }),
-    )
+/**
+ * 把模型输出整理成 Markdown：
+ * 1. `\(...\)` 与 `\[...\]` 统一成 `$...$` / `$$...$$`（模型常混用两种写法）；
+ * 2. 把有效的 `[n]` 转成指向来源序号的链接。
+ * 代码块、行内代码与公式内部不做引用替换，避免把数组下标或公式内容误转。
+ */
+function prepareMarkdown(answer: string, sourceCount: number): string {
+  // 代码与公式片段放在捕获组里，split 后位于奇数下标
+  const parts = answer.split(
+    /(```[\s\S]*?```|`[^`\n]*`|\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[^$\n]+\$)/g,
+  )
+
+  return parts
+    .map((part, index) => {
+      if (index % 2 === 1) {
+        // 公式：统一成 remark-math 的定界符，$$ 单独成行才会渲染为块级公式
+        if (part.startsWith('$$') && part.endsWith('$$')) {
+          return `\n$$\n${part.slice(2, -2).trim()}\n$$\n`
+        }
+        if (part.startsWith('\\(') && part.endsWith('\\)')) {
+          return `$${part.slice(2, -2)}$`
+        }
+        if (part.startsWith('\\[') && part.endsWith('\\]')) {
+          return `\n$$\n${part.slice(2, -2).trim()}\n$$\n`
+        }
+        return part
+      }
+
+      if (sourceCount <= 0) return part
+      return part.replace(/(?:\[|【)\s*(\d{1,2})\s*(?:\]|】)/g, (match, raw: string) => {
+        const sourceIndex = Number(raw)
+        if (sourceIndex < 1 || sourceIndex > sourceCount) return match
+        return `[${sourceIndex}](#source-${sourceIndex})`
+      })
+    })
     .join('')
 }
 
@@ -125,8 +153,9 @@ export const CORNER_ZONES: { edge: ResizeEdge; position: string; cursor: string 
 function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const { node }: CardNodeData = data
   const regenerate = useGraphStore((state) => state.regenerate)
-  const regenerateSuggestions = useGraphStore((state) => state.regenerateSuggestions)
   const removeNode = useGraphStore((state) => state.deleteNode)
+  const removeDescendants = useGraphStore((state) => state.removeDescendants)
+  const stopGeneration = useGraphStore((state) => state.stopGeneration)
   const togglePin = useGraphStore((state) => state.togglePin)
   const startQuestion = useGraphStore((state) => state.startQuestion)
   const runAnswer = useGraphStore((state) => state.runAnswer)
@@ -166,12 +195,23 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const [sourcesDragging, setSourcesDragging] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
+  /** 顶部提问抽屉：只读展示原始提问，双击进入编辑并重新提交 */
+  const [promptOpen, setPromptOpen] = useState(false)
+  /** 打开抽屉时是否直接进入编辑态（「重新提问」按钮） */
+  const [promptEditing, setPromptEditing] = useState(false)
+
+  /** 关闭抽屉并复位编辑态，下次打开回到只读 */
+  const closePrompt = () => {
+    setPromptOpen(false)
+    setPromptEditing(false)
+  }
   /** 上一次点击标题的时间，用于手动判定双击 */
   const lastTitleClickRef = useRef(0)
   /** 标题上按下时的坐标，用于排除拖动/选字造成的误双击 */
   const titlePointerRef = useRef<{ x: number; y: number } | null>(null)
   /** 元问题卡片输入区的待提交附件 */
   const attachments = useAttachmentUploads()
+  const pasteAttachments = usePasteAttachments(attachments)
   const dropZone = useFileDropZone((files) => void attachments.addFiles(files))
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   /** 正文容器：抽屉高度不能超过它的实际高度 */
@@ -179,6 +219,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
 
   // 抽屉展开时统一走 Escape 栈，多浮层叠加时总是先关闭最后打开的那个
   useEscapeHandler(sourcesOpen, () => setSourcesOpen(false))
+  useEscapeHandler(promptOpen, closePrompt)
 
   /** 抽屉高度：拖拽预览优先，其次取设置中的比例 */
   const sourcesPanelHeight = Math.round(
@@ -192,7 +233,8 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const isRoot = node.parentId === null && node.nodeType === 'chat'
 
   const handleCopy = async () => {
-    const text = [node.question, node.answer].filter(Boolean).join('\n\n')
+    // 复制「用户原始提问 + 模型回答」，标题改名不影响复制内容
+    const text = [node.prompt || node.question, node.answer].filter(Boolean).join('\n\n')
     try {
       await navigator.clipboard.writeText(text)
       setCopied(true)
@@ -201,6 +243,27 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
       // 剪贴板不可用时静默失败，不打断阅读
     }
   }
+
+  /** 重新生成：已有后续卡片时确认后先删除，再重新请求回答（整步可撤销） */
+  const handleRegenerate = async () => {
+    const state = useGraphStore.getState()
+    const hasChildren = state.nodes.some((item) => item.data.node.parentId === node.id)
+    if (hasChildren) {
+      if (!window.confirm('重新生成将会丢失后续卡片内容，请问是否继续？')) return
+      try {
+        await removeDescendants(node.id)
+      } catch {
+        return
+      }
+    }
+    await regenerate(node.id)
+  }
+
+  // 元问题卡片停止生成后会回到输入态，用之前的提问预填输入框
+  useEffect(() => {
+    if (!isInput) return
+    setDraft((previous) => previous || node.prompt || '')
+  }, [isInput, node.prompt])
 
   const handleSubmit = async () => {
     const text = draft.trim()
@@ -402,6 +465,11 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
       <Handle id="source-top" type="source" position={Position.Top} isConnectable={false} style={{ opacity: 0 }} />
       <Handle id="source-bottom" type="source" position={Position.Bottom} isConnectable={false} style={{ opacity: 0 }} />
 
+      {/* 提问抽屉：浮在卡片上方，展示并可重新提交用户原始提问 */}
+      {promptOpen && (
+        <PromptDrawer node={node} initialEditing={promptEditing} onClose={closePrompt} />
+      )}
+
       {/* 附件条固定在标题行之前 */}
       <AttachmentBar node={node} />
 
@@ -437,13 +505,29 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           </h3>
         )}
         <div className="flex shrink-0 items-center gap-1">
+          <IconButton
+            title="查看我的提问"
+            onClick={() => {
+              if (promptOpen) {
+                closePrompt()
+                return
+              }
+              setPromptEditing(false)
+              setPromptOpen(true)
+              // 抽屉随卡片整体抬升，避免被其它卡片遮挡
+              bumpUiLayer(node.id)
+            }}
+            active={promptOpen}
+          >
+            <MessageSquareText size={14} />
+          </IconButton>
           <IconButton title="复制问题和回答" onClick={() => void handleCopy()}>
             {copied ? <Check size={14} /> : <Copy size={14} />}
           </IconButton>
           <IconButton
             title="重新生成回答"
             disabled={isStreaming || isInput}
-            onClick={() => void regenerate(node.id)}
+            onClick={() => void handleRegenerate()}
           >
             <RefreshCw size={14} />
           </IconButton>
@@ -515,6 +599,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             autoFocus
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
+            onPaste={pasteAttachments}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
@@ -548,6 +633,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                   void attachments.addFiles(files)
                 }}
               />
+              <ThinkingToggle />
               <WebSearchToggle />
             </div>
             <button
@@ -570,7 +656,8 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
               {node.answer ? (
                 <div className={MARKDOWN_CLASS} style={{ fontSize: 'var(--card-font-size)' }}>
                   <Markdown
-                    remarkPlugins={[remarkGfm]}
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
                     components={{
                       // 引用角标：把 #source-n 渲染成可点击的小徽标
                       a: ({ href, children }) => {
@@ -596,7 +683,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                       },
                     }}
                   >
-                    {withCitationLinks(node.answer, node.sources.length)}
+                    {prepareMarkdown(node.answer, node.sources.length)}
                   </Markdown>
                 </div>
               ) : (
@@ -677,6 +764,19 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             </div>
           )}
 
+          {node.status === 'streaming' && (
+            <div className="mt-2 flex shrink-0 items-center justify-end">
+              <button
+                type="button"
+                onClick={() => void stopGeneration(node.id)}
+                className="nodrag flex items-center gap-1 rounded-md border border-subtle px-2 py-0.5 text-[12px] text-danger transition-colors duration-150 hover:border-danger hover:bg-ghost-border"
+              >
+                <Square size={10} fill="currentColor" />
+                停止生成
+              </button>
+            </div>
+          )}
+
           {node.status === 'done' && (
             <div
               className={[
@@ -701,11 +801,20 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void regenerateSuggestions(node.id)}
+                  onClick={() => {
+                    if (promptOpen && promptEditing) {
+                      closePrompt()
+                      return
+                    }
+                    // 直接打开抽屉并进入编辑态，由抽屉自动聚焦输入框
+                    setPromptEditing(true)
+                    setPromptOpen(true)
+                    bumpUiLayer(node.id)
+                  }}
                   className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
                 >
-                  <RefreshCw size={12} />
-                  换一个方向
+                  <MessageSquareText size={12} />
+                  重新提问
                 </button>
                 <button
                   type="button"

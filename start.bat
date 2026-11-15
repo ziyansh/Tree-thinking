@@ -1,89 +1,89 @@
 @echo off
-chcp 65001 >nul
+chcp 936 >nul
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo ========================================
-echo   æ ‘çŠ¶å¯¹è¯ - ä¸€é”®å¯åŠ¨ï¼ˆåŽç«¯ + å‰ç«¯ï¼‰
+echo   Ê÷×´¶Ô»° - Ò»¼üÆô¶¯£¨ºó¶Ë + Ç°¶Ë£©
 echo ========================================
 echo.
 
-REM ---------- 1. åŽç«¯è™šæ‹ŸçŽ¯å¢ƒ ----------
+REM ---------- 1. ºó¶ËÐéÄâ»·¾³ ----------
 if not exist "backend\.venv\Scripts\python.exe" (
-    echo [1/4] æœªæ‰¾åˆ°åŽç«¯è™šæ‹ŸçŽ¯å¢ƒï¼Œæ­£åœ¨åˆ›å»º backend\.venv ...
+    echo [1/4] Î´ÕÒµ½ºó¶ËÐéÄâ»·¾³£¬ÕýÔÚ´´½¨ backend\.venv ...
     python -m venv backend\.venv
     if errorlevel 1 goto :no_python
-    echo       æ­£åœ¨å®‰è£…åŽç«¯ä¾èµ–ï¼Œè¯·ç¨å€™ ...
+    echo       ÕýÔÚ°²×°ºó¶ËÒÀÀµ£¬ÇëÉÔºò ...
     backend\.venv\Scripts\python.exe -m pip install -q -r backend\requirements.txt
     if errorlevel 1 goto :pip_failed
 ) else (
-    echo [1/4] åŽç«¯è™šæ‹ŸçŽ¯å¢ƒå·²å°±ç»ª
+    echo [1/4] ºó¶ËÐéÄâ»·¾³ÒÑ¾ÍÐ÷
 )
 
-REM ---------- 2. å‰ç«¯ä¾èµ– ----------
+REM ---------- 2. Ç°¶ËÒÀÀµ ----------
 if not exist "frontend\node_modules" (
-    echo [2/4] æœªæ‰¾åˆ°å‰ç«¯ä¾èµ–ï¼Œæ­£åœ¨æ‰§è¡Œ npm install ...
+    echo [2/4] Î´ÕÒµ½Ç°¶ËÒÀÀµ£¬ÕýÔÚÖ´ÐÐ npm install ...
     call npm install --prefix frontend
     if errorlevel 1 goto :npm_failed
 ) else (
-    echo [2/4] å‰ç«¯ä¾èµ–å·²å°±ç»ª
+    echo [2/4] Ç°¶ËÒÀÀµÒÑ¾ÍÐ÷
 )
 
-REM ---------- 3. é»˜è®¤é…ç½® ----------
-REM è¿™é‡Œåªå‡†å¤‡é…ç½®æ–‡ä»¶çš„é»˜è®¤å€¼ï¼›API ç›¸å…³é…ç½®è¯·åœ¨é¡µé¢å·¦ä¸‹è§’ã€Œè®¾ç½®ã€ä¸­å®Œæˆ
+REM ---------- 3. Ä¬ÈÏÅäÖÃ ----------
+REM ÕâÀïÖ»×¼±¸ÅäÖÃÎÄ¼þµÄÄ¬ÈÏÖµ£»API Ïà¹ØÅäÖÃÇëÔÚÒ³Ãæ×óÏÂ½Ç¡¸ÉèÖÃ¡¹ÖÐÍê³É
 if not exist "backend\.env" (
-    echo [3/4] æœªæ‰¾åˆ° backend\.envï¼Œå·²ä»Ž .env.example å¤åˆ¶é»˜è®¤é…ç½®
+    echo [3/4] Î´ÕÒµ½ backend\.env£¬ÒÑ´Ó .env.example ¸´ÖÆÄ¬ÈÏÅäÖÃ
     copy "backend\.env.example" "backend\.env" >nul
 ) else (
-    echo [3/4] é…ç½®æ–‡ä»¶ backend\.env å·²å°±ç»ª
+    echo [3/4] ÅäÖÃÎÄ¼þ backend\.env ÒÑ¾ÍÐ÷
 )
 
-REM ---------- 4. ç«¯å£å ç”¨æç¤º ----------
+REM ---------- 4. ¶Ë¿ÚÕ¼ÓÃÌáÊ¾ ----------
 netstat -ano | findstr ":8000" | findstr "LISTENING" >nul 2>&1
-if not errorlevel 1 echo       æç¤ºï¼š8000 ç«¯å£å·²è¢«å ç”¨ï¼ŒåŽç«¯å¯èƒ½å¯åŠ¨å¤±è´¥
+if not errorlevel 1 echo       ÌáÊ¾£º8000 ¶Ë¿ÚÒÑ±»Õ¼ÓÃ£¬ºó¶Ë¿ÉÄÜÆô¶¯Ê§°Ü
 netstat -ano | findstr ":5173" | findstr "LISTENING" >nul 2>&1
-if not errorlevel 1 echo       æç¤ºï¼š5173 ç«¯å£å·²è¢«å ç”¨ï¼Œå‰ç«¯å¯èƒ½å¯åŠ¨å¤±è´¥
+if not errorlevel 1 echo       ÌáÊ¾£º5173 ¶Ë¿ÚÒÑ±»Õ¼ÓÃ£¬Ç°¶Ë¿ÉÄÜÆô¶¯Ê§°Ü
 
-REM ---------- 5. å¯åŠ¨å‰åŽç«¯ ----------
-echo [4/4] æ­£åœ¨å¯åŠ¨æœåŠ¡ï¼ˆæ–°çª—å£ï¼‰...
+REM ---------- 5. Æô¶¯Ç°ºó¶Ë ----------
+echo [4/4] ÕýÔÚÆô¶¯·þÎñ£¨ÐÂ´°¿Ú£©...
 powershell -NoProfile -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/k','.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000 --reload' -WorkingDirectory '%CD%\backend'"
 
 powershell -NoProfile -Command "Start-Process -FilePath 'npm.cmd' -ArgumentList 'run','dev' -WorkingDirectory '%CD%\frontend'"
 
 echo.
-echo ç­‰å¾…æœåŠ¡å°±ç»ªï¼ˆçº¦ 8 ç§’ï¼‰åŽè‡ªåŠ¨æ‰“å¼€æµè§ˆå™¨ ...
+echo µÈ´ý·þÎñ¾ÍÐ÷£¨Ô¼ 8 Ãë£©ºó×Ô¶¯´ò¿ªä¯ÀÀÆ÷ ...
 ping -n 9 127.0.0.1 >nul
 start "" http://localhost:5173
 
 echo.
-echo åŽç«¯ï¼š http://127.0.0.1:8000  ï¼ˆå¥åº·æ£€æŸ¥ /healthï¼‰
-echo å‰ç«¯ï¼š http://localhost:5173
+echo ºó¶Ë£º http://127.0.0.1:8000  £¨½¡¿µ¼ì²é /health£©
+echo Ç°¶Ë£º http://localhost:5173
 echo.
-echo ä¸¤ä¸ªæ–°çª—å£è¯·å‹¿å…³é—­ï¼›å…³é—­çª—å£å³å¯åœæ­¢å¯¹åº”æœåŠ¡ã€‚
-echo é¦–æ¬¡ä½¿ç”¨ï¼šåœ¨é¡µé¢å·¦ä¸‹è§’ã€Œè®¾ç½®ã€ä¸­å¡«å†™ API Keyï¼Œä¿å­˜åŽç«‹å³ç”Ÿæ•ˆï¼ˆæ— éœ€é‡å¯ï¼‰ã€‚
+echo Á½¸öÐÂ´°¿ÚÇëÎð¹Ø±Õ£»¹Ø±Õ´°¿Ú¼´¿ÉÍ£Ö¹¶ÔÓ¦·þÎñ¡£
+echo Ê×´ÎÊ¹ÓÃ£ºÔÚÒ³Ãæ×óÏÂ½Ç¡¸ÉèÖÃ¡¹ÖÐÌîÐ´ API Key£¬±£´æºóÁ¢¼´ÉúÐ§£¨ÎÞÐèÖØÆô£©¡£
 echo.
 pause
 exit /b 0
 
-REM ---------- é”™è¯¯åˆ†æ”¯ ----------
+REM ---------- ´íÎó·ÖÖ§ ----------
 :no_python
 echo.
-echo [é”™è¯¯] æœªæ‰¾åˆ° python å‘½ä»¤ï¼Œè¯·å…ˆå®‰è£… Python 3.10+ å¹¶å‹¾é€‰ "Add to PATH"ã€‚
-echo        ä¸‹è½½åœ°å€ï¼šhttps://www.python.org/downloads/
+echo [´íÎó] Î´ÕÒµ½ python ÃüÁî£¬ÇëÏÈ°²×° Python 3.10+ ²¢¹´Ñ¡ "Add to PATH"¡£
+echo        ÏÂÔØµØÖ·£ºhttps://www.python.org/downloads/
 pause
 exit /b 1
 
 :pip_failed
 echo.
-echo [é”™è¯¯] åŽç«¯ä¾èµ–å®‰è£…å¤±è´¥ï¼Œè¯·æ£€æŸ¥ç½‘ç»œåŽé‡è¯•ï¼š
+echo [´íÎó] ºó¶ËÒÀÀµ°²×°Ê§°Ü£¬Çë¼ì²éÍøÂçºóÖØÊÔ£º
 echo        backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 pause
 exit /b 1
 
 :npm_failed
 echo.
-echo [é”™è¯¯] å‰ç«¯ä¾èµ–å®‰è£…å¤±è´¥ï¼Œè¯·æ£€æŸ¥ Node.js ä¸Žç½‘ç»œåŽé‡è¯•ï¼š
+echo [´íÎó] Ç°¶ËÒÀÀµ°²×°Ê§°Ü£¬Çë¼ì²é Node.js ÓëÍøÂçºóÖØÊÔ£º
 echo        npm install --prefix frontend
-echo        Node.js ä¸‹è½½ï¼šhttps://nodejs.org/
+echo        Node.js ÏÂÔØ£ºhttps://nodejs.org/
 pause
 exit /b 1

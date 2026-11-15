@@ -47,6 +47,8 @@ class ConversationNode(Base):
         ForeignKey("nodes.id"), nullable=True, index=True
     )
     question: Mapped[str] = mapped_column(Text, default="")
+    # 用户原始提问：标题可单独编辑，重新提交/复制都使用该字段
+    prompt: Mapped[str] = mapped_column(Text, default="")
     answer: Mapped[str] = mapped_column(Text, default="")
     reasoning: Mapped[str] = mapped_column(Text, default="")
     # 来源：root（元问题）/ user（自定义输入）/ suggestion（点选建议）

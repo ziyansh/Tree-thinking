@@ -25,10 +25,12 @@ def _user_content(
     attachments_for: Callable[[ConversationNode], tuple[str, list[dict]]] | None,
 ) -> str | list[dict]:
     """拼一条 user 消息的 content：有附件文本则追加，有图片则改用内容块数组。"""
+    # 优先使用原始提问；旧数据或轻量测试节点没有 prompt 时退回标题
+    question = getattr(node, "prompt", "") or node.question
     if attachments_for is None:
-        return node.question
+        return question
     extra_text, images = attachments_for(node)
-    content = node.question + (extra_text or "")
+    content = question + (extra_text or "")
     if images:
         return [{"type": "text", "text": content}, *images]
     return content

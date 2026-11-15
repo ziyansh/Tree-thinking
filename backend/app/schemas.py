@@ -106,6 +106,14 @@ class NodeOut(CamelModel):
     project_id: str
     parent_id: str | None = None
     question: str
+    # 用户原始提问；旧数据为空时由 DTO 回落到 question
+    prompt: str = ""
+
+    @field_validator("prompt", mode="before")
+    @classmethod
+    def _null_prompt(cls, value: Any) -> Any:
+        """旧库补列后历史行 prompt 为 NULL，先归一成空串再由 DTO 回落到标题。"""
+        return value if isinstance(value, str) else ""
     answer: str
     reasoning: str
     origin: str
@@ -200,6 +208,10 @@ class NodePatch(CamelModel):
     y: float | None = None
     pinned: bool | None = None
     title: str | None = None
+    # 用户原始提问（卡片顶部抽屉编辑后重新提交）
+    prompt: str | None = None
+    # 重新提交时整体覆盖附件 id 列表
+    attachments: list[str] | None = None
     content: str | None = None
     width: float | None = None
     height: float | None = None
@@ -225,6 +237,8 @@ class NodeRestoreItem(CamelModel):
     id: str
     parent_id: str | None = None
     question: str = ""
+    # 原始提问：撤销删除时一并恢复
+    prompt: str = ""
     answer: str = ""
     reasoning: str = ""
     origin: str = "user"

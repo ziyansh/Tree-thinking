@@ -1,18 +1,25 @@
-import { memo, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
 import { ChevronRight } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import type { SuggestionGhostNode } from './ghosts'
+import { bumpUiLayer } from '../lib/uiLayers'
 
 /** 建议箭头：点击后在原地创建子卡片，ghost 随子节点出现而消失 */
 function GhostNodeInner({
+  id,
   data,
   positionAbsoluteX,
   positionAbsoluteY,
 }: NodeProps<SuggestionGhostNode>) {
   const createBranch = useGraphStore((state) => state.createBranch)
   const [pending, setPending] = useState(false)
+
+  // 新显示的候选方向置顶
+  useEffect(() => {
+    bumpUiLayer(id)
+  }, [id])
 
   const handleClick = async () => {
     // 防止连点重复创建

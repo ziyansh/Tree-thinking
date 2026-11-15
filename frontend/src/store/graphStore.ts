@@ -32,6 +32,8 @@ export interface CreateBranchPayload {
 export interface BranchInput {
   id: string
   parentId: string
+  /** 停止生成后回退时预填的提问 */
+  initialQuestion?: string
 }
 
 /** 全局卡片尺寸的最小值（与后端一致，无上限） */
@@ -70,6 +72,7 @@ export type Preferences = Pick<
   | 'themeMode'
   | 'timeFormat'
   | 'provider'
+  | 'thinkingEnabled'
   | 'webSearchEnabled'
   | 'sourcesPanelRatio'
   | 'panInertiaEnabled'
@@ -97,6 +100,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   themeMode: 'system',
   timeFormat: '24h',
   provider: 'deepseek',
+  thinkingEnabled: true,
   webSearchEnabled: false,
   sourcesPanelRatio: 0.25,
   panInertiaEnabled: false,
@@ -125,6 +129,7 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     themeMode: settings.themeMode,
     timeFormat: settings.timeFormat,
     provider: settings.provider,
+    thinkingEnabled: settings.thinkingEnabled,
     webSearchEnabled: settings.webSearchEnabled,
     sourcesPanelRatio: settings.sourcesPanelRatio ?? 0.25,
     panInertiaEnabled: settings.panInertiaEnabled ?? false,
@@ -154,6 +159,7 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     themeMode: patch.themeMode ?? base.themeMode,
     timeFormat: patch.timeFormat ?? base.timeFormat,
     provider: patch.provider ?? base.provider,
+    thinkingEnabled: patch.thinkingEnabled ?? base.thinkingEnabled,
     webSearchEnabled: patch.webSearchEnabled ?? base.webSearchEnabled,
     sourcesPanelRatio: patch.sourcesPanelRatio ?? base.sourcesPanelRatio,
     panInertiaEnabled: patch.panInertiaEnabled ?? base.panInertiaEnabled,
@@ -192,6 +198,7 @@ type NodePatchBody = {
   y?: number
   pinned?: boolean
   title?: string
+  prompt?: string
   content?: string
   width?: number
   height?: number
@@ -222,6 +229,7 @@ function buildUndoPatch(node: NodeDTO, snapshot: NodeDTO): NodePatchBody | null 
   if (node.pinned !== snapshot.pinned) patch.pinned = snapshot.pinned
   // 标题（聊天卡片与笔记都复用 question）
   if (node.question !== snapshot.question) patch.title = snapshot.question
+  if (node.prompt !== snapshot.prompt) patch.prompt = snapshot.prompt
   // 笔记正文单独回写；聊天卡片的回答不由撤销覆盖
   if (node.nodeType === 'note' && node.answer !== snapshot.answer) patch.content = snapshot.answer
   if (node.nodeType === 'note') {
@@ -269,8 +277,10 @@ interface GraphState {
   /** 多选集合；主选中始终包含在内 */
   selectedNodeIds: string[]
   isStreamingIds: string[]
-  /** 分支输入条（卡片下方长条），提交后才创建子卡片 */
+  /** 分支输入条（卡片下方长条），提交后才创建子卡片；同一时刻只保留一条 */
   branchInputs: BranchInput[]
+  /** 分支输入草稿：parentId → 未提交文本，切换输入条后内容仍各自保留 */
+  branchDrafts: Record<string, string>
   /** 全局卡片尺寸，所有画布共用一份 */
   cardSize: { width: number; height: number }
   /** 个人偏好设置（外观、画布交互与保存参数），全局共用 */
@@ -307,14 +317,22 @@ interface GraphState {
   startQuestion: (nodeId: string, question: string, attachmentIds?: string[]) => Promise<string | null>
   /** 由 ghost 箭头创建子卡片，坐标以后端返回值为准 */
   createBranch: (parentId: string, payload: CreateBranchPayload) => Promise<void>
-  /** 在指定卡片下方新增一条分支输入条 */
-  addBranchInput: (parentId: string) => void
-  /** 移除分支输入条 */
+  /** 在指定卡片下方新增一条分支输入条（会收起其它卡片的输入条） */
+  addBranchInput: (parentId: string, initialQuestion?: string) => void
+  /** 移除分支输入条；已输入的文本保留在草稿中 */
   cancelBranchInput: (inputId: string) => void
+  /** 写入分支输入草稿 */
+  setBranchDraft: (parentId: string, text: string) => void
   /** 提交分支问题：创建子卡片、写入落点并开始生成回答 */
-  submitBranchInput: (inputId: string, question: string) => Promise<void>
+  submitBranchInput: (inputId: string, question: string, attachmentIds?: string[]) => Promise<void>
   /** 更新卡片标题并同步后端返回的修改时间 */
   updateNodeTitle: (nodeId: string, title: string) => Promise<void>
+  /** 更新用户原始提问（卡片顶部抽屉重新提交） */
+  updateNodePrompt: (nodeId: string, prompt: string, attachmentIds?: string[]) => Promise<void>
+  /** 删除某张卡片的全部后代（重新生成回答前使用），可撤销 */
+  removeDescendants: (nodeId: string) => Promise<void>
+  /** 停止生成：终止请求并回退到生成前的输入状态 */
+  stopGeneration: (nodeId: string) => Promise<void>
   /** 在画布指定坐标新建笔记卡片并选中 */
   createNoteAt: (x: number, y: number) => Promise<void>
   /** 更新笔记标题（乐观更新，失败回滚） */
@@ -367,6 +385,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     selectedNodeIds: [],
     isStreamingIds: [],
     branchInputs: [],
+    branchDrafts: {},
     cardSize: { ...DEFAULT_CARD_SIZE },
     preferences: { ...DEFAULT_PREFERENCES },
     toast: null,
@@ -390,6 +409,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         selectedNodeIds: root ? [root.id] : [],
         isStreamingIds: [],
         branchInputs: [],
+        branchDrafts: {},
         projects: get().projects.map((project) =>
           project.id === graph.project.id ? graph.project : project,
         ),
@@ -528,6 +548,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         selectedNodeIds: root ? [root.id] : [],
         isStreamingIds: [],
         branchInputs: [],
+        branchDrafts: {},
       }))
     },
 
@@ -567,6 +588,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           selectedNodeId: null,
           selectedNodeIds: [],
           branchInputs: [],
+          branchDrafts: {},
         }
       })
     },
@@ -734,20 +756,37 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       await get().runAnswer(child.id)
     },
 
-    addBranchInput: (parentId) =>
-      set((state) => ({
-        branchInputs: [
-          ...state.branchInputs,
-          { id: `branch-input-${crypto.randomUUID()}`, parentId },
-        ],
-      })),
+    addBranchInput: (parentId, initialQuestion) =>
+      set((state) => {
+        // 同一时刻只保留一条输入条：同一父卡片不重复创建，其它父卡片的输入条收起
+        if (state.branchInputs.some((item) => item.parentId === parentId)) return state
+        return {
+          branchInputs: [
+            {
+              id: `branch-input-${crypto.randomUUID()}`,
+              parentId,
+              ...(initialQuestion ? { initialQuestion } : {}),
+            },
+          ],
+          // 回退预填的提问写入草稿，打开即可继续编辑
+          branchDrafts: initialQuestion
+            ? { ...state.branchDrafts, [parentId]: initialQuestion }
+            : state.branchDrafts,
+        }
+      }),
 
     cancelBranchInput: (inputId) =>
       set((state) => ({
+        // 草稿保留在 branchDrafts 中，再次打开同一卡片可恢复
         branchInputs: state.branchInputs.filter((item) => item.id !== inputId),
       })),
 
-    submitBranchInput: async (inputId, question) => {
+    setBranchDraft: (parentId, text) =>
+      set((state) => ({
+        branchDrafts: { ...state.branchDrafts, [parentId]: text },
+      })),
+
+    submitBranchInput: async (inputId, question, attachmentIds) => {
       const text = question.trim()
       if (!text) return
       const { branchInputs, nodes, currentProjectId } = get()
@@ -764,6 +803,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           parentId: input.parentId,
           question: text,
           origin: 'user',
+          attachments: attachmentIds,
         })
       } catch (err) {
         console.warn('提交分支失败', err)
@@ -774,12 +814,18 @@ export const useGraphStore = create<GraphState>()((set, get) => {
 
       // 分支输入提交后，父卡片这一轮候选方向同样结束
       patchNode(input.parentId, (node) => ({ ...node, suggestionsConsumed: true }))
-      set((state) => ({
-        nodes: [...state.nodes, toFlowNode(child)],
-        branchInputs: state.branchInputs.filter((item) => item.id !== inputId),
-        selectedNodeId: child.id,
-        selectedNodeIds: [child.id],
-      }))
+      set((state) => {
+        // 提交成功后清除该卡片的草稿，避免下次打开残留旧内容
+        const drafts = { ...state.branchDrafts }
+        delete drafts[input.parentId]
+        return {
+          nodes: [...state.nodes, toFlowNode(child)],
+          branchInputs: state.branchInputs.filter((item) => item.id !== inputId),
+          branchDrafts: drafts,
+          selectedNodeId: child.id,
+          selectedNodeIds: [child.id],
+        }
+      })
       await get().runAnswer(child.id)
     },
 
@@ -793,6 +839,122 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         console.warn('更新标题失败', err)
         dropLastUndo(get().currentProjectId)
         window.alert('更新标题失败，请稍后重试')
+      }
+    },
+
+    updateNodePrompt: async (nodeId, prompt, attachmentIds) => {
+      get().pushUndo('编辑提问')
+      try {
+        const updated = await api.patchNode(nodeId, {
+          prompt,
+          ...(attachmentIds ? { attachments: attachmentIds } : {}),
+        })
+        patchNode(nodeId, (node) => ({ ...node, ...updated }))
+      } catch (err) {
+        console.warn('更新提问失败', err)
+        dropLastUndo(get().currentProjectId)
+        window.alert('更新提问失败，请稍后重试')
+      }
+    },
+
+    removeDescendants: async (nodeId) => {
+      const { nodes, currentProjectId } = get()
+      const childRoots = nodes
+        .filter((item) => item.data.node.parentId === nodeId)
+        .map((item) => item.id)
+      if (childRoots.length === 0) return
+
+      // 先快照，撤销可恢复被删掉的后续卡片
+      get().pushUndo('重新生成回答')
+      const removing = collectSubtree(nodes, childRoots)
+      for (const id of removing) abortStream(id)
+
+      try {
+        await Promise.all(childRoots.map((id) => api.deleteNode(id)))
+      } catch (err) {
+        console.warn('删除后续卡片失败', err)
+        dropLastUndo(currentProjectId)
+        window.alert('删除后续卡片失败，请稍后重试')
+        throw err
+      }
+
+      set((state) => ({
+        nodes: state.nodes.filter((item) => !removing.has(item.id)),
+        isStreamingIds: state.isStreamingIds.filter((id) => !removing.has(id)),
+        selectedNodeId: state.selectedNodeId && removing.has(state.selectedNodeId) ? null : state.selectedNodeId,
+        selectedNodeIds: state.selectedNodeIds.filter((id) => !removing.has(id)),
+      }))
+    },
+
+    stopGeneration: async (nodeId) => {
+      const node = get().nodes.find((item) => item.id === nodeId)?.data.node
+      if (!node) return
+      // 立即中断前端 SSE，后续增量不会再写回
+      abortStream(nodeId)
+      removeStreamingId(nodeId)
+
+      // 元问题：回到输入态，保留原始提问供用户修改后重新提交
+      if (node.parentId === null && node.nodeType === 'chat') {
+        try {
+          const updated = await api.stopNode(nodeId)
+          patchNode(nodeId, (current) => ({
+            ...current,
+            ...updated,
+            status: 'input',
+            answer: '',
+            reasoning: '',
+            sources: [],
+            suggestions: [],
+          }))
+        } catch (err) {
+          console.warn('停止生成失败', err)
+          patchNode(nodeId, (current) => ({
+            ...current,
+            status: 'input',
+            answer: '',
+            reasoning: '',
+            sources: [],
+            suggestions: [],
+          }))
+        }
+        return
+      }
+
+      // 其余卡片：删除本次生成的卡片，并尽量回到输入环节
+      const parentId = node.parentId
+      if (!parentId) return
+      const prompt = node.prompt || node.question
+      const origin = node.origin
+      const removing = collectSubtree(get().nodes, [nodeId])
+      try {
+        await api.deleteNode(nodeId)
+      } catch (err) {
+        // 卡片已不存在时忽略，保持本地一致
+        if (!(err instanceof ApiError) || (err.status !== 400 && err.status !== 404)) {
+          console.warn('停止生成时删除卡片失败', err)
+        }
+      }
+
+      set((state) => ({
+        nodes: state.nodes.filter((item) => !removing.has(item.id)),
+        isStreamingIds: state.isStreamingIds.filter((id) => !removing.has(id)),
+        selectedNodeId: parentId,
+        selectedNodeIds: parentId ? [parentId] : [],
+      }))
+      // 恢复父卡片的候选方向与输入入口
+      patchNode(parentId, (parent) => ({ ...parent, suggestionsConsumed: false }))
+      if (origin === 'user' && prompt) {
+        // 与 addBranchInput 一致：只保留这一条输入条，并把原提问写进草稿
+        set((state) => ({
+          branchInputs: [
+            {
+              id: `branch-input-${crypto.randomUUID()}`,
+              parentId,
+              initialQuestion: prompt,
+            },
+          ],
+          branchDrafts: { ...state.branchDrafts, [parentId]: prompt },
+        }))
       }
     },
 

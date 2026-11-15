@@ -62,6 +62,7 @@ function makeRoot(projectId: string): NodeDTO {
     projectId,
     parentId: null,
     question: '',
+    prompt: '',
     answer: '',
     reasoning: '',
     origin: 'root',
@@ -256,6 +257,7 @@ function makeNode(init: Partial<NodeDTO> & { projectId: string; parentId: string
     projectId: init.projectId,
     parentId: init.parentId,
     question: init.question ?? '',
+    prompt: init.prompt ?? init.question ?? '',
     answer: '',
     reasoning: '',
     origin: init.origin ?? 'user',
@@ -445,6 +447,8 @@ export const mockApi: ApiClient = {
     if (patch.y !== undefined) node.y = patch.y
     if (patch.pinned !== undefined) node.pinned = patch.pinned
     if (patch.title !== undefined) node.question = patch.title
+    if (patch.prompt !== undefined) node.prompt = patch.prompt.trim()
+    if (patch.attachments !== undefined) node.attachments = resolveAttachments(patch.attachments)
     // 候选方向整组覆盖（撤销「换一个方向」）
     if (patch.suggestions !== undefined) node.suggestions = patch.suggestions
     if (patch.suggestionsConsumed !== undefined) node.suggestionsConsumed = patch.suggestionsConsumed
@@ -534,12 +538,32 @@ export const mockApi: ApiClient = {
     const db = getDb()
     const node = findNode(id)
     node.question = question
+    // 首次提交时原始提问与标题一致，后续标题可单独改名
+    node.prompt = question
     node.error = null
     // 附件按 id 解析成元信息；未传该字段时保持原附件不变
     if (attachments !== undefined) node.attachments = resolveAttachments(attachments)
     node.updatedAt = nowIso()
     // 根问题写入后同步画布摘要，侧边栏列表才能显示最新摘要
     syncProjectMeta(db, node.projectId)
+    saveDb(db)
+    return { ...node }
+  },
+
+  async stopNode(id) {
+    await delay(40)
+    const db = getDb()
+    const node = findNode(id)
+    // 与后端一致：只有元问题卡片回到输入态，其余卡片由前端删除
+    if (node.parentId === null && node.nodeType === 'chat') {
+      node.status = 'input'
+      node.answer = ''
+      node.reasoning = ''
+      node.error = null
+      node.sources = []
+      node.suggestions = []
+    }
+    node.updatedAt = nowIso()
     saveDb(db)
     return { ...node }
   },

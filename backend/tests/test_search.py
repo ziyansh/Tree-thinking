@@ -176,7 +176,7 @@ def _fake_search_client(captured: dict):
 
 
 def test_search_respects_limit_setting(monkeypatch):
-    """默认不设限时不发送 count 且不截断；设置上限后请求并截断到该数量。"""
+    """默认不设限时请求服务端上限且不截断；设置上限后请求并截断到该数量。"""
     from app.services import search as search_service
 
     captured: dict = {}
@@ -184,7 +184,8 @@ def test_search_respects_limit_setting(monkeypatch):
 
     runtime = {"api_key": "sk-test", "base_url": "https://api.deepseek.com"}
     unlimited = asyncio.run(search_service.search_web("测试", runtime))
-    assert "count" not in captured["payload"]
+    # 显式请求 50 条，避免服务端默认的 10 条成为隐性上限
+    assert captured["payload"]["count"] == 50
     assert len(unlimited) == 12
 
     limited = asyncio.run(search_service.search_web("测试", {**runtime, "search_limit": 5}))

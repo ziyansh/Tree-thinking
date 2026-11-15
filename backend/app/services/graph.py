@@ -25,7 +25,11 @@ def get_node_or_404(db: Session, node_id: str, detail: str = "节点不存在") 
 
 def node_to_dto(node: ConversationNode) -> dict:
     """ORM 节点转 camelCase 字典：解析 suggestions JSON，时间转 ISO 字符串。"""
-    return NodeOut.model_validate(node).model_dump(by_alias=True)
+    data = NodeOut.model_validate(node)
+    # 旧库没有 prompt 列时回落到标题，保证前端始终拿到原始提问
+    if not data.prompt:
+        data.prompt = node.question or ""
+    return data.model_dump(by_alias=True)
 
 
 def next_child_position(db: Session, parent: ConversationNode) -> tuple[float, float]:

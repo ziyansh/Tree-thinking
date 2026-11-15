@@ -4,10 +4,12 @@ import { Handle, Position } from '@xyflow/react'
 import { Paperclip, Send } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import type { InputGhostNode } from './ghosts'
-import { AttachmentChips, useAttachmentUploads, useFileDropZone } from './AttachmentComposer'
+import { AttachmentChips, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
 import { WebSearchToggle } from './WebSearchToggle'
+import { ThinkingToggle } from './ThinkingToggle'
 import { useSpacePressed } from '../lib/spaceKey'
 import { setActiveGhostInput, useActiveGhostInput } from '../lib/ghostInputFocus'
+import { bumpUiLayer } from '../lib/uiLayers'
 
 /**
  * 自定义方向输入箭头：收起时为单行输入，聚焦后展开为多行输入 + 附件区，
@@ -28,6 +30,7 @@ function GhostInputNodeInner({
   const [draft, setDraft] = useState('')
   const [pending, setPending] = useState(false)
   const attachments = useAttachmentUploads()
+  const pasteAttachments = usePasteAttachments(attachments)
   const spacePressed = useSpacePressed()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -39,6 +42,11 @@ function GhostInputNodeInner({
   }
 
   const dropZone = useFileDropZone((files) => void addFiles(files))
+
+  // 新显示的自定义输入置顶；展开（获焦）时再次置顶
+  useEffect(() => {
+    bumpUiLayer(id)
+  }, [id])
 
   // 展开态下只有选中卡片发生非空变化才收起（点击空白画布不收起）
   useEffect(() => {
@@ -90,6 +98,7 @@ function GhostInputNodeInner({
     <div
       onFocus={() => {
         setActiveGhostInput(id)
+        bumpUiLayer(id)
         setFocused(true)
       }}
       onDragOver={dropZone.onDragOver}
@@ -118,6 +127,7 @@ function GhostInputNodeInner({
             value={draft}
             disabled={isStreaming || pending}
             onChange={(event) => setDraft(event.target.value)}
+            onPaste={pasteAttachments}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
@@ -162,6 +172,7 @@ function GhostInputNodeInner({
                   void addFiles(files)
                 }}
               />
+              <ThinkingToggle />
               <WebSearchToggle />
             </div>
             <button
@@ -187,6 +198,7 @@ function GhostInputNodeInner({
             value={draft}
             disabled={isStreaming || pending}
             onChange={(event) => setDraft(event.target.value)}
+            onPaste={pasteAttachments}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()

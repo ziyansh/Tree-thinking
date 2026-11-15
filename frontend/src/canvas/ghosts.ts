@@ -8,7 +8,7 @@ export type GhostNodeData = { parentId: string; suggestionId: string; text: stri
 export type GhostInputNodeData = { parentId: string }
 
 /** 分支输入条的节点数据 */
-export type BranchInputNodeData = { inputId: string }
+export type BranchInputNodeData = { inputId: string; parentId: string }
 
 /** 建议箭头节点 */
 export type SuggestionGhostNode = Node<GhostNodeData, 'ghost'>
@@ -28,8 +28,8 @@ export const GHOST_WIDTH = 420
 /** ghost 卡片之间的纵向间距 */
 const GHOST_GAP = 8
 
-/** 分支输入条之间的纵向堆叠间距 */
-const BRANCH_INPUT_GAP = 52
+/** 分支输入条之间的纵向堆叠间距：输入条已改为多行 composer 样式 */
+const BRANCH_INPUT_GAP = 170
 
 /**
  * 估算候选方向 ghost 的实际高度：每行约 26 个字符、行高 20px、上下内边距 12px，最小 44px。
@@ -83,8 +83,7 @@ export function buildGhostNodes(
         // 坐标取拖拽后的最新 position，而非 data.node.x/y
         position: { x, y: card.position.y + offset },
         data: { parentId: node.id, suggestionId: suggestion.id, text: suggestion.text },
-        // 候选方向始终浮在卡片之上，避免重叠时被遮挡
-        zIndex: 10,
+        // zIndex 由 Canvas 的动态层级分配器统一设置
         draggable: false,
         selectable: false,
         deletable: false,
@@ -99,8 +98,7 @@ export function buildGhostNodes(
       type: 'ghost-input',
       position: { x, y: card.position.y + offset },
       data: { parentId: node.id },
-      // 与候选方向同层，保证可点击、可输入
-      zIndex: 10,
+      // zIndex 由 Canvas 的动态层级分配器统一设置
       draggable: false,
       selectable: false,
       deletable: false,
@@ -137,9 +135,8 @@ export function buildBranchInputNodes(
         x: parent.position.x,
         y: parent.position.y + cardSize.height + cardGap + index * BRANCH_INPUT_GAP,
       },
-      data: { inputId: input.id },
-      // 输入条高于卡片，与候选方向同层
-      zIndex: 10,
+      data: { inputId: input.id, parentId: input.parentId },
+      // zIndex 由 Canvas 的动态层级分配器统一设置（分支输入条区段最高）
       draggable: false,
       selectable: false,
       deletable: false,

@@ -245,6 +245,7 @@ def restore_nodes(
                 project_id=project_id,
                 parent_id=item.parent_id,
                 question=item.question,
+                prompt=item.prompt or item.question,
                 answer=item.answer,
                 reasoning=item.reasoning,
                 origin=item.origin,
@@ -325,6 +326,8 @@ def create_node(
         project_id=project_id,
         parent_id=parent.id,
         question=question,
+        # 原始提问与标题初始相同，之后标题可单独改名
+        prompt=question,
         answer="",
         reasoning="",
         origin=payload.origin,

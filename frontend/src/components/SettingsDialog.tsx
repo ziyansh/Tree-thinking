@@ -859,7 +859,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
                       <Row
                         label="模型搜索上限"
-                        hint="联网搜索时注入模型的资料条数上限；默认 0 表示不设限"
+                        hint="联网搜索时注入模型的资料条数上限（服务端最多 50 条）；0 表示不设限"
                       >
                         <NumberInput
                           value={form.searchLimit}

@@ -52,6 +52,8 @@ _EXTRA_COLUMNS = {
         # 联网搜索来源与附件元数据，均为 JSON 数组字符串
         "sources": "TEXT",
         "attachments": "TEXT",
+        # 用户原始提问（标题可单独改名，重新提交与复制使用该字段）
+        "prompt": "TEXT",
     },
     "app_settings": {
         # 服务商与 OpenAI 独立配置（旧库补列）

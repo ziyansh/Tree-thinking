@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import {
   Background,
@@ -10,7 +10,7 @@ import {
 } from '@xyflow/react'
 import type { Edge, Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Globe, LayoutGrid, Maximize, Minus, Plus } from 'lucide-react'
+import { Brain, Globe, LayoutGrid, Maximize, Minus, Plus } from 'lucide-react'
 import { CardNode } from './CardNode'
 import { NoteNode } from './NoteNode'
 import { BranchInputNode } from './BranchInputNode'
@@ -24,6 +24,13 @@ import { NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, useGraphStore } from '../store
 import type { GraphFlowNode } from '../store/graphStore'
 import { DOT_COLORS, resolveTheme } from '../lib/theme'
 import { useSpacePressed } from '../lib/spaceKey'
+import {
+  bumpUiLayer,
+  dropUiLayer,
+  getUiLayerVersion,
+  resolveLayerZ,
+  subscribeUiLayer,
+} from '../lib/uiLayers'
 
 const nodeTypes = {
   card: CardNode,
@@ -628,18 +635,60 @@ function CanvasInner() {
     () => buildBranchInputNodes(branchInputs, nodes, cardSize, preferences.cardGap),
     [branchInputs, nodes, cardSize, preferences.cardGap],
   )
+  // 动态层级：同类元素中最新显示 / 状态更新 / 获焦者排在最上面
+  const layerVersion = useSyncExternalStore(subscribeUiLayer, getUiLayerVersion)
+
+  // 新出现的卡片与状态变化的卡片自动置顶（流式回答的 streaming / done 都算状态更新）
+  const nodeStateRef = useRef(new Map<string, string>())
+  useEffect(() => {
+    const alive = new Set<string>()
+    nodes.forEach((item) => {
+      alive.add(item.id)
+      const status = item.data.node.status
+      if (nodeStateRef.current.get(item.id) !== status) bumpUiLayer(item.id)
+      nodeStateRef.current.set(item.id, status)
+    })
+    nodeStateRef.current.forEach((_, id) => {
+      if (alive.has(id)) return
+      nodeStateRef.current.delete(id)
+      dropUiLayer(id)
+    })
+  }, [nodes])
+
+  const cardZ = useMemo(
+    () => resolveLayerZ('card', nodes.map((item) => item.id)),
+    // layerVersion 变化即层级变化，节点本身未变也要重算
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nodes, layerVersion],
+  )
+  const ghostZ = useMemo(
+    () => resolveLayerZ('ghost', ghosts.map((item) => item.id)),
+    [ghosts, layerVersion],
+  )
+  const branchInputZ = useMemo(
+    () => resolveLayerZ(
+      'branchInput',
+      branchInputNodes.map((item) => item.id),
+    ),
+    [branchInputNodes, layerVersion],
+  )
+
   const allNodes = useMemo(
     () => [
       // 固定卡片不可直接拖动；只有标题区（.card-drag-handle）作为拖动手柄
       ...nodes.map((item) => ({
         ...item,
+        zIndex: cardZ.get(item.id),
         draggable: !item.data.node.pinned,
         dragHandle: '.card-drag-handle',
       })),
-      ...ghosts,
-      ...branchInputNodes,
+      ...ghosts.map((item) => ({ ...item, zIndex: ghostZ.get(item.id) })),
+      ...branchInputNodes.map((item) => ({
+        ...item,
+        zIndex: branchInputZ.get(item.id),
+      })),
     ],
-    [nodes, ghosts, branchInputNodes],
+    [nodes, ghosts, branchInputNodes, cardZ, ghostZ, branchInputZ],
   )
 
   // 卡片之间为主链/分支实线；卡片指向 ghost 的连线复用主链边并保持虚线
@@ -780,6 +829,8 @@ function CanvasInner() {
     // 用户接管：停止自动整理插值与平移惯性
     layoutCanceledRef.current = true
     stopInertia()
+    // 拖动中的卡片是当前焦点，置顶
+    bumpUiLayer(node.id)
     const state = useGraphStore.getState()
     const dragged = state.nodes.find((item) => item.id === node.id)?.data.node
     if (!dragged || dragged.pinned) return
@@ -997,6 +1048,17 @@ function CanvasInner() {
     }
   }, [preferences.webSearchEnabled, updatePreferences, webSearchDisabled])
 
+  // 思考模式同样仅 DeepSeek 支持，与卡片、设置里的开关共用同一字段
+  const thinkingDisabled = preferences.provider !== 'deepseek'
+  const toggleThinking = useCallback(async () => {
+    if (thinkingDisabled) return
+    try {
+      await updatePreferences({ thinkingEnabled: !preferences.thinkingEnabled })
+    } catch (err) {
+      console.warn('切换思考模式失败', err)
+    }
+  }, [preferences.thinkingEnabled, thinkingDisabled, updatePreferences])
+
   // 仅在打开/切换画布时定位一次：有保存视口则恢复，否则 fitView
   useEffect(() => {
     if (!currentProjectId || nodes.length === 0) return
@@ -1071,7 +1133,7 @@ function CanvasInner() {
         panActivationKeyCode={null}
         // 卡片拖动沿用同一「漂移距离」判定
         nodeDragThreshold={preferences.dragDriftDistance}
-        // 取消选中卡片自动抬升，保证 ghost 与分支输入条（zIndex 10）始终在卡片之上
+        // 取消库内选中自动抬升，层级统一交给 lib/uiLayers 的动态分配器
         elevateNodesOnSelect={false}
         // 空格按住时卡片不可拖动，左键拖动改为平移画布
         nodesDraggable={!spacePressed}
@@ -1082,6 +1144,8 @@ function CanvasInner() {
         onNodeClick={(event, node) => {
           // ghost 与分支输入条不可选中；聊天卡片与笔记都参与选中
           if (node.type !== 'card' && node.type !== 'note') return
+          // 获焦卡片置顶，避免被其它卡片或输入浮层遮挡
+          bumpUiLayer(node.id)
           // 拖拽松手后浏览器仍可能补发 click，此时保持原来的多选集合
           if (performance.now() - lastDragEndRef.current < 100) return
           if (event.ctrlKey || event.metaKey) {
@@ -1116,6 +1180,24 @@ function CanvasInner() {
             >
               <LayoutGrid size={12} />
               自动重排
+            </button>
+            <button
+              type="button"
+              title={thinkingDisabled ? '仅 DeepSeek 服务商支持思考模式' : '深度思考'}
+              aria-disabled={thinkingDisabled}
+              aria-pressed={preferences.thinkingEnabled}
+              onClick={() => void toggleThinking()}
+              className={[
+                'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors duration-150',
+                thinkingDisabled
+                  ? 'cursor-not-allowed border-subtle bg-panel text-muted opacity-40'
+                  : preferences.thinkingEnabled
+                    ? 'border-accent bg-accent-dim text-accent'
+                    : 'border-subtle bg-panel text-muted hover:text-ink',
+              ].join(' ')}
+            >
+              <Brain size={12} />
+              深度思考
             </button>
             <button
               type="button"

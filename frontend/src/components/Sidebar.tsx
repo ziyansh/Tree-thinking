@@ -1,12 +1,35 @@
 import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronsLeft, ChevronsRight, Pencil, Plus, Settings, Trash2 } from 'lucide-react'
+import { ChevronsLeft, ChevronsRight, Download, LogOut, Pencil, Plus, Settings, Trash2 } from 'lucide-react'
+import { api } from '../api/client'
 import { useGraphStore } from '../store/graphStore'
-import type { ProjectDTO } from '../api/types'
+import type { AuthSession, ProjectDTO } from '../api/types'
 
 /** 展开/收起后的固定宽度；切换宽度不做动画，避免画布内容出现大幅位移 */
 const EXPANDED_WIDTH = 240
 const COLLAPSED_WIDTH = 48
+
+/** 去掉 Windows 文件名非法字符（\ / : * ? " < > |），结尾空格与点也一并清理 */
+function safeFileName(name: string): string {
+  const cleaned = name
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/[. ]+$/, '')
+    .trim()
+  return cleaned || '画布'
+}
+
+/** 导出文件名的时间戳：yyyyMMdd-HHmm */
+function fileStamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    '-',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+  ].join('')
+}
 
 interface IconButtonProps {
   title: string
@@ -41,8 +64,16 @@ function IconButton({ title, onClick, small, danger, children }: IconButtonProps
   )
 }
 
-/** 左侧可折叠画布侧边栏：列出、切换、新建、重命名与删除画布，左下角提供设置入口 */
-export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
+/** 左侧可折叠画布侧边栏：列出、切换、新建、重命名、下载与删除画布，左下角提供设置与账号入口 */
+export function Sidebar({
+  onOpenSettings,
+  session,
+  onLogout,
+}: {
+  onOpenSettings: () => void
+  session: AuthSession | null
+  onLogout: () => void
+}) {
   const projects = useGraphStore((state) => state.projects)
   const currentProjectId = useGraphStore((state) => state.currentProjectId)
   const openProject = useGraphStore((state) => state.openProject)
@@ -95,6 +126,24 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
       else await createProject()
     } catch (err) {
       console.warn('切换画布失败', err)
+    }
+  }
+
+  /** 下载画布历史文件：取 Blob → 临时 URL → a[download] → 释放 URL */
+  const handleDownload = async (project: ProjectDTO) => {
+    try {
+      const blob = await api.exportProject(project.id)
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `${safeFileName(project.name)}-${fileStamp(new Date())}.json`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.warn('下载画布失败', err)
+      window.alert(err instanceof Error ? err.message : '下载失败，请稍后重试')
     }
   }
 
@@ -174,7 +223,8 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
                       ) : (
                         <div
                           className={[
-                            'truncate pr-12 text-[13px] leading-tight',
+                            // 右侧常驻三个图标（重命名/下载/删除），预留足够宽度避免标题被遮挡
+                            'truncate pr-20 text-[13px] leading-tight',
                             active ? 'text-accent' : 'text-ink',
                           ].join(' ')}
                         >
@@ -190,6 +240,13 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
                             onClick={() => startRename(project)}
                           >
                             <Pencil size={12} />
+                          </IconButton>
+                          <IconButton
+                            title="下载历史文件"
+                            small
+                            onClick={() => void handleDownload(project)}
+                          >
+                            <Download size={12} />
                           </IconButton>
                           <IconButton
                             title="删除画布"
@@ -209,6 +266,27 @@ export function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
           </div>
 
           <div className="border-t border-subtle p-2">
+            {/* 仅 server 模式显示账号区：当前用户名与退出登录 */}
+            {session?.mode === 'server' && session.user && (
+              <div className="mb-1 flex items-center justify-between gap-1 px-1.5">
+                <span
+                  className="min-w-0 truncate text-[12px] text-muted"
+                  title={session.user.username}
+                >
+                  {session.user.username}
+                </span>
+                <button
+                  type="button"
+                  title="退出登录"
+                  aria-label="退出登录"
+                  onClick={onLogout}
+                  className="flex shrink-0 items-center gap-1 rounded-lg px-1.5 py-1 text-[12px] text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
+                >
+                  <LogOut size={12} />
+                  退出登录
+                </button>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-1">
               <button
                 type="button"

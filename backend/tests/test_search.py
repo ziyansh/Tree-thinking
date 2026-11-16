@@ -65,7 +65,11 @@ def test_answer_with_web_search(client, session_factory, monkeypatch):
 
     client.put(
         "/api/settings",
-        json={"apiKey": "sk-search-key", "webSearchEnabled": True},
+        json={
+            "apiKey": "sk-search-key",
+            "webSearchEnabled": True,
+            "webSearchMode": "forced",
+        },
     )
     project_id, node_id = _create_node_with_question(client, "2026 年 AI 有哪些新进展")
 
@@ -121,7 +125,11 @@ def test_answer_search_failure_keeps_flow(client, session_factory, monkeypatch):
 
     client.put(
         "/api/settings",
-        json={"apiKey": "sk-search-key", "webSearchEnabled": True},
+        json={
+            "apiKey": "sk-search-key",
+            "webSearchEnabled": True,
+            "webSearchMode": "forced",
+        },
     )
     _, node_id = _create_node_with_question(client, "搜索失败时回答")
 

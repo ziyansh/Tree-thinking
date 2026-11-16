@@ -5,7 +5,13 @@ import type { BranchInput, GraphFlowNode } from '../store/graphStore'
 export type GhostNodeData = { parentId: string; suggestionId: string; text: string }
 
 /** 自定义输入箭头的节点数据 */
-export type GhostInputNodeData = { parentId: string }
+export type GhostInputNodeData = {
+  parentId: string
+  /** 挂载后直接展开并聚焦（无候选方向的默认输入入口） */
+  autoOpen?: boolean
+  /** 展开时预填的内容，来自 store 的 ghostDrafts */
+  initialQuestion?: string
+}
 
 /** 分支输入条的节点数据 */
 export type BranchInputNodeData = { inputId: string; parentId: string }
@@ -42,19 +48,24 @@ export function suggestionGhostHeight(text: string): number {
 /**
  * 由卡片派生 ghost 箭头。
  * 候选方向紧凑纵向堆叠：组顶部与父卡片顶部对齐，x 位于父卡片右侧一个卡片间距处。
- * 每条未被使用的建议生成一个 ghost 节点，每个已消费过滤后的卡片末尾再追加一个输入箭头。
- * 父卡片已消费候选方向（单选过一条）时整组隐藏，包括输入项。
+ * 每条未被使用的建议生成一个 ghost 节点，每张卡片末尾再追加一个输入箭头（同一父卡片最多一个）。
+ * 没有子卡片时输入箭头默认展开：候选方向组隐藏时直接展开，候选方向仍然显示时仅在
+ * 有预填草稿（停止生成删除子卡片）的情况下展开。
  */
 export function buildGhostNodes(
   cards: GraphFlowNode[],
   cardSize: { width: number; height: number },
   cardGap: number,
+  getGhostDraft: (parentId: string) => string = () => '',
 ): GhostFlowNode[] {
   /** 已被创建成子卡片的建议，键为「父节点 id:建议 id」 */
   const usedSuggestions = new Set<string>()
+  /** 每个父卡片当前的子卡片数量 */
+  const childCount = new Map<string, number>()
 
   for (const card of cards) {
     const node = card.data.node
+    if (node.parentId) childCount.set(node.parentId, (childCount.get(node.parentId) ?? 0) + 1)
     if (node.parentId && node.origin === 'suggestion' && node.suggestionId) {
       usedSuggestions.add(`${node.parentId}:${node.suggestionId}`)
     }
@@ -66,38 +77,51 @@ export function buildGhostNodes(
     const node = card.data.node
     // 笔记不产生建议与输入箭头，直接跳过
     if (node.nodeType === 'note') continue
-    // 只有已完成且未被消费建议的卡片才展示候选方向
-    if (node.status !== 'done' || node.suggestionsConsumed) continue
+    // 只有已完成的卡片才展示候选方向与输入入口
+    if (node.status !== 'done') continue
+
+    const hasChildren = (childCount.get(node.id) ?? 0) > 0
+    const showSuggestions = !node.suggestionsConsumed && node.suggestions.length > 0
+    // 有子卡片且候选方向已消费时没有任何 ghost
+    if (hasChildren && !showSuggestions) continue
 
     const x = card.position.x + cardSize.width + cardGap
     const seen = new Set<string>()
     /** 已排入的 ghost 累计高度：按每条候选的实际估算高度向下累加 */
     let offset = 0
 
-    for (const suggestion of node.suggestions) {
-      if (usedSuggestions.has(`${node.id}:${suggestion.id}`) || seen.has(suggestion.id)) continue
-      seen.add(suggestion.id)
-      ghosts.push({
-        id: `ghost:${node.id}:${suggestion.id}`,
-        type: 'ghost',
-        // 坐标取拖拽后的最新 position，而非 data.node.x/y
-        position: { x, y: card.position.y + offset },
-        data: { parentId: node.id, suggestionId: suggestion.id, text: suggestion.text },
-        // zIndex 由 Canvas 的动态层级分配器统一设置
-        draggable: false,
-        selectable: false,
-        deletable: false,
-        connectable: false,
-      })
-      offset += suggestionGhostHeight(suggestion.text) + GHOST_GAP
+    if (showSuggestions) {
+      for (const suggestion of node.suggestions) {
+        if (usedSuggestions.has(`${node.id}:${suggestion.id}`) || seen.has(suggestion.id)) continue
+        seen.add(suggestion.id)
+        ghosts.push({
+          id: `ghost:${node.id}:${suggestion.id}`,
+          type: 'ghost',
+          // 坐标取拖拽后的最新 position，而非 data.node.x/y
+          position: { x, y: card.position.y + offset },
+          data: { parentId: node.id, suggestionId: suggestion.id, text: suggestion.text },
+          // zIndex 由 Canvas 的动态层级分配器统一设置
+          draggable: false,
+          selectable: false,
+          deletable: false,
+          connectable: false,
+        })
+        offset += suggestionGhostHeight(suggestion.text) + GHOST_GAP
+      }
     }
 
-    // 输入箭头排在所有候选方向之后，高度固定 44 后不再有其他项
+    const draft = getGhostDraft(node.id)
+    // 输入箭头排在所有候选方向之后，每个父卡片只生成一次
     ghosts.push({
       id: `ghost-input:${node.id}`,
       type: 'ghost-input',
       position: { x, y: card.position.y + offset },
-      data: { parentId: node.id },
+      data: {
+        parentId: node.id,
+        // 没有子卡片且候选方向组不显示（或有预填内容）时默认展开
+        autoOpen: !hasChildren && (!showSuggestions || draft.trim().length > 0),
+        initialQuestion: draft,
+      },
       // zIndex 由 Canvas 的动态层级分配器统一设置
       draggable: false,
       selectable: false,

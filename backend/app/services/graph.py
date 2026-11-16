@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import ConversationNode
+from app.models import ConversationNode, Project
 from app.schemas import NodeOut
 from app.services import settings as runtime_settings
 
@@ -15,11 +15,20 @@ NOTE_MIN_WIDTH = 280
 NOTE_MIN_HEIGHT = 240
 
 
-def get_node_or_404(db: Session, node_id: str, detail: str = "节点不存在") -> ConversationNode:
-    """按 id 取节点，不存在时抛 404。"""
+def get_owned_node(
+    db: Session, node_id: str, user=None, detail: str = "节点不存在"
+) -> ConversationNode:
+    """按 id 取节点并校验归属；local 模式（user 为空）只校验存在性。
+
+    server 模式下非本人节点一律按不存在处理，避免泄露资源存在性。
+    """
     node = db.get(ConversationNode, node_id)
     if node is None:
         raise HTTPException(status_code=404, detail=detail)
+    if user is not None:
+        project = db.get(Project, node.project_id)
+        if project is None or project.owner_id != user.id:
+            raise HTTPException(status_code=404, detail=detail)
     return node
 
 
@@ -32,7 +41,9 @@ def node_to_dto(node: ConversationNode) -> dict:
     return data.model_dump(by_alias=True)
 
 
-def next_child_position(db: Session, parent: ConversationNode) -> tuple[float, float]:
+def next_child_position(
+    db: Session, parent: ConversationNode, user=None
+) -> tuple[float, float]:
     """按连接方式与「卡片间距」计算新子节点坐标。
 
     第一子卡片永远是主干：父卡片正右方、同一 y。
@@ -40,7 +51,7 @@ def next_child_position(db: Session, parent: ConversationNode) -> tuple[float, f
     - 直接分支：父卡片正下方，同 x 列；
     - 共用母线：父卡片右侧下一列，纵向错开。
     """
-    runtime = runtime_settings.effective(db)
+    runtime = runtime_settings.effective(db, user)
     gap = runtime["card_gap"]
     style = runtime["connection_style"]
     sibling_count = (

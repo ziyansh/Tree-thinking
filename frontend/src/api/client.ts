@@ -1,15 +1,29 @@
 import { isMock, mockApi } from './mock'
+import { streamContinue } from './sse'
+import type { StreamHandlers } from './sse'
 import type {
   AttachmentDTO,
+  AuthSession,
+  AuthUser,
+  ExportFile,
   GraphDTO,
+  ImportResult,
   NodeCreateInput,
   NodeDTO,
   ProjectDTO,
   SettingsDTO,
   SettingsPatch,
+  SourceDTO,
   SuggestionDTO,
   Viewport,
 } from './types'
+
+/** 停止生成时一并提交的内存内容：后端据此落库，避免流式期间数据库未更新导致内容丢失 */
+export interface StopNodePayload {
+  answer: string
+  reasoning: string
+  sources: SourceDTO[]
+}
 
 /** 所有请求走同源 /api，开发环境由 vite 代理到后端 8000 端口 */
 const API_BASE = '/api'
@@ -44,17 +58,28 @@ async function readError(res: Response): Promise<string> {
   return `请求失败（HTTP ${res.status}）`
 }
 
+/** 401 统一处理：通知 App 会话已失效，随后仍照常抛出 ApiError（登录/注册失败为 400，不触发） */
+function notifyUnauthorized(status: number): void {
+  if (status !== 401) return
+  window.dispatchEvent(new CustomEvent('tt:unauthorized'))
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response
   try {
     res = await fetch(`${API_BASE}${path}`, {
       ...init,
+      // 跨端口开发与 server 模式的 Cookie 会话都需要显式携带凭据
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     })
   } catch {
     throw new ApiError(0, '无法连接后端服务，请确认后端已启动')
   }
-  if (!res.ok) throw new ApiError(res.status, await readError(res))
+  if (!res.ok) {
+    notifyUnauthorized(res.status)
+    throw new ApiError(res.status, await readError(res))
+  }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
@@ -65,16 +90,47 @@ async function uploadAttachmentFile(file: File): Promise<AttachmentDTO> {
   formData.append('file', file)
   let res: Response
   try {
-    res = await fetch(`${API_BASE}/attachments`, { method: 'POST', body: formData })
+    res = await fetch(`${API_BASE}/attachments`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include',
+    })
   } catch {
     throw new ApiError(0, '无法连接后端服务，请确认后端已启动')
   }
-  if (!res.ok) throw new ApiError(res.status, await readError(res))
+  if (!res.ok) {
+    notifyUnauthorized(res.status)
+    throw new ApiError(res.status, await readError(res))
+  }
   return (await res.json()) as AttachmentDTO
+}
+
+/** 下载画布导出文件：响应体为附件二进制，失败时按统一结构抛错 */
+async function downloadProjectFile(id: string): Promise<Blob> {
+  let res: Response
+  try {
+    res = await fetch(`${API_BASE}/projects/${id}/export`, { credentials: 'include' })
+  } catch {
+    throw new ApiError(0, '无法连接后端服务，请确认后端已启动')
+  }
+  if (!res.ok) {
+    notifyUnauthorized(res.status)
+    throw new ApiError(res.status, await readError(res))
+  }
+  return res.blob()
 }
 
 /** 前端用到的全部后端接口（Mock 与真实模式共用） */
 export interface ApiClient {
+  /** 当前会话：local 免登录，server 需要登录 */
+  getSession(): Promise<AuthSession>
+  register(username: string, password: string): Promise<AuthUser>
+  login(username: string, password: string): Promise<AuthUser>
+  logout(): Promise<void>
+  /** 导出画布为 JSON 文件（Blob），供浏览器下载 */
+  exportProject(id: string): Promise<Blob>
+  /** 导入画布文件，返回新建画布与根节点 id */
+  importProject(payload: ExportFile): Promise<ImportResult>
   listProjects(): Promise<ProjectDTO[]>
   createProject(name?: string): Promise<GraphDTO>
   patchProject(id: string, patch: { name?: string; viewport?: Viewport }): Promise<ProjectDTO>
@@ -113,8 +169,10 @@ export interface ApiClient {
   /** 保存当前画布快照，返回保存时间 */
   saveProject(projectId: string): Promise<{ savedAt: string }>
   setNodeQuestion(id: string, question: string, attachments?: string[]): Promise<NodeDTO>
-  /** 停止生成：根卡片回退到输入态；其余卡片由前端删除 */
-  stopNode(id: string): Promise<NodeDTO>
+  /** 停止生成：已有输出时保留内容并置 paused；根卡片无输出时回退到输入态 */
+  stopNode(id: string, payload?: StopNodePayload): Promise<NodeDTO>
+  /** 续写暂停的回答（SSE 流式），事件形状与 answer 接口一致 */
+  continueNode(id: string, handlers: StreamHandlers, signal?: AbortSignal): Promise<void>
   generateSuggestions(id: string, count?: number): Promise<SuggestionDTO[]>
   /** 新增空分支卡片：后端按当前卡片尺寸计算坐标，返回输入态节点 */
   createBranch(nodeId: string): Promise<NodeDTO>
@@ -123,6 +181,37 @@ export interface ApiClient {
 }
 
 const realApi: ApiClient = {
+  getSession: () => request<AuthSession>('/auth/session'),
+
+  // 注册与登录成功后后端直接下发会话 Cookie，这里只返回用户信息
+  register: async (username, password) => {
+    const body = await request<{ user: AuthUser }>('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+    return body.user
+  },
+
+  login: async (username, password) => {
+    const body = await request<{ user: AuthUser }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    })
+    return body.user
+  },
+
+  logout: async () => {
+    await request<{ ok: boolean }>('/auth/logout', { method: 'POST' })
+  },
+
+  exportProject: downloadProjectFile,
+
+  importProject: (payload) =>
+    request<ImportResult>('/projects/import', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
   listProjects: () => request<ProjectDTO[]>('/projects'),
 
   // 后端创建画布时同时返回自动创建的根节点
@@ -178,8 +267,13 @@ const realApi: ApiClient = {
       body: JSON.stringify({ question, attachments }),
     }),
 
-  stopNode: (id) =>
-    request<NodeDTO>(`/nodes/${id}/stop`, { method: 'POST', body: JSON.stringify({}) }),
+  stopNode: (id, payload) =>
+    request<NodeDTO>(`/nodes/${id}/stop`, {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {}),
+    }),
+
+  continueNode: (id, handlers, signal) => streamContinue(id, handlers, signal),
 
   // 重新生成候选方向，已生成子卡片的建议由后端保留
   generateSuggestions: (id, count) =>

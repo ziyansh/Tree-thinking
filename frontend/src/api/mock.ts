@@ -2,7 +2,10 @@ import type { ApiClient } from './client'
 import type { StreamHandlers } from './sse'
 import type {
   AttachmentDTO,
+  AuthSession,
+  ExportFile,
   GraphDTO,
+  ImportResult,
   NodeDTO,
   ProjectDTO,
   SettingsDTO,
@@ -71,8 +74,10 @@ function makeRoot(projectId: string): NodeDTO {
     error: null,
     suggestions: [],
     suggestionsConsumed: false,
+    titleCustom: false,
     sources: [],
     attachments: [],
+    webToolUsed: false,
     // 元卡片默认固定，与后端一致
     pinned: true,
     nodeType: 'chat',
@@ -160,11 +165,12 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   themeMode: 'system',
   timeFormat: '24h',
   webSearchEnabled: false,
+  webSearchMode: 'smart',
   sourcesPanelRatio: 0.25,
   panInertiaEnabled: false,
   panInertiaCoefficient: 0.5,
   canvasStyle: 'none',
-  searchLimit: 0,
+  searchLimit: 50,
 }
 
 /** 全局卡片尺寸的最小值（与后端一致，无上限） */
@@ -266,8 +272,10 @@ function makeNode(init: Partial<NodeDTO> & { projectId: string; parentId: string
     error: null,
     suggestions: [],
     suggestionsConsumed: false,
+    titleCustom: init.titleCustom ?? false,
     sources: init.sources ?? [],
     attachments: init.attachments ?? [],
+    webToolUsed: init.webToolUsed ?? false,
     pinned: init.pinned ?? false,
     nodeType: init.nodeType ?? 'chat',
     width: init.width ?? null,
@@ -312,11 +320,97 @@ function resolveAttachments(ids?: string[]): AttachmentDTO[] {
         kind: 'other',
         ext: '',
         url: `/api/attachments/${id}`,
+        fileId: id,
+        parsed: false,
       },
   )
 }
 
 export const mockApi: ApiClient = {
+  async getSession(): Promise<AuthSession> {
+    // Mock 始终是单机模式，没有账号体系
+    return { mode: 'local', user: null }
+  },
+
+  async register() {
+    throw new Error('Mock 模式为本地模式，无需注册')
+  },
+
+  async login() {
+    throw new Error('Mock 模式为本地模式，无需登录')
+  },
+
+  async logout() {
+    // 本地模式没有会话，直接视为成功
+  },
+
+  async exportProject(id) {
+    await delay(80)
+    const db = getDb()
+    const project = db.projects.find((item) => item.id === id)
+    if (!project) throw new Error('画布不存在')
+    const payload: ExportFile = {
+      app: 'tree-thinking',
+      version: 1,
+      exportedAt: nowIso(),
+      project: { name: project.name, viewport: project.viewport },
+      nodes: db.nodes.filter((item) => item.projectId === id).map((node) => ({ ...node })),
+    }
+    return new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  },
+
+  async importProject(payload): Promise<ImportResult> {
+    await delay(160)
+    if (payload.app !== 'tree-thinking') throw new Error('不是本应用导出的画布文件')
+    if (payload.version !== 1) throw new Error('不支持的导出文件版本')
+    if (!Array.isArray(payload.nodes) || payload.nodes.length === 0) {
+      throw new Error('导入文件里没有节点')
+    }
+
+    const db = getDb()
+    const project: ProjectDTO = {
+      id: uid('p'),
+      // 与后端一致：导入后追加后缀，便于和原画布区分
+      name: `${(payload.project?.name ?? '').trim() || '新画布'}（导入）`,
+      viewport: payload.project?.viewport ?? null,
+      rootQuestion: '',
+      nodeCount: 0,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    }
+
+    // 旧 id → 新 id 的映射，parentId 同步换成新 id 以保持树结构
+    const idMap = new Map<string, string>()
+    for (const node of payload.nodes) {
+      if (!node.id) throw new Error('导入文件里的节点 id 缺失')
+      idMap.set(node.id, uid('n'))
+    }
+    if (idMap.size !== payload.nodes.length) throw new Error('导入文件里的节点 id 缺失或重复')
+    for (const node of payload.nodes) {
+      if (node.parentId && !idMap.has(node.parentId)) {
+        throw new Error('导入文件里的父子关系不完整')
+      }
+    }
+
+    const nodes: NodeDTO[] = payload.nodes.map((node) => ({
+      ...node,
+      id: idMap.get(node.id) as string,
+      projectId: project.id,
+      parentId: node.parentId ? (idMap.get(node.parentId) ?? null) : null,
+      createdAt: node.createdAt ?? nowIso(),
+      updatedAt: nowIso(),
+    }))
+
+    const root = nodes.find((node) => node.parentId === null && node.nodeType === 'chat')
+    if (!root) throw new Error('导入文件缺少根节点')
+
+    db.projects.unshift(project)
+    db.nodes.push(...nodes)
+    syncProjectMeta(db, project.id)
+    saveDb(db)
+    return { project: { ...project }, nodeId: root.id }
+  },
+
   async listProjects() {
     await delay(80)
     return getDb().projects.map((project) => ({ ...project }))
@@ -411,6 +505,8 @@ export const mockApi: ApiClient = {
       kind: kindOfAttachment(file.name, file.type),
       ext,
       url,
+      fileId: id,
+      parsed: true,
     }
     attachmentCache.set(id, attachment)
     return { ...attachment }
@@ -446,7 +542,11 @@ export const mockApi: ApiClient = {
     if (patch.x !== undefined) node.x = patch.x
     if (patch.y !== undefined) node.y = patch.y
     if (patch.pinned !== undefined) node.pinned = patch.pinned
-    if (patch.title !== undefined) node.question = patch.title
+    if (patch.title !== undefined) {
+      node.question = patch.title
+      // 用户手动编辑标题后标记，重新提交提问时不再自动覆盖
+      node.titleCustom = true
+    }
     if (patch.prompt !== undefined) node.prompt = patch.prompt.trim()
     if (patch.attachments !== undefined) node.attachments = resolveAttachments(patch.attachments)
     // 候选方向整组覆盖（撤销「换一个方向」）
@@ -550,12 +650,21 @@ export const mockApi: ApiClient = {
     return { ...node }
   },
 
-  async stopNode(id) {
+  async stopNode(id, payload) {
     await delay(40)
     const db = getDb()
     const node = findNode(id)
-    // 与后端一致：只有元问题卡片回到输入态，其余卡片由前端删除
-    if (node.parentId === null && node.nodeType === 'chat') {
+    // 流式期间数据库尚未写入增量：先把前端提交的内存内容落库，再判断有无输出
+    if (payload) {
+      node.answer = payload.answer
+      node.reasoning = payload.reasoning
+      node.sources = payload.sources.map((source) => ({ ...source }))
+    }
+    // 与后端一致：已有可见输出时保留内容并进入暂停态，否则根卡片回到输入态
+    if (node.answer.trim()) {
+      node.status = 'paused'
+      node.error = null
+    } else if (node.parentId === null && node.nodeType === 'chat') {
       node.status = 'input'
       node.answer = ''
       node.reasoning = ''
@@ -566,6 +675,27 @@ export const mockApi: ApiClient = {
     node.updatedAt = nowIso()
     saveDb(db)
     return { ...node }
+  },
+
+  async continueNode(id, handlers, signal) {
+    await delay(40)
+    const db = getDb()
+    const node = findNode(id)
+    if (signal?.aborted) return
+    // 模拟续写：在现有回答后追加一段文本，完成后回到 done
+    const chunk = '\n\n（继续生成）模型从中断处接着补完剩余内容。'
+    node.status = 'streaming'
+    node.error = null
+    node.answer += chunk
+    node.updatedAt = nowIso()
+    saveDb(db)
+    handlers.onDelta?.(chunk)
+    await sleep(120, signal)
+    if (signal?.aborted) return
+    node.status = 'done'
+    node.updatedAt = nowIso()
+    saveDb(db)
+    handlers.onDone?.()
   },
 
   async generateSuggestions(id, count = 3) {
@@ -726,6 +856,10 @@ export const mockApi: ApiClient = {
     if (patch.themeMode !== undefined) settings.themeMode = patch.themeMode
     if (patch.timeFormat !== undefined) settings.timeFormat = patch.timeFormat
     if (patch.webSearchEnabled !== undefined) settings.webSearchEnabled = patch.webSearchEnabled
+    // 只接受智能搜索 / 强制搜索两种取值
+    if (patch.webSearchMode === 'smart' || patch.webSearchMode === 'forced') {
+      settings.webSearchMode = patch.webSearchMode
+    }
     // 参考资料抽屉比例：与后端一致夹到 0.15–0.7
     if (patch.sourcesPanelRatio !== undefined) {
       settings.sourcesPanelRatio = Math.min(0.7, Math.max(0.15, patch.sourcesPanelRatio))
@@ -736,7 +870,7 @@ export const mockApi: ApiClient = {
     }
     if (patch.canvasStyle !== undefined) settings.canvasStyle = patch.canvasStyle
     if (patch.searchLimit !== undefined) {
-      settings.searchLimit = Math.min(50, Math.max(0, Math.round(patch.searchLimit)))
+      settings.searchLimit = Math.min(50, Math.max(1, Math.round(patch.searchLimit)))
     }
     saveSettingsState(settings)
     return { ...settings }

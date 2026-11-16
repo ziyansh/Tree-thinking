@@ -1,6 +1,9 @@
 # Python 虚拟环境
 backend/.venv/
 __pycache__/
+# 其它位置（仓库根目录 / frontend 等）的虚拟环境
+.venv/
+venv/
 
 # 数据库文件
 backend/data/
@@ -34,6 +37,14 @@ Reference_Doc/
 *.db
 *.sqlite
 *.sqlite3
+
+# SQLite 运行时附属文件（WAL / 共享内存），随数据库一起产生
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 # 密钥/证书
 *.key

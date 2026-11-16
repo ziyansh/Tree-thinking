@@ -143,9 +143,10 @@ def test_build_message_parts_image(client):
     assert meta["kind"] == "image"
 
     node = SimpleNamespace(attachments=json.dumps([meta]))
-    text, images = attachments.build_message_parts(node)
+    text, images, documents = attachments.build_message_parts(node)
 
     assert text == ""
+    assert documents == []
     assert len(images) == 1
     block = images[0]
     assert block["type"] == "image_url"

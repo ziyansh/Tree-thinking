@@ -5,12 +5,14 @@
 
 /** 各类 UI 的层级基线：同类型在基线之后按序号递增 */
 export const UI_LAYER_BASE = {
-  /** 卡片（含卡片内部抽屉） */
+  /** 聊天卡片（含卡片内部抽屉） */
   card: 10,
   /** 猜你想问（建议箭头与自定义方向输入） */
   ghost: 400,
-  /** 新建分支输入条：必须高于卡片与猜你想问 */
-  branchInput: 800,
+  /** 笔记卡片：必须高于猜你想问，避免被建议组遮挡 */
+  note: 800,
+  /** 新建分支输入条：必须高于卡片、猜你想问与笔记 */
+  branchInput: 1200,
 } as const
 
 export type UiLayerKind = keyof typeof UI_LAYER_BASE

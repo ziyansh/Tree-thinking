@@ -5,8 +5,8 @@ export interface Viewport {
   zoom: number
 }
 
-/** 节点状态：待输入 / 排队 / 流式中 / 完成 / 失败 */
-export type NodeStatus = 'input' | 'pending' | 'streaming' | 'done' | 'error'
+/** 节点状态：待输入 / 排队 / 流式中 / 已完成 / 已暂停（有输出时停止生成）/ 失败 */
+export type NodeStatus = 'input' | 'pending' | 'streaming' | 'done' | 'paused' | 'error'
 
 /** 节点来源：根节点 / 用户新增 / 点选建议 */
 export type NodeOrigin = 'root' | 'user' | 'suggestion'
@@ -39,6 +39,10 @@ export interface AttachmentDTO {
   kind: AttachmentKind
   ext: string
   url: string
+  /** 后端解析后的文件 id（部分实现返回，可选） */
+  fileId?: string
+  /** 纯文本类附件是否已解析完成（部分实现返回，可选） */
+  parsed?: boolean
 }
 
 /** 对话卡片对应的后端节点 */
@@ -58,6 +62,8 @@ export interface NodeDTO {
   suggestions: SuggestionDTO[]
   /** 候选方向是否已被消费（选中一条后隐藏整组，换一个方向后重置） */
   suggestionsConsumed: boolean
+  /** 标题是否被用户手动编辑过：为 true 时重新提交提问不再自动更新标题 */
+  titleCustom: boolean
   /** 是否固定：固定卡片不能被直接拖动（元卡片默认固定） */
   pinned: boolean
   /** 节点类型：chat 问答卡片 / note 笔记卡片 */
@@ -70,6 +76,8 @@ export interface NodeDTO {
   sources: SourceDTO[]
   /** 节点创建时上传的附件元信息 */
   attachments: AttachmentDTO[]
+  /** 本次回答是否使用过联网工具：智能搜索产生的结果不支持续写 */
+  webToolUsed: boolean
   x: number
   y: number
   createdAt?: string
@@ -123,6 +131,9 @@ export type ModelProvider = 'deepseek' | 'openai'
 
 /** OpenAI 推理强度：default 表示不发送该参数 */
 export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high'
+
+/** 联网搜索方式：smart 由模型判断是否检索 / forced 每次先检索再回答 */
+export type WebSearchMode = 'smart' | 'forced'
 
 /** 应用设置视图：Key 只返回脱敏值 */
 export interface SettingsDTO {
@@ -182,6 +193,8 @@ export interface SettingsDTO {
   timeFormat: TimeFormat
   /** 是否开启联网搜索（默认关闭，仅 DeepSeek 服务商可用） */
   webSearchEnabled: boolean
+  /** 联网搜索方式（默认智能搜索） */
+  webSearchMode: WebSearchMode
   /** 参考资料抽屉高度占卡片高度的比例（默认 0.25，范围 0.15–0.7） */
   sourcesPanelRatio: number
   /** 画布拖动惯性开关（默认关闭） */
@@ -190,8 +203,38 @@ export interface SettingsDTO {
   panInertiaCoefficient: number
   /** 画布背景样式（默认 none） */
   canvasStyle: CanvasStyle
-  /** 模型搜索上限：注入模型的资料条数，0 表示不设限 */
+  /** 强制搜索上限：注入模型的资料条数，1–50（仅强制搜索生效） */
   searchLimit: number
+}
+
+/** 服务端模式下的登录用户 */
+export interface AuthUser {
+  id: string
+  username: string
+}
+
+/** 当前会话：local 为免登录的单机模式，server 需要登录 */
+export interface AuthSession {
+  mode: 'local' | 'server'
+  user: AuthUser | null
+}
+
+/** 导出文件：与 GET /api/projects/{id}/export 输出、POST /api/projects/import 入参一致 */
+export interface ExportFile {
+  app: string
+  version: number
+  exportedAt?: string
+  project: {
+    name: string
+    viewport: Viewport | null
+  }
+  nodes: NodeDTO[]
+}
+
+/** 导入结果：新建的画布与根节点 id */
+export interface ImportResult {
+  project: ProjectDTO
+  nodeId: string
 }
 
 /** 更新设置入参：只提交要改的字段；apiKey 留空表示保持原 Key */
@@ -230,6 +273,8 @@ export interface SettingsPatch {
   timeFormat?: TimeFormat
   /** 是否开启联网搜索 */
   webSearchEnabled?: boolean
+  /** 联网搜索方式 */
+  webSearchMode?: WebSearchMode
   /** 参考资料抽屉高度占卡片高度的比例（0.15–0.7） */
   sourcesPanelRatio?: number
   /** 画布拖动惯性开关 */
@@ -238,6 +283,6 @@ export interface SettingsPatch {
   panInertiaCoefficient?: number
   /** 画布背景样式 */
   canvasStyle?: CanvasStyle
-  /** 模型搜索上限（0 表示不设限，服务层夹到 0–50） */
+  /** 强制搜索上限（注入模型的资料条数，1–50） */
   searchLimit?: number
 }

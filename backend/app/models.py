@@ -30,6 +30,10 @@ class Project(Base):
     name_is_custom: Mapped[bool] = mapped_column(Boolean, default=False)
     # 视口 {x,y,zoom}，存 JSON 字符串；可空表示尚未保存
     viewport: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 归属用户；local 模式为空，server 模式为 users.id
+    owner_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(default=_now)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
@@ -49,6 +53,8 @@ class ConversationNode(Base):
     question: Mapped[str] = mapped_column(Text, default="")
     # 用户原始提问：标题可单独编辑，重新提交/复制都使用该字段
     prompt: Mapped[str] = mapped_column(Text, default="")
+    # 标题是否被用户手动改过；未改过时重新提交会自动更新标题
+    title_custom: Mapped[bool] = mapped_column(Boolean, default=False)
     answer: Mapped[str] = mapped_column(Text, default="")
     reasoning: Mapped[str] = mapped_column(Text, default="")
     # 来源：root（元问题）/ user（自定义输入）/ suggestion（点选建议）
@@ -61,6 +67,8 @@ class ConversationNode(Base):
     suggestions: Mapped[str] = mapped_column(Text, default="[]")
     # 联网搜索来源，存 JSON 数组的字符串（没有来源时为空数组）
     sources: Mapped[str] = mapped_column(Text, default="[]")
+    # 本次回答是否使用过服务端联网工具；用过之后不能继续生成
+    web_tool_used: Mapped[bool] = mapped_column(Boolean, default=False)
     # 节点附件元数据（上传接口返回的结构），存 JSON 数组的字符串
     attachments: Mapped[str] = mapped_column(Text, default="[]")
     # 本组候选方向是否已被选择（单选后整组隐藏）
@@ -78,16 +86,13 @@ class ConversationNode(Base):
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
 
-class AppSetting(Base):
-    """应用内设置：固定只有一行（id=1）。
+class _SettingsFields:
+    """设置项公共列：app_settings 与 user_settings 字段完全一致。
 
     字段为空时回落到环境变量（backend/.env）里的默认值，
     这样用户既可以在页面里改，也保留了 .env 作为兜底配置。
     """
 
-    __tablename__ = "app_settings"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # 当前服务商：deepseek / openai；为空表示 deepseek
     provider: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 前端提交的 DeepSeek Key；为空表示沿用环境变量
@@ -145,6 +150,8 @@ class AppSetting(Base):
     time_format: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # 是否开启联网搜索；为空表示沿用环境变量默认值（默认关闭）
     web_search_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # 联网搜索模式：smart（模型自主搜索）/ forced（预检索注入）；为空表示 smart
+    web_search_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 来源抽屉高度占卡片高度的比例；为空表示 0.25
     sources_panel_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 画布拖动惯性：是否启用与系数（0.1–1.0）；为空表示关闭、系数 0.5
@@ -155,3 +162,31 @@ class AppSetting(Base):
     # 模型搜索上限（注入模型的资料条数）；0 表示不设限
     search_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
+
+
+class AppSetting(_SettingsFields, Base):
+    """应用内设置：固定只有一行（id=1），local 模式使用。"""
+
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+
+class User(Base):
+    """服务器模式账号：用户名统一小写存储，保证大小写不敏感。"""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    # bcrypt 哈希值：长度固定 60，留出余量
+    password_hash: Mapped[str] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
+class UserSetting(_SettingsFields, Base):
+    """服务器模式下的用户设置：每个用户一行，字段与 app_settings 一致。"""
+
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)

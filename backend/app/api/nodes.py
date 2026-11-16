@@ -11,17 +11,18 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, get_db
-from app.models import ConversationNode
-from app.schemas import NodePatch, NodeQuestion, SuggestionRequest
-from app.services import attachments, llm, suggestions
+from app.models import ConversationNode, Project, User
+from app.schemas import NodePatch, NodeQuestion, NodeStopRequest, SuggestionRequest
+from app.services import attachments, llm, naming, suggestions
 from app.services import search as search_service
 from app.services import settings as runtime_settings
+from app.services.auth import require_user
 from app.services.context import build_messages, get_path
 from app.services.graph import (
     NOTE_MIN_HEIGHT,
     NOTE_MIN_WIDTH,
     collect_subtree_ids,
-    get_node_or_404,
+    get_owned_node,
     next_child_position,
     node_to_dto,
 )
@@ -32,8 +33,17 @@ router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 # SSE 响应头：禁用缓存与反向代理缓冲，保证增量及时到达浏览器
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
+# 继续生成时追加的指令：要求紧接着已有内容续写
+CONTINUE_PROMPT = "请从中断处继续输出，不要重复已有内容，不要重新开头。"
+
 # 未配置 Key 时的提示：带上当前服务商名，同时作为节点错误信息落库
 PROVIDER_LABELS = {"deepseek": "DeepSeek", "openai": "OpenAI"}
+
+# 新画布的默认名：仍是该名字时才允许会话标题自动改名
+DEFAULT_PROJECT_NAME = "新画布"
+
+# 智能搜索：在 Chat Completions 顶层声明服务端联网工具（不能用 tool_choice 强制）
+WEB_SEARCH_TOOL = [{"type": "deepseek_web_search"}]
 
 
 def _no_key_message(provider: str) -> str:
@@ -55,19 +65,21 @@ def _persist_answer(
     error: str | None,
     suggestion_list: list[dict] | None = None,
     sources: list[dict] | None = None,
+    web_tool_used: bool | None = None,
 ) -> None:
     """用新的会话落库回答结果；suggestion_list 非空时一并写入候选方向。
 
     生成器里不能跨 await 复用请求级的同步会话，所以这里单独开一个会话。
     sources 非 None 时写入本次搜索来源（即使回答失败也保留）。
+    web_tool_used 非 None 时写入「本次回答是否用过服务端联网工具」。
     """
     db = SessionLocal()
     try:
         node = db.get(ConversationNode, node_id)
         if node is None:
             return
-        # 用户已「停止生成」把卡片退回输入态时，迟到的流式结果不再覆盖
-        if node.status == "input":
+        # 用户已「停止生成」（input）或「暂停」（paused）时，迟到的流式结果不再覆盖
+        if node.status in ("input", "paused"):
             return
         node.answer = answer
         node.reasoning = reasoning
@@ -77,7 +89,29 @@ def _persist_answer(
             node.suggestions = json.dumps(suggestion_list, ensure_ascii=False)
         if sources is not None:
             node.sources = json.dumps(sources, ensure_ascii=False)
+        if web_tool_used is not None:
+            node.web_tool_used = web_tool_used
         db.commit()
+    finally:
+        db.close()
+
+
+def _apply_project_title(project_id: str, title: str) -> bool:
+    """把会话标题写入画布名，仅当画布未被手动改名且仍是默认名；返回是否写入。"""
+    db = SessionLocal()
+    try:
+        project = db.get(Project, project_id)
+        if (
+            project is None
+            or project.name_is_custom
+            or project.name != DEFAULT_PROJECT_NAME
+        ):
+            return False
+        project.name = title
+        # 标题属于自动命名，保持「未手动改名」状态
+        project.name_is_custom = False
+        db.commit()
+        return True
     finally:
         db.close()
 
@@ -102,28 +136,39 @@ def _sources_prompt(sources: list[dict]) -> str:
 
 
 @router.patch("/{node_id}")
-def patch_node(node_id: str, payload: NodePatch, db: Session = Depends(get_db)) -> dict:
+def patch_node(
+    node_id: str,
+    payload: NodePatch,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+) -> dict:
     """保存节点坐标，并支持固定、标题、正文、笔记尺寸与候选方向修改。
 
     - pinned：任何节点可改
-    - title：写入 question（聊天卡片标题与笔记标题复用该字段）
+    - title：写入 question，并标记为用户自定义标题
+    - prompt：写入原始提问；未手动改过标题时按同步规则自动更新标题
     - content：仅笔记节点写入 answer，聊天卡片忽略
     - width/height：仅笔记节点写入（最小 280×240），聊天卡片忽略
     - suggestions：整组覆盖候选方向（撤销「换一个方向」时回写）
     """
-    node = get_node_or_404(db, node_id)
+    node = get_owned_node(db, node_id, user)
     if payload.x is not None:
         node.x = payload.x
     if payload.y is not None:
         node.y = payload.y
     if payload.pinned is not None:
         node.pinned = payload.pinned
+    # title 优先：同时提交 title 与 prompt 时以 title 为准
     if payload.title is not None:
         node.question = payload.title
+        node.title_custom = True
     if payload.prompt is not None:
         node.prompt = payload.prompt.strip()
+        # 未手动改过标题时，用新提问自动更新标题（同步规则，不调用模型）
+        if not node.title_custom:
+            node.question = naming.clean_title(node.prompt) or node.question
     if payload.attachments is not None:
-        metas = attachments.resolve_ids(payload.attachments)
+        metas = attachments.resolve_ids(payload.attachments, user)
         node.attachments = json.dumps(metas, ensure_ascii=False)
     if payload.suggestions_consumed is not None:
         node.suggestions_consumed = payload.suggestions_consumed
@@ -147,9 +192,13 @@ def patch_node(node_id: str, payload: NodePatch, db: Session = Depends(get_db)) 
 
 
 @router.delete("/{node_id}")
-def delete_node(node_id: str, db: Session = Depends(get_db)) -> dict:
+def delete_node(
+    node_id: str,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+) -> dict:
     """删除节点及其全部后代；元问题卡片（根节点）不可删除，笔记卡片可删除。"""
-    node = get_node_or_404(db, node_id)
+    node = get_owned_node(db, node_id, user)
     if node.parent_id is None and node.node_type != "note":
         raise HTTPException(status_code=400, detail="元问题卡片不可删除")
 
@@ -160,13 +209,17 @@ def delete_node(node_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/{node_id}/branch")
-def create_branch(node_id: str, db: Session = Depends(get_db)) -> dict:
+def create_branch(
+    node_id: str,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+) -> dict:
     """新增空分支卡片：仅已完成回答的卡片可以派生，坐标与普通子节点一致。"""
-    parent = get_node_or_404(db, node_id)
+    parent = get_owned_node(db, node_id, user)
     if parent.status != "done":
         raise HTTPException(status_code=400, detail="当前卡片还没有完成回答，无法新增分支")
 
-    x, y = next_child_position(db, parent)
+    x, y = next_child_position(db, parent, user)
     node = ConversationNode(
         project_id=parent.project_id,
         parent_id=parent.id,
@@ -187,9 +240,14 @@ def create_branch(node_id: str, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/{node_id}/question")
-def set_question(node_id: str, payload: NodeQuestion, db: Session = Depends(get_db)) -> dict:
+def set_question(
+    node_id: str,
+    payload: NodeQuestion,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+) -> dict:
     """写入节点问题（用于根卡片首次输入或错误重试），并置为待回答。"""
-    node = get_node_or_404(db, node_id)
+    node = get_owned_node(db, node_id, user)
     if node.status not in ("input", "error"):
         raise HTTPException(status_code=400, detail="该节点已有回答，不能重复写入问题")
 
@@ -197,7 +255,7 @@ def set_question(node_id: str, payload: NodeQuestion, db: Session = Depends(get_
     # 首次提交时原始提问与标题相同；之后标题可单独改名
     node.prompt = node.question
     # 附件按本次提交整体覆盖；空数组表示该节点不附附件
-    metas = attachments.resolve_ids(payload.attachments)
+    metas = attachments.resolve_ids(payload.attachments, user)
     node.attachments = json.dumps(metas, ensure_ascii=False)
     node.status = "pending"
     db.commit()
@@ -206,13 +264,38 @@ def set_question(node_id: str, payload: NodeQuestion, db: Session = Depends(get_
 
 
 @router.post("/{node_id}/stop")
-def stop_generation(node_id: str, db: Session = Depends(get_db)) -> dict:
-    """停止生成：元问题卡片回退到输入态；其余卡片由前端删除。
+def stop_generation(
+    node_id: str,
+    payload: NodeStopRequest | None = None,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+) -> dict:
+    """停止生成：已产生输出 → 暂停（保留内容，可继续生成）。
 
-    前端中断 SSE 后调用，把根卡片恢复成「等待用户输入」，
-    清空本次已生成的内容，便于用户修改后重新提交。
+    前端流式期间内容只在前端累积，因此允许通过 body 回传 answer/reasoning/sources；
+    没有输出时：根卡片回退到输入态并清空本次内容；
+    非根卡片保持原样返回，由前端自行删除。
     """
-    node = get_node_or_404(db, node_id)
+    node = get_owned_node(db, node_id, user)
+
+    merged_answer = payload.answer if payload else ""
+    if not merged_answer:
+        merged_answer = node.answer or ""
+    merged_reasoning = payload.reasoning if payload else ""
+    if not merged_reasoning:
+        merged_reasoning = node.reasoning or ""
+
+    if merged_answer.strip():
+        node.answer = merged_answer
+        node.reasoning = merged_reasoning
+        if payload is not None and payload.sources is not None:
+            node.sources = json.dumps(payload.sources, ensure_ascii=False)
+        node.status = "paused"
+        node.error = None
+        db.commit()
+        db.refresh(node)
+        return node_to_dto(node)
+
     if node.parent_id is None and node.node_type == "chat":
         node.status = "input"
         node.answer = ""
@@ -225,22 +308,117 @@ def stop_generation(node_id: str, db: Session = Depends(get_db)) -> dict:
     return node_to_dto(node)
 
 
+@router.post("/{node_id}/continue")
+async def continue_answer(
+    node_id: str,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+):
+    """继续生成：在已有回答后流式追加，不重新联网搜索，也不重新生成候选方向。"""
+    node = get_owned_node(db, node_id, user)
+    # 智能搜索用过的回答无法续写（服务端会返回 400），这里提前拦截给可读提示
+    if node.web_tool_used:
+        raise HTTPException(
+            status_code=400, detail="智能搜索产生的回答不支持继续生成，请重新输入问题"
+        )
+    existing_answer = node.answer or ""
+    if not existing_answer.strip():
+        raise HTTPException(status_code=400, detail="当前卡片还没有回答，无法继续生成")
+
+    node.status = "streaming"
+    node.error = None
+    db.commit()
+    db.refresh(node)
+
+    # 上下文快照：路径为「根 → 当前节点」，附件按节点注入
+    messages = build_messages(
+        get_path(db, node),
+        attachments_for=lambda item: attachments.build_message_parts(item),
+    )
+    # 已生成的内容作为 assistant 消息回传，再要求从中断处续写
+    messages.append({"role": "assistant", "content": existing_answer})
+    messages.append({"role": "user", "content": CONTINUE_PROMPT})
+    runtime = runtime_settings.effective(db, user)
+    # 生成器内不能复用请求级会话，先把已有思考过程取出来
+    existing_reasoning = node.reasoning or ""
+
+    if not runtime["api_key"]:
+        message = _no_key_message(runtime["provider"])
+        _persist_answer(node_id, existing_answer, existing_reasoning, "error", message)
+
+        def _no_key_stream() -> Iterator[str]:
+            yield _sse("error", {"message": message})
+
+        return StreamingResponse(
+            _no_key_stream(), media_type="text/event-stream", headers=SSE_HEADERS
+        )
+
+    async def _stream() -> AsyncIterator[str]:
+        """在已有回答基础上累积增量；结束时一次性落库。"""
+        answer = existing_answer
+        reasoning = existing_reasoning
+        error: str | None = None
+        try:
+            async for kind, text in llm.stream_chat(messages, runtime):
+                if kind == "reasoning":
+                    reasoning += text
+                    yield _sse("reasoning", {"text": text})
+                elif kind == "delta":
+                    answer += text
+                    yield _sse("delta", {"text": text})
+        except llm.LLMError as exc:
+            error = str(exc) or "模型调用失败"
+        except Exception as exc:  # 兜底：未预期异常也转成可读中文提示
+            error = f"回答过程中发生错误：{exc}"
+        finally:
+            # 保留原有来源与候选方向，只覆盖回答与思考过程
+            _persist_answer(
+                node_id, answer, reasoning, "error" if error else "done", error
+            )
+
+        if error:
+            yield _sse("error", {"message": error})
+        else:
+            yield _sse("done", {"status": "done"})
+
+    return StreamingResponse(
+        _stream(), media_type="text/event-stream", headers=SSE_HEADERS
+    )
+
+
 @router.post("/{node_id}/answer")
-async def answer_node(node_id: str, db: Session = Depends(get_db)):
+async def answer_node(
+    node_id: str,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+):
     """流式回答：以 SSE 推送 sources / reasoning / delta / done / error，并把结果落库。"""
-    node = get_node_or_404(db, node_id)
+    node = get_owned_node(db, node_id, user)
     # 重新提交时以「原始提问」为准，标题只影响画布显示
     question = (node.prompt or node.question or "").strip()
     if not question:
         raise HTTPException(status_code=400, detail="该节点还没有问题，请先输入问题后再请求回答")
+
+    # 会话标题：仅根卡片首次回答、画布仍是默认名时开启（连带自动命名画布）
+    project = db.get(Project, node.project_id)
+    project_id = node.project_id
+    enable_title = (
+        node.parent_id is None
+        and node.node_type == "chat"
+        and not (node.answer or "").strip()
+        and project is not None
+        and not project.name_is_custom
+        and project.name == DEFAULT_PROJECT_NAME
+    )
 
     # 开始前置为流式状态并清空旧内容，便于前端「重新生成」时复用同一节点
     node.status = "streaming"
     node.answer = ""
     node.reasoning = ""
     node.error = None
-    # 重新生成时同样清空上一次的来源，避免新旧来源混在一起
+    # 重新生成时同样清空上一次的来源与联网工具标记
     node.sources = "[]"
+    node.web_tool_used = False
     db.commit()
     db.refresh(node)
 
@@ -251,7 +429,7 @@ async def answer_node(node_id: str, db: Session = Depends(get_db)):
         attachments_for=lambda item: attachments.build_message_parts(item),
     )
     # 当前生效的模型设置（页面「设置」优先，其次 .env）；保存后立即生效
-    runtime = runtime_settings.effective(db)
+    runtime = runtime_settings.effective(db, user)
 
     if not runtime["api_key"]:
         # 未配置 Key 也返回 200 + SSE，先告知前端具体原因，并把错误态落库
@@ -272,30 +450,53 @@ async def answer_node(node_id: str, db: Session = Depends(get_db)):
         reasoning = ""
         error: str | None = None
         suggestion_items: list[dict] = []
+        tool_used = False
+        # 联网搜索仅在开启开关、DeepSeek 且已配置 Key 时可用：
+        # forced 走预检索注入，smart 交给模型自主搜索（不预检索、不传 count）
+        search_enabled = (
+            bool(runtime.get("web_search_enabled"))
+            and runtime["provider"] == "deepseek"
+            and bool(runtime["api_key"])
+        )
+        smart_search = search_enabled and runtime.get("web_search_mode") == "smart"
         try:
-            # 联网搜索：仅在开启开关、DeepSeek 且已配置 Key 时触发
-            if (
-                runtime.get("web_search_enabled")
-                and runtime["provider"] == "deepseek"
-                and runtime["api_key"]
-            ):
+            if search_enabled and not smart_search:
                 try:
                     sources = await search_service.search_web(question, runtime)
                 except Exception:
                     logging.warning("联网搜索失败，跳过来源注入", exc_info=True)
                     sources = []
 
-            if sources:
-                # 来源注入到最后一条 user 消息之前，保证模型看到资料再作答
-                messages.insert(len(messages) - 1, {"role": "system", "content": _sources_prompt(sources)})
-                yield _sse("sources", {"sources": sources})
+                if sources:
+                    # 来源注入到最后一条 user 消息之前，保证模型看到资料再作答
+                    messages.insert(len(messages) - 1, {"role": "system", "content": _sources_prompt(sources)})
+                    yield _sse("sources", {"sources": sources})
 
-            async for kind, text in llm.stream_chat(messages, runtime):
+            # 会话标题与智能搜索的额外参数可在同一次请求中共存
+            extra: dict = {}
+            if enable_title:
+                extra["enable_title"] = True
+            if smart_search:
+                extra["tools"] = WEB_SEARCH_TOOL
+
+            async for kind, payload in llm.stream_chat(messages, runtime, **extra):
                 if kind == "reasoning":
-                    reasoning += text
-                else:
-                    answer += text
-                yield _sse(kind, {"text": text})
+                    reasoning += str(payload)
+                    yield _sse("reasoning", {"text": payload})
+                elif kind == "delta":
+                    answer += str(payload)
+                    yield _sse("delta", {"text": payload})
+                elif kind == "title":
+                    title = str(payload).strip()
+                    # 标题可能缺失；仅在成功写入画布名后推送，避免前端显示未保存的名字
+                    if title and _apply_project_title(project_id, title):
+                        yield _sse("title", {"title": title, "projectId": project_id})
+                elif kind == "sources":
+                    # 智能搜索：来源边生成边推送，发送当前累积全量
+                    if search_service.merge_sources(sources, payload):
+                        yield _sse("sources", {"sources": sources})
+                elif kind == "tool_use":
+                    tool_used = True
             # 回答结束后生成候选方向；任何未预期异常都只记日志，不影响 done
             try:
                 snapshot = SimpleNamespace(question=question, answer=answer)
@@ -323,6 +524,8 @@ async def answer_node(node_id: str, db: Session = Depends(get_db)):
                 None if error else suggestion_items,
                 # 失败也保留本次已拿到的来源
                 sources,
+                # 智能搜索用过工具后禁止继续生成
+                web_tool_used=tool_used,
             )
 
         if error:
@@ -342,9 +545,10 @@ async def regenerate_suggestions(
     node_id: str,
     payload: SuggestionRequest | None = None,
     db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
 ) -> list[dict]:
     """重新生成候选方向：保留已产生子卡片的建议（顺序在前），替换其余建议。"""
-    node = get_node_or_404(db, node_id)
+    node = get_owned_node(db, node_id, user)
     if node.status != "done":
         raise HTTPException(status_code=400, detail="该节点尚未完成回答，无法生成候选方向")
 
@@ -365,7 +569,7 @@ async def regenerate_suggestions(
     kept_texts = [str(item.get("text") or "") for item in kept]
 
     # 生成数量：显式传入优先，否则用设置里的默认值
-    runtime = runtime_settings.effective(db)
+    runtime = runtime_settings.effective(db, user)
     count = payload.count if payload and payload.count else runtime["suggestion_count"]
     fresh = await suggestions.generate_suggestions(
         node,

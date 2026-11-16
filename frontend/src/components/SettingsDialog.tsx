@@ -11,6 +11,7 @@ import type {
   SettingsPatch,
   ThemeMode,
   TimeFormat,
+  WebSearchMode,
   WheelMode,
 } from '../api/types'
 import { useGraphStore } from '../store/graphStore'
@@ -37,6 +38,7 @@ interface SettingsForm {
   baseUrl: string
   model: string
   thinkingEnabled: boolean
+  webSearchMode: WebSearchMode
   openaiApiKey: string
   openaiBaseUrl: string
   openaiModel: string
@@ -76,6 +78,7 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     baseUrl: data.baseUrl,
     model: data.model,
     thinkingEnabled: data.thinkingEnabled,
+    webSearchMode: data.webSearchMode,
     openaiApiKey: '',
     openaiBaseUrl: data.openaiBaseUrl,
     openaiModel: data.openaiModel,
@@ -104,7 +107,8 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     canvasStyle: data.canvasStyle,
     panInertiaEnabled: data.panInertiaEnabled,
     panInertiaCoefficient: data.panInertiaCoefficient,
-    searchLimit: data.searchLimit,
+    // 旧配置的 0 表示「不设限」，新版本最小为 1，统一按 50 展示与保存
+    searchLimit: data.searchLimit === 0 ? 50 : data.searchLimit,
   }
 }
 
@@ -446,6 +450,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     baseUrl: '',
     model: '',
     thinkingEnabled: true,
+    webSearchMode: 'smart',
     openaiApiKey: '',
     openaiBaseUrl: '',
     openaiModel: '',
@@ -474,7 +479,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     canvasStyle: 'none',
     panInertiaEnabled: false,
     panInertiaCoefficient: 0.5,
-    searchLimit: 0,
+    searchLimit: 50,
   })
 
   // Esc 关闭统一走 Escape 栈：多浮层叠加时只关闭最上层
@@ -529,6 +534,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         baseUrl: form.baseUrl,
         model: form.model,
         thinkingEnabled: form.thinkingEnabled,
+        webSearchMode: form.webSearchMode,
         openaiBaseUrl: form.openaiBaseUrl,
         openaiModel: form.openaiModel,
         openaiOrganization: form.openaiOrganization,
@@ -646,7 +652,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     <Section title="服务商与连接">
                       <Row
                         label="服务商"
-                        hint="OpenAI 兼容可填写任意兼容 OpenAI 协议的服务（官方 OpenAI、中转、OpenRouter、Moonshot 等）"
+                        hint="OpenAI可以兼容各种兼容OpenAI协议的模型接口"
                       >
                         <SelectRow
                           ariaLabel="服务商"
@@ -680,7 +686,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           />
                         </Row>
 
-                        <Row label="接口地址" hint="默认 https://api.deepseek.com，兼容其他 OpenAI 协议服务">
+                        <Row label="接口地址" hint="DeepSeek 默认接口 https://api.deepseek.com">
                           <input
                             type="text"
                             value={form.baseUrl}
@@ -708,6 +714,33 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                             label="思考模式"
                             checked={form.thinkingEnabled}
                             onChange={(thinkingEnabled) => setForm({ ...form, thinkingEnabled })}
+                          />
+                        </Row>
+
+                        <Row
+                          label="智能搜索"
+                          hint="开启联网搜索时使用的检索方式：智能搜索由模型判断是否搜索；强制搜索每次先检索再回答"
+                        >
+                          <ChoiceGroup
+                            value={form.webSearchMode}
+                            options={[
+                              { value: 'smart', label: '智能搜索' },
+                              { value: 'forced', label: '强制搜索' },
+                            ]}
+                            onChange={(webSearchMode) => setForm({ ...form, webSearchMode })}
+                          />
+                        </Row>
+
+                        <Row
+                          label="强制搜索上限"
+                          hint="仅强制搜索生效：注入模型的资料条数（1–50）"
+                        >
+                          <NumberInput
+                            value={form.searchLimit}
+                            onChange={(searchLimit) => setForm({ ...form, searchLimit })}
+                            min={1}
+                            max={50}
+                            step={1}
                           />
                         </Row>
                       </Section>
@@ -848,25 +881,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     )}
 
                     <Section title="通用">
-                      <Row label="候选方向数量" hint="每张卡片回答完成后生成的建议箭头数量（2–6），另有 1 条自定义输入">
+                      <Row label="候选方向数量" hint="每张卡片回答完成后生成的建议箭头数量，另有 1 条自定义输入">
                         <SliderNumber
                           value={form.suggestionCount}
                           onChange={(suggestionCount) => setForm({ ...form, suggestionCount })}
                           min={2}
                           max={6}
-                        />
-                      </Row>
-
-                      <Row
-                        label="模型搜索上限"
-                        hint="联网搜索时注入模型的资料条数上限（服务端最多 50 条）；0 表示不设限"
-                      >
-                        <NumberInput
-                          value={form.searchLimit}
-                          onChange={(searchLimit) => setForm({ ...form, searchLimit })}
-                          min={0}
-                          max={50}
-                          step={1}
                         />
                       </Row>
                     </Section>

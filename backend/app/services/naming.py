@@ -14,6 +14,20 @@ MAX_NAME_LENGTH = 20
 ANSWER_SUMMARY_LENGTH = 1200
 
 
+def clean_title(raw: str) -> str:
+    """按同步规则从提问生成卡片标题（不调用模型）。
+
+    取首行、压缩连续空白、去掉首尾标点与引号，再截断到 MAX_NAME_LENGTH。
+    """
+    text = (raw or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"\s+", " ", text.splitlines()[0]).strip()
+    text = text.strip("\"'“”‘’")
+    text = text.strip(" #.,，。:：!！?？;；、")
+    return text[:MAX_NAME_LENGTH].strip()
+
+
 def _clean_name(raw: str) -> str:
     """从模型返回的 JSON/文本中提取标题并清理引号、标点与换行。"""
     text = (raw or "").strip()

@@ -22,23 +22,26 @@ SYSTEM_PROMPT = (
 
 def _user_content(
     node: ConversationNode,
-    attachments_for: Callable[[ConversationNode], tuple[str, list[dict]]] | None,
+    attachments_for: Callable[[ConversationNode], tuple[str, list[dict], list[dict]]] | None,
 ) -> str | list[dict]:
-    """拼一条 user 消息的 content：有附件文本则追加，有图片则改用内容块数组。"""
+    """拼一条 user 消息的 content：有文档/图片则改用内容块数组。
+
+    内容块顺序固定为文档 → 图片 → 文本，文本里包含问题与文本附件正文。
+    """
     # 优先使用原始提问；旧数据或轻量测试节点没有 prompt 时退回标题
     question = getattr(node, "prompt", "") or node.question
     if attachments_for is None:
         return question
-    extra_text, images = attachments_for(node)
+    extra_text, images, documents = attachments_for(node)
     content = question + (extra_text or "")
-    if images:
-        return [{"type": "text", "text": content}, *images]
+    if documents or images:
+        return [*documents, *images, {"type": "text", "text": content}]
     return content
 
 
 def build_messages(
     path: list[ConversationNode],
-    attachments_for: Callable[[ConversationNode], tuple[str, list[dict]]] | None = None,
+    attachments_for: Callable[[ConversationNode], tuple[str, list[dict], list[dict]]] | None = None,
 ) -> list[dict]:
     """把祖先路径拼成 messages 列表（纯函数，不查库，便于单测）。
 

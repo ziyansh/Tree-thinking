@@ -1,4 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { FocusEvent as ReactFocusEvent } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
 import { Paperclip, Send } from 'lucide-react'
@@ -26,8 +27,10 @@ function GhostInputNodeInner({
   // 哪一个自定义输入框当前持有焦点：切换到另一个时收起当前输入框
   const activeInputId = useActiveGhostInput()
 
-  const [focused, setFocused] = useState(false)
-  const [draft, setDraft] = useState('')
+  const [focused, setFocused] = useState(() => Boolean(data.autoOpen))
+  // 草稿按父卡片保存在 store 中：不同卡片的内容各自独立、收起后仍然保留
+  const draft = useGraphStore((state) => state.ghostDrafts[data.parentId] ?? '')
+  const setGhostDraft = useGraphStore((state) => state.setGhostDraft)
   const [pending, setPending] = useState(false)
   const attachments = useAttachmentUploads()
   const pasteAttachments = usePasteAttachments(attachments)
@@ -48,6 +51,14 @@ function GhostInputNodeInner({
     bumpUiLayer(id)
   }, [id])
 
+  /** 失焦判定（docs/lose_focus.md）：焦点移出整个容器后收起为单行，内容保留 */
+  const handleBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null
+    if (next && event.currentTarget.contains(next)) return
+    setFocused(false)
+    setActiveGhostInput(null)
+  }
+
   // 展开态下只有选中卡片发生非空变化才收起（点击空白画布不收起）
   useEffect(() => {
     if (!focused) return
@@ -62,6 +73,20 @@ function GhostInputNodeInner({
   useEffect(() => {
     if (activeInputId !== null && activeInputId !== id) setFocused(false)
   }, [activeInputId, id])
+
+  /** 上一次的 autoOpen：只在 false → true（含首次挂载）时自动展开并聚焦 */
+  const prevAutoOpenRef = useRef(false)
+  useEffect(() => {
+    const autoOpen = Boolean(data.autoOpen)
+    if (!autoOpen || prevAutoOpenRef.current) return
+    prevAutoOpenRef.current = true
+    setFocused(true)
+    setActiveGhostInput(id)
+    bumpUiLayer(id)
+    // 首次挂载时把预填内容写入草稿（stopGeneration 已经写入时不会覆盖）
+    if (data.initialQuestion && !draft) setGhostDraft(data.parentId, data.initialQuestion)
+    textareaRef.current?.focus()
+  }, [data.autoOpen, data.initialQuestion, data.parentId, draft, id, setGhostDraft])
 
   // 展开态按内容自动增高，至少保持 3 行（60px）；收起态恢复单行高度
   useLayoutEffect(() => {
@@ -87,7 +112,7 @@ function GhostInputNodeInner({
         x: positionAbsoluteX,
         y: positionAbsoluteY,
       })
-      setDraft('')
+      setGhostDraft(data.parentId, '')
       attachments.clear()
     } finally {
       setPending(false)
@@ -101,6 +126,7 @@ function GhostInputNodeInner({
         bumpUiLayer(id)
         setFocused(true)
       }}
+      onBlur={handleBlur}
       onDragOver={dropZone.onDragOver}
       onDragLeave={dropZone.onDragLeave}
       onDrop={dropZone.onDrop}
@@ -126,7 +152,7 @@ function GhostInputNodeInner({
             rows={3}
             value={draft}
             disabled={isStreaming || pending}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => setGhostDraft(data.parentId, event.target.value)}
             onPaste={pasteAttachments}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
@@ -197,7 +223,7 @@ function GhostInputNodeInner({
             rows={1}
             value={draft}
             disabled={isStreaming || pending}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => setGhostDraft(data.parentId, event.target.value)}
             onPaste={pasteAttachments}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {

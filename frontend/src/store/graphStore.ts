@@ -2,7 +2,14 @@ import { create } from 'zustand'
 import type { Node } from '@xyflow/react'
 import { ApiError, api } from '../api/client'
 import { streamAnswer } from '../api/sse'
-import type { NodeDTO, ProjectDTO, SettingsDTO, SettingsPatch, Viewport } from '../api/types'
+import type {
+  ExportFile,
+  NodeDTO,
+  ProjectDTO,
+  SettingsDTO,
+  SettingsPatch,
+  Viewport,
+} from '../api/types'
 import { applyTheme } from '../lib/theme'
 
 /** React Flow 卡片节点的数据类型 */
@@ -74,6 +81,7 @@ export type Preferences = Pick<
   | 'provider'
   | 'thinkingEnabled'
   | 'webSearchEnabled'
+  | 'webSearchMode'
   | 'sourcesPanelRatio'
   | 'panInertiaEnabled'
   | 'panInertiaCoefficient'
@@ -102,6 +110,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   provider: 'deepseek',
   thinkingEnabled: true,
   webSearchEnabled: false,
+  webSearchMode: 'smart',
   sourcesPanelRatio: 0.25,
   panInertiaEnabled: false,
   panInertiaCoefficient: 0.5,
@@ -131,6 +140,7 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     provider: settings.provider,
     thinkingEnabled: settings.thinkingEnabled,
     webSearchEnabled: settings.webSearchEnabled,
+    webSearchMode: settings.webSearchMode ?? 'smart',
     sourcesPanelRatio: settings.sourcesPanelRatio ?? 0.25,
     panInertiaEnabled: settings.panInertiaEnabled ?? false,
     panInertiaCoefficient: settings.panInertiaCoefficient ?? 0.5,
@@ -161,6 +171,7 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     provider: patch.provider ?? base.provider,
     thinkingEnabled: patch.thinkingEnabled ?? base.thinkingEnabled,
     webSearchEnabled: patch.webSearchEnabled ?? base.webSearchEnabled,
+    webSearchMode: patch.webSearchMode ?? base.webSearchMode,
     sourcesPanelRatio: patch.sourcesPanelRatio ?? base.sourcesPanelRatio,
     panInertiaEnabled: patch.panInertiaEnabled ?? base.panInertiaEnabled,
     panInertiaCoefficient: patch.panInertiaCoefficient ?? base.panInertiaCoefficient,
@@ -281,6 +292,8 @@ interface GraphState {
   branchInputs: BranchInput[]
   /** 分支输入草稿：parentId → 未提交文本，切换输入条后内容仍各自保留 */
   branchDrafts: Record<string, string>
+  /** 自定义方向输入草稿：parentId → 未提交文本，各卡片独立保留 */
+  ghostDrafts: Record<string, string>
   /** 全局卡片尺寸，所有画布共用一份 */
   cardSize: { width: number; height: number }
   /** 个人偏好设置（外观、画布交互与保存参数），全局共用 */
@@ -303,6 +316,10 @@ interface GraphState {
   /** 首轮回答完成后尝试自动命名；失败只告警，不影响画布 */
   autoNameProject: (id: string) => Promise<void>
   deleteProject: (id: string) => Promise<void>
+  /** 导入历史文件：校验格式后新建画布并切换到该画布，失败返回 null */
+  importProjectFile: (file: File) => Promise<string | null>
+  /** 退出登录：中断全部流式请求并清空画布相关状态 */
+  resetCanvas: () => void
   /** 单选：清空其它选中并设为主选中 */
   setSelected: (id: string | null) => void
   /** Ctrl 多选切换：已选中则取消，否则追加并成为主选中 */
@@ -323,6 +340,8 @@ interface GraphState {
   cancelBranchInput: (inputId: string) => void
   /** 写入分支输入草稿 */
   setBranchDraft: (parentId: string, text: string) => void
+  /** 写入自定义方向输入草稿 */
+  setGhostDraft: (parentId: string, text: string) => void
   /** 提交分支问题：创建子卡片、写入落点并开始生成回答 */
   submitBranchInput: (inputId: string, question: string, attachmentIds?: string[]) => Promise<void>
   /** 更新卡片标题并同步后端返回的修改时间 */
@@ -331,8 +350,10 @@ interface GraphState {
   updateNodePrompt: (nodeId: string, prompt: string, attachmentIds?: string[]) => Promise<void>
   /** 删除某张卡片的全部后代（重新生成回答前使用），可撤销 */
   removeDescendants: (nodeId: string) => Promise<void>
-  /** 停止生成：终止请求并回退到生成前的输入状态 */
+  /** 停止生成：无可见输出时回退/删除；已有输出时进入暂停态并保留内容 */
   stopGeneration: (nodeId: string) => Promise<void>
+  /** 继续生成暂停的回答：流式追加到现有正文与思考过程 */
+  continueGeneration: (nodeId: string) => Promise<void>
   /** 在画布指定坐标新建笔记卡片并选中 */
   createNoteAt: (x: number, y: number) => Promise<void>
   /** 更新笔记标题（乐观更新，失败回滚） */
@@ -386,6 +407,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     isStreamingIds: [],
     branchInputs: [],
     branchDrafts: {},
+    ghostDrafts: {},
     cardSize: { ...DEFAULT_CARD_SIZE },
     preferences: { ...DEFAULT_PREFERENCES },
     toast: null,
@@ -410,6 +432,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         isStreamingIds: [],
         branchInputs: [],
         branchDrafts: {},
+        ghostDrafts: {},
         projects: get().projects.map((project) =>
           project.id === graph.project.id ? graph.project : project,
         ),
@@ -549,6 +572,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         isStreamingIds: [],
         branchInputs: [],
         branchDrafts: {},
+        ghostDrafts: {},
       }))
     },
 
@@ -589,7 +613,64 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           selectedNodeIds: [],
           branchInputs: [],
           branchDrafts: {},
+          ghostDrafts: {},
         }
+      })
+    },
+
+    importProjectFile: async (file) => {
+      let parsed: ExportFile
+      try {
+        parsed = JSON.parse(await file.text()) as ExportFile
+      } catch {
+        window.alert('无法读取导入文件，请选择本应用导出的 JSON 文件')
+        return null
+      }
+
+      // 校验文件标识与版本，避免把无关 JSON 提交给后端
+      if (parsed?.app !== 'tree-thinking') {
+        window.alert('不是本应用导出的画布文件')
+        return null
+      }
+      if (parsed.version !== 1) {
+        window.alert('不支持的导出文件版本')
+        return null
+      }
+      if (!Array.isArray(parsed.nodes) || parsed.nodes.length === 0) {
+        window.alert('导入文件里没有节点')
+        return null
+      }
+
+      try {
+        // 后端生成新 id 并重建父子关系，前端刷新列表后切到新画布
+        const result = await api.importProject(parsed)
+        await get().loadProjects()
+        await get().openProject(result.project.id)
+        get().showToast('已导入画布')
+        return result.project.id
+      } catch (err) {
+        console.warn('导入画布失败', err)
+        window.alert(err instanceof Error ? err.message : '导入失败，请稍后重试')
+        return null
+      }
+    },
+
+    resetCanvas: () => {
+      // 退出登录：先中断仍在进行的流式请求，再清空画布数据与撤销栈
+      for (const controller of controllers.values()) controller.abort()
+      controllers.clear()
+      undoStacks.clear()
+      set({
+        projects: [],
+        currentProjectId: null,
+        nodes: [],
+        selectedNodeId: null,
+        selectedNodeIds: [],
+        isStreamingIds: [],
+        branchInputs: [],
+        branchDrafts: {},
+        ghostDrafts: {},
+        toast: null,
       })
     },
 
@@ -786,6 +867,11 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         branchDrafts: { ...state.branchDrafts, [parentId]: text },
       })),
 
+    setGhostDraft: (parentId, text) =>
+      set((state) => ({
+        ghostDrafts: { ...state.ghostDrafts, [parentId]: text },
+      })),
+
     submitBranchInput: async (inputId, question, attachmentIds) => {
       const text = question.trim()
       if (!text) return
@@ -833,8 +919,8 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       get().pushUndo('编辑卡片')
       try {
         const updated = await api.patchNode(nodeId, { title })
-        // 合并后端返回值，question 与 updatedAt 一起刷新
-        patchNode(nodeId, (node) => ({ ...node, ...updated }))
+        // 合并后端返回值；手动改过标题后标记，重新提交提问时不再自动覆盖
+        patchNode(nodeId, (node) => ({ ...node, ...updated, titleCustom: true }))
       } catch (err) {
         console.warn('更新标题失败', err)
         dropLastUndo(get().currentProjectId)
@@ -893,6 +979,24 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       abortStream(nodeId)
       removeStreamingId(nodeId)
 
+      // 已有可见输出：把停止瞬间的内存内容一并提交，后端落库后返回 paused
+      if (node.answer.trim()) {
+        try {
+          const updated = await api.stopNode(nodeId, {
+            answer: node.answer,
+            reasoning: node.reasoning,
+            sources: node.sources,
+          })
+          // 直接采用后端返回值，不再用本地空值覆盖已生成内容
+          patchNode(nodeId, (current) => ({ ...current, ...updated, status: 'paused' }))
+        } catch (err) {
+          console.warn('停止生成失败', err)
+          // 请求失败时保留内存中的内容，仅切换状态
+          patchNode(nodeId, (current) => ({ ...current, status: 'paused' }))
+        }
+        return
+      }
+
       // 元问题：回到输入态，保留原始提问供用户修改后重新提交
       if (node.parentId === null && node.nodeType === 'chat') {
         try {
@@ -940,6 +1044,10 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         isStreamingIds: state.isStreamingIds.filter((id) => !removing.has(id)),
         selectedNodeId: parentId,
         selectedNodeIds: parentId ? [parentId] : [],
+        // 预填被删卡片发送给模型的问题，父卡片的默认输入框会展开并带入该内容
+        ghostDrafts: prompt
+          ? { ...state.ghostDrafts, [parentId]: prompt }
+          : state.ghostDrafts,
       }))
       // 恢复父卡片的候选方向与输入入口
       patchNode(parentId, (parent) => ({ ...parent, suggestionsConsumed: false }))
@@ -955,6 +1063,115 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           ],
           branchDrafts: { ...state.branchDrafts, [parentId]: prompt },
         }))
+      }
+    },
+
+    continueGeneration: async (nodeId) => {
+      const node = get().nodes.find((item) => item.id === nodeId)?.data.node
+      if (!node) return
+      // 智能搜索使用过工具的回答无法从中断处续写，直接提示且不发请求
+      if (node.webToolUsed) {
+        get().showToast('智能搜索产生的回答不支持继续生成，请重新输入问题')
+        return
+      }
+      // 保留已生成内容，仅把状态切回流式；错误信息在续写成功后清空
+      patchNode(nodeId, (current) => ({ ...current, status: 'streaming', error: null }))
+      set((state) => ({
+        isStreamingIds: [...state.isStreamingIds.filter((id) => id !== nodeId), nodeId],
+      }))
+
+      // 与 runAnswer 一致：先登记新控制器再中断旧流，避免旧流清理覆盖本次状态
+      const previous = controllers.get(nodeId)
+      const controller = new AbortController()
+      controllers.set(nodeId, controller)
+      previous?.abort()
+
+      // 增量按 ~30fps 批量写回，避免逐 token 重新解析整段 Markdown
+      let pendingAnswer = ''
+      let pendingReasoning = ''
+      let flushTimer: number | null = null
+
+      const flush = () => {
+        if (flushTimer !== null) {
+          window.clearTimeout(flushTimer)
+          flushTimer = null
+        }
+        if (pendingReasoning) {
+          const chunk = pendingReasoning
+          pendingReasoning = ''
+          patchNode(nodeId, (current) => ({
+            ...current,
+            reasoning: current.reasoning + chunk,
+          }))
+        }
+        if (pendingAnswer) {
+          const chunk = pendingAnswer
+          pendingAnswer = ''
+          patchNode(nodeId, (current) => ({ ...current, answer: current.answer + chunk }))
+        }
+      }
+
+      const scheduleFlush = () => {
+        if (flushTimer !== null) return
+        flushTimer = window.setTimeout(flush, 32)
+      }
+
+      const dropPending = () => {
+        if (flushTimer !== null) {
+          window.clearTimeout(flushTimer)
+          flushTimer = null
+        }
+        pendingAnswer = ''
+        pendingReasoning = ''
+      }
+
+      try {
+        await api.continueNode(
+          nodeId,
+          {
+            onTitle: ({ title, projectId }) => {
+              // 画布自动标题已生成：只更新列表中的名称，其它字段保持不变
+              set((state) => ({
+                projects: state.projects.map((project) =>
+                  project.id === projectId ? { ...project, name: title } : project,
+                ),
+              }))
+            },
+            onReasoning: (reasoning) => {
+              pendingReasoning += reasoning
+              scheduleFlush()
+            },
+            onDelta: (delta) => {
+              pendingAnswer += delta
+              scheduleFlush()
+            },
+            onDone: () => {
+              flush()
+              patchNode(nodeId, (current) => ({ ...current, status: 'done' }))
+            },
+            onError: (error) => {
+              flush()
+              patchNode(nodeId, (current) => ({ ...current, status: 'error', error }))
+            },
+          },
+          controller.signal,
+        )
+      } finally {
+        if (controllers.get(nodeId) === controller) {
+          flush()
+          controllers.delete(nodeId)
+          removeStreamingId(nodeId)
+          patchNode(nodeId, (current) =>
+            current.status === 'streaming'
+              ? current.answer
+                ? { ...current, status: 'done' }
+                : { ...current, status: 'error', error: '生成被中断，请重试' }
+              : current,
+          )
+        } else {
+          // 旧流被新流替换：丢弃旧缓冲区
+          dropPending()
+        }
       }
     },
 
@@ -1105,6 +1322,14 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           nodeId,
           {
             onSources: (sources) => patchNode(nodeId, (node) => ({ ...node, sources })),
+            onTitle: ({ title, projectId }) => {
+              // 画布自动标题已生成：只更新列表中的名称，其它字段保持不变
+              set((state) => ({
+                projects: state.projects.map((project) =>
+                  project.id === projectId ? { ...project, name: title } : project,
+                ),
+              }))
+            },
             onReasoning: (reasoning) => {
               pendingReasoning += reasoning
               scheduleFlush()

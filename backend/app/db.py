@@ -42,6 +42,8 @@ _EXTRA_COLUMNS = {
     "projects": {
         # 用户是否手动改过画布名
         "name_is_custom": "BOOLEAN NOT NULL DEFAULT 0",
+        # 归属用户（server 模式）
+        "owner_id": "VARCHAR(32)",
     },
     "nodes": {
         "suggestions_consumed": "BOOLEAN NOT NULL DEFAULT 0",
@@ -54,6 +56,10 @@ _EXTRA_COLUMNS = {
         "attachments": "TEXT",
         # 用户原始提问（标题可单独改名，重新提交与复制使用该字段）
         "prompt": "TEXT",
+        # 标题是否被用户手动改过
+        "title_custom": "BOOLEAN NOT NULL DEFAULT 0",
+        # 本次回答是否使用过服务端联网工具（旧库补列）
+        "web_tool_used": "BOOLEAN NOT NULL DEFAULT 0",
     },
     "app_settings": {
         # 服务商与 OpenAI 独立配置（旧库补列）
@@ -86,8 +92,9 @@ _EXTRA_COLUMNS = {
         "edge_color": "VARCHAR(16)",
         "theme_mode": "VARCHAR(16)",
         "time_format": "VARCHAR(8)",
-        # 联网搜索开关
+        # 联网搜索开关与搜索模式（smart / forced）
         "web_search_enabled": "BOOLEAN",
+        "web_search_mode": "VARCHAR(16)",
         # 来源抽屉高度比例（旧库补列）
         "sources_panel_ratio": "FLOAT",
         # 画布拖动惯性与背景样式（旧库补列）
@@ -96,6 +103,10 @@ _EXTRA_COLUMNS = {
         "canvas_style": "VARCHAR(16)",
         # 模型搜索上限（旧库补列）
         "search_limit": "INTEGER",
+    },
+    "user_settings": {
+        # server 模式每用户设置：联网搜索模式（旧库补列）
+        "web_search_mode": "VARCHAR(16)",
     },
 }
 

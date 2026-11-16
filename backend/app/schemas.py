@@ -114,6 +114,15 @@ class NodeOut(CamelModel):
     def _null_prompt(cls, value: Any) -> Any:
         """旧库补列后历史行 prompt 为 NULL，先归一成空串再由 DTO 回落到标题。"""
         return value if isinstance(value, str) else ""
+    # 标题是否被用户手动改过；未改过时重新提交会自动更新标题
+    title_custom: bool = False
+
+    @field_validator("title_custom", mode="before")
+    @classmethod
+    def _null_title_custom(cls, value: Any) -> Any:
+        """旧库补列后历史行 title_custom 为 NULL，按 False 处理。"""
+        return bool(value) if value is not None else False
+
     answer: str
     reasoning: str
     origin: str
@@ -123,6 +132,14 @@ class NodeOut(CamelModel):
     suggestions: list[Suggestion] = []
     # 联网搜索来源（camelCase 的 title/url/snippet/summary/siteName/date）
     sources: list[dict] = []
+    # 本次回答是否使用过服务端联网工具（用过之后不能继续生成）
+    web_tool_used: bool = False
+
+    @field_validator("web_tool_used", mode="before")
+    @classmethod
+    def _null_web_tool_used(cls, value: Any) -> Any:
+        """旧库补列后历史行 web_tool_used 为 NULL，按 False 处理。"""
+        return bool(value) if value is not None else False
     # 节点附件元数据（上传接口返回的结构）
     attachments: list[dict] = []
     suggestions_consumed: bool = False
@@ -239,6 +256,8 @@ class NodeRestoreItem(CamelModel):
     question: str = ""
     # 原始提问：撤销删除时一并恢复
     prompt: str = ""
+    # 标题是否被手动改过
+    title_custom: bool = False
     answer: str = ""
     reasoning: str = ""
     origin: str = "user"
@@ -276,6 +295,15 @@ class SuggestionRequest(CamelModel):
     """重新生成候选方向请求，数量可选（后端会夹到 2–6）。"""
 
     count: int | None = None
+
+
+class NodeStopRequest(CamelModel):
+    """停止生成请求：前端把流式期间已累积的内容回传，避免中断时丢失。"""
+
+    answer: str = ""
+    reasoning: str = ""
+    # 为 None 表示本次不更新来源
+    sources: list[dict] | None = None
 
 
 class SettingsPatch(CamelModel):
@@ -328,6 +356,8 @@ class SettingsPatch(CamelModel):
     time_format: Literal["24h", "12h"] | None = None
     # 联网搜索开关
     web_search_enabled: bool | None = None
+    # 联网搜索模式：smart（模型自主搜索）/ forced（预检索注入）
+    web_search_mode: Literal["smart", "forced"] | None = None
     # 来源抽屉高度比例（服务层夹到 0.15–0.7）
     sources_panel_ratio: float | None = None
     # 画布拖动惯性：开关与系数（服务层夹到 0.1–1.0）
@@ -379,3 +409,56 @@ class SettingsPatch(CamelModel):
         if value is not None and not 2 <= value <= 6:
             raise ValueError("候选方向数量需在 2–6 之间")
         return value
+
+
+class ImportProject(CamelModel):
+    """导入文件里的画布信息。"""
+
+    name: str = ""
+    viewport: dict[str, Any] | None = None
+
+
+class ImportNode(CamelModel):
+    """导入文件里的单个节点：字段与导出时的 NodeOut 对齐。"""
+
+    id: str | None = None
+    parent_id: str | None = None
+    question: str = ""
+    prompt: str = ""
+    title_custom: bool = False
+    answer: str = ""
+    reasoning: str = ""
+    origin: str = "user"
+    suggestion_id: str | None = None
+    status: str = "done"
+    error: str | None = None
+    suggestions: list[Suggestion] = []
+    sources: list[dict] = []
+    attachments: list[dict] = []
+    suggestions_consumed: bool = False
+    pinned: bool = False
+    node_type: str = "chat"
+    width: float | None = None
+    height: float | None = None
+    x: float = 0
+    y: float = 0
+
+
+class ImportPayload(CamelModel):
+    """导入请求体：与 GET /api/projects/{id}/export 的输出结构一致。
+
+    app/version 给默认值，缺失时由接口返回 400 可读错误而不是 422。
+    """
+
+    app: str = ""
+    version: int = 0
+    exported_at: str | None = None
+    project: ImportProject = ImportProject()
+    nodes: list[ImportNode] = []
+
+
+class AuthCredentials(CamelModel):
+    """注册 / 登录请求：用户名与密码。"""
+
+    username: str
+    password: str

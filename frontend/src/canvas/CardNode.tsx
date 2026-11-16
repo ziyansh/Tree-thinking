@@ -15,6 +15,7 @@ import {
   MessageSquareText,
   Paperclip,
   Pin,
+  Play,
   RefreshCw,
   Square,
   Trash2,
@@ -156,6 +157,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const removeNode = useGraphStore((state) => state.deleteNode)
   const removeDescendants = useGraphStore((state) => state.removeDescendants)
   const stopGeneration = useGraphStore((state) => state.stopGeneration)
+  const continueGeneration = useGraphStore((state) => state.continueGeneration)
   const togglePin = useGraphStore((state) => state.togglePin)
   const startQuestion = useGraphStore((state) => state.startQuestion)
   const runAnswer = useGraphStore((state) => state.runAnswer)
@@ -179,6 +181,8 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
   const spacePressed = useSpacePressed()
   const wheelScrollClass = wheelMode === 'scroll-card' && !spacePressed ? 'nowheel' : ''
+  // 回答正文是主要阅读区：始终保留原生滚动（按住空格时仍交给画布缩放）
+  const answerScrollClass = spacePressed ? '' : 'nowheel'
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
   /** 新建 1.2 秒内的卡片播放一次入场动画；旧卡片与项目载入不播 */
   const createdAtMs = node.createdAt ? Date.parse(node.createdAt) : Number.NaN
@@ -229,6 +233,8 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const isStreaming = node.status === 'streaming'
   const isError = node.status === 'error'
   const isInput = node.status === 'input'
+  // 暂停态：有输出时停止生成，正文与思考区域模糊并显示继续/重输入口
+  const isPaused = node.status === 'paused'
   // 元问题卡片固定尺寸，不提供缩放手柄；笔记节点也有 parentId=null，不能当作元卡片
   const isRoot = node.parentId === null && node.nodeType === 'chat'
 
@@ -498,7 +504,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           <h3
             onPointerDown={handleTitlePointerDown}
             onPointerUp={handleTitlePointerUp}
-            className="min-w-0 flex-1 cursor-grab break-words font-semibold leading-snug text-accent active:cursor-grabbing"
+            className="line-clamp-2 min-w-0 flex-1 cursor-grab break-words font-semibold leading-snug text-accent active:cursor-grabbing"
             style={{ fontSize: 'calc(var(--card-font-size) + 2px)' }}
           >
             {node.question || <span className="text-muted">请输入你的元问题</span>}
@@ -552,6 +558,9 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
         </div>
       </div>
 
+      {/* 正文与思考区域包一层：暂停时整体模糊，并叠加毛玻璃遮罩 */}
+      <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className={['flex min-h-0 flex-1 flex-col', isPaused ? 'blur-[2px]' : ''].join(' ')}>
       {node.reasoning && (
         <div className="mt-3 shrink-0 rounded-lg bg-elevated px-3 py-2">
           <button
@@ -652,7 +661,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           <div ref={sourcesContainerRef} className="relative mt-3 min-h-0 flex-1">
             {/* 正文占据剩余高度，内容超出后内部滚动，绝不撑开卡片；
                 容器留白可拖动卡片，正文本身标了 nodrag 以支持选字 */}
-            <div className={`${wheelScrollClass} h-full overflow-y-auto pr-1`}>
+            <div className={`${answerScrollClass} h-full min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable]`}>
               {node.answer ? (
                 <div className={MARKDOWN_CLASS} style={{ fontSize: 'var(--card-font-size)' }}>
                   <Markdown
@@ -831,6 +840,45 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           )}
         </>
       )}
+        </div>
+
+        {/* 暂停态遮罩：正文与思考区域已模糊，中央提供继续生成 / 重新输入 */}
+        {isPaused && (
+          <div className="pause-in nodrag absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-lg border border-subtle bg-panel/55 backdrop-blur-sm">
+            <span className="text-[12px] text-muted">生成已暂停</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={node.webToolUsed}
+                title={
+                  node.webToolUsed ? '智能搜索产生的回答不支持续写，请重新输入问题' : undefined
+                }
+                onClick={() => void continueGeneration(node.id)}
+                className={[
+                  'flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity duration-150',
+                  node.webToolUsed ? 'cursor-not-allowed opacity-40' : 'hover:opacity-90',
+                ].join(' ')}
+              >
+                <Play size={12} />
+                继续生成
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  // 复用提问抽屉并直接进入编辑态，由抽屉自动聚焦输入框
+                  setPromptEditing(true)
+                  setPromptOpen(true)
+                  bumpUiLayer(node.id)
+                }}
+                className="flex items-center gap-1 rounded-lg border border-subtle px-3 py-1.5 text-[12px] text-body transition-colors duration-150 hover:border-strong hover:text-ink"
+              >
+                <MessageSquareText size={12} />
+                重新输入
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* 四边与四角缩放命中区：仅提供光标与命中，不绘制高亮；根卡片同样可缩放 */}
       {EDGE_ZONES.map((zone) => (

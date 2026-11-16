@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type {
+  DragEvent as ReactDragEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+} from 'react'
 import {
   Background,
   Panel,
@@ -52,6 +56,18 @@ const GHOST_SIZE = { width: 280, height: 44 }
 
 /** 点状画布的网格步长（px），Shift 平移吸附与背景点阵一致 */
 const CANVAS_DOT_GAP = 24
+
+/**
+ * 拖入内容是否为可导入的 JSON 文件：
+ * 拖拽阶段拿不到文件名，能拿到 MIME 时先排除明显的非 JSON 文件；
+ * drop 时再按 .json 扩展名做最终过滤。
+ */
+function hasJsonDrag(dataTransfer: DataTransfer): boolean {
+  if (!dataTransfer.types.includes('Files')) return false
+  return Array.from(dataTransfer.items).every(
+    (item) => item.kind !== 'file' || item.type === '' || item.type === 'application/json',
+  )
+}
 
 /**
  * 以 60Hz 上限调度一次回调：高刷新率屏幕会跳过多余的帧，
@@ -214,6 +230,7 @@ function CanvasInner() {
   const selectedNodeIds = useGraphStore((state) => state.selectedNodeIds)
   const savePosition = useGraphStore((state) => state.savePosition)
   const createNoteAt = useGraphStore((state) => state.createNoteAt)
+  const importProjectFile = useGraphStore((state) => state.importProjectFile)
   const updatePreferences = useGraphStore((state) => state.updatePreferences)
   const dotColor = useDotColor()
 
@@ -224,6 +241,8 @@ function CanvasInner() {
   const spacePressed = useSpacePressed()
   /** 是否正在自定义平移：用于切换抓取光标 */
   const [isPanning, setIsPanning] = useState(false)
+  /** 拖入画布文件时的强调色提示 */
+  const [dragActive, setDragActive] = useState(false)
   /** 自动整理插值中：给节点加合成层提示，减少逐帧重绘 */
   const [layoutAnimating, setLayoutAnimating] = useState(false)
   /** 空白处指针状态：按下坐标、延迟计时与是否已进入平移 */
@@ -340,6 +359,43 @@ function CanvasInner() {
   )
 
   /**
+   * 滚轮缩放导致视口变化后重新校准平移基准：
+   * 记录「当前指针位置 ↔ 最新视口」，拖动继续按增量换算，避免缩放后回弹或抖动；
+   * 同时清零速度，松手时不会误触发惯性。
+   */
+  const recalibratePanBaseline = useCallback(
+    (pointerX: number, pointerY: number) => {
+      const viewport = getViewport()
+      const now = performance.now()
+
+      const spacePan = spacePanRef.current
+      if (spacePan) {
+        spacePan.startX = pointerX
+        spacePan.startY = pointerY
+        spacePan.viewport = viewport
+        spacePan.lastX = pointerX
+        spacePan.lastY = pointerY
+        spacePan.lastTime = now
+        spacePan.velocityX = 0
+        spacePan.velocityY = 0
+      }
+
+      const panePan = pointerRef.current
+      if (panePan?.panning) {
+        panePan.startX = pointerX
+        panePan.startY = pointerY
+        panePan.lastX = pointerX
+        panePan.lastY = pointerY
+        panePan.lastTime = now
+        panePan.velocityX = 0
+        panePan.velocityY = 0
+        panStartViewportRef.current = viewport
+      }
+    },
+    [getViewport],
+  )
+
+  /**
    * macOS / Windows 触控板：双指滑动平移画布，捏合（浏览器会带 ctrlKey）交给 React Flow 缩放。
    * 鼠标滚轮保持「滚轮逻辑」设置中的缩放行为，因此这里只拦截步长细小的触控板事件。
    * React 的 wheel 监听是 passive 的无法 preventDefault，改用原生监听 + 捕获阶段。
@@ -349,19 +405,41 @@ function CanvasInner() {
     if (!element) return
 
     const handleWheel = (event: WheelEvent) => {
-      stopInertia()
-      // 空格按住时滚轮始终缩放画布，交给 React Flow
-      if (spacePressed) return
-      // 触控板捏合：ctrlKey 由浏览器自动附带，交给 React Flow 的缩放
-      if (event.ctrlKey || event.metaKey) return
+      // 可滚动区域（卡片正文、思考过程、参考资料抽屉等）完全交给原生滚动：
+      // 不 preventDefault、不缩放、不平移，滚到边界也不会冒泡成画布缩放
       const target = event.target as Element | null
-      // 卡片正文、思考过程、参考资料抽屉等可滚动区域保持原生滚动
       if (target?.closest('.nowheel')) return
+
+      // 开始滚轮操作即停止正在播放的平移惯性
+      stopInertia()
+
+      // 缩放由 React Flow 在本次事件中完成，下一帧再按当前指针位置重设平移基准，
+      // 保证拖动过程中缩放跟手、不回弹
+      const recalibrateLater = () => {
+        const pointerX = event.clientX
+        const pointerY = event.clientY
+        window.requestAnimationFrame(() => recalibratePanBaseline(pointerX, pointerY))
+      }
+
+      // 空格按住时滚轮始终缩放画布，交给 React Flow
+      if (spacePressed) {
+        recalibrateLater()
+        return
+      }
+      // 触控板捏合：ctrlKey 由浏览器自动附带，交给 React Flow 的缩放
+      if (event.ctrlKey || event.metaKey) {
+        recalibrateLater()
+        return
+      }
 
       // 触控板双指滑动：deltaMode 为像素且步长细小；鼠标滚轮通常是 ±100
       const isTrackpad =
         event.deltaMode === 0 && (Math.abs(event.deltaX) > 0 || Math.abs(event.deltaY) < 40)
-      if (!isTrackpad) return
+      if (!isTrackpad) {
+        // 鼠标滚轮缩放同样交给 React Flow
+        recalibrateLater()
+        return
+      }
 
       event.preventDefault()
       event.stopPropagation()
@@ -378,7 +456,7 @@ function CanvasInner() {
 
     element.addEventListener('wheel', handleWheel, { passive: false, capture: true })
     return () => element.removeEventListener('wheel', handleWheel, { capture: true })
-  }, [getViewport, setViewport, spacePressed, stopInertia])
+  }, [getViewport, recalibratePanBaseline, setViewport, spacePressed, stopInertia])
 
   // 空白处拖动：按下后经过漂移延迟开始检测，位移超过漂移距离才进入平移
   const startPan = useCallback(
@@ -626,8 +704,15 @@ function CanvasInner() {
   )
 
   // 由 parentId 派生 ghost 箭头（建议 + 自定义输入），坐标依赖当前卡片尺寸
+  // 草稿只在构建时按需读取：输入过程中不订阅 ghostDrafts，避免画布整体重渲染
   const ghosts = useMemo(
-    () => buildGhostNodes(nodes, cardSize, preferences.cardGap),
+    () =>
+      buildGhostNodes(
+        nodes,
+        cardSize,
+        preferences.cardGap,
+        (parentId) => useGraphStore.getState().ghostDrafts[parentId] ?? '',
+      ),
     [nodes, cardSize, preferences.cardGap],
   )
   // 分支输入条同样跟随父卡片移动，堆叠在卡片下方
@@ -655,12 +740,21 @@ function CanvasInner() {
     })
   }, [nodes])
 
-  const cardZ = useMemo(
-    () => resolveLayerZ('card', nodes.map((item) => item.id)),
+  // 聊天卡片与笔记分属不同层级区段：笔记高于猜你想问，分支输入条仍在最上层
+  const { cardZ, noteZ } = useMemo(() => {
+    const chatIds: string[] = []
+    const noteIds: string[] = []
+    nodes.forEach((item) => {
+      if (item.data.node.nodeType === 'note') noteIds.push(item.id)
+      else chatIds.push(item.id)
+    })
+    return {
+      cardZ: resolveLayerZ('card', chatIds),
+      noteZ: resolveLayerZ('note', noteIds),
+    }
     // layerVersion 变化即层级变化，节点本身未变也要重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nodes, layerVersion],
-  )
+  }, [nodes, layerVersion])
   const ghostZ = useMemo(
     () => resolveLayerZ('ghost', ghosts.map((item) => item.id)),
     [ghosts, layerVersion],
@@ -678,7 +772,8 @@ function CanvasInner() {
       // 固定卡片不可直接拖动；只有标题区（.card-drag-handle）作为拖动手柄
       ...nodes.map((item) => ({
         ...item,
-        zIndex: cardZ.get(item.id),
+        zIndex:
+          item.data.node.nodeType === 'note' ? noteZ.get(item.id) : cardZ.get(item.id),
         draggable: !item.data.node.pinned,
         dragHandle: '.card-drag-handle',
       })),
@@ -688,7 +783,7 @@ function CanvasInner() {
         zIndex: branchInputZ.get(item.id),
       })),
     ],
-    [nodes, ghosts, branchInputNodes, cardZ, ghostZ, branchInputZ],
+    [nodes, ghosts, branchInputNodes, cardZ, noteZ, ghostZ, branchInputZ],
   )
 
   // 卡片之间为主链/分支实线；卡片指向 ghost 的连线复用主链边并保持虚线
@@ -1039,6 +1134,18 @@ function CanvasInner() {
 
   // 联网搜索仅 DeepSeek 服务商支持；失败时 store 会回滚，这里只告警
   const webSearchDisabled = preferences.provider !== 'deepseek'
+  // 搜索方式弹窗：悬停按钮或弹窗时显示，移出后隐藏
+  const [webSearchPanelOpen, setWebSearchPanelOpen] = useState(false)
+  const forcedSearch = preferences.webSearchMode === 'forced'
+  const toggleForcedSearch = useCallback(async () => {
+    if (webSearchDisabled) return
+    try {
+      await updatePreferences({ webSearchMode: forcedSearch ? 'smart' : 'forced' })
+    } catch (err) {
+      // store 已回滚，这里只告警
+      console.warn('切换搜索方式失败', err)
+    }
+  }, [forcedSearch, updatePreferences, webSearchDisabled])
   const toggleWebSearch = useCallback(async () => {
     if (webSearchDisabled) return
     try {
@@ -1090,6 +1197,39 @@ function CanvasInner() {
     [],
   )
 
+  // 拖入 JSON 文件：输入框与 .nodrag 区域交给原有附件拖拽逻辑，其余位置按画布导入处理
+  const handleDragOver = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement
+    if (target.closest('textarea, input, .nodrag')) return
+    if (!hasJsonDrag(event.dataTransfer)) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'copy'
+    setDragActive(true)
+  }, [])
+
+  const handleDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    // 只在真正离开容器时收起提示，子元素之间移动不闪烁
+    const related = event.relatedTarget
+    if (related instanceof Element && event.currentTarget.contains(related)) return
+    setDragActive(false)
+  }, [])
+
+  const handleDrop = useCallback(
+    async (event: ReactDragEvent<HTMLDivElement>) => {
+      const target = event.target as HTMLElement
+      if (target.closest('textarea, input, .nodrag')) return
+      const file = Array.from(event.dataTransfer.files).find((item) =>
+        item.name.toLowerCase().endsWith('.json'),
+      )
+      if (!file) return
+      event.preventDefault()
+      setDragActive(false)
+      // 导入成功由 store 给出 toast，失败时弹出可读错误
+      await importProjectFile(file)
+    },
+    [importProjectFile],
+  )
+
   useEffect(() => {
     return () => {
       if (viewportTimerRef.current !== null) window.clearTimeout(viewportTimerRef.current)
@@ -1118,6 +1258,9 @@ function CanvasInner() {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerEnd}
       onPointerCancel={handlePointerEnd}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={(event) => void handleDrop(event)}
     >
       <ReactFlow
         nodes={allNodes}
@@ -1199,23 +1342,67 @@ function CanvasInner() {
               <Brain size={12} />
               深度思考
             </button>
-            <button
-              type="button"
-              title={webSearchDisabled ? '仅 DeepSeek 服务商支持联网搜索' : '联网搜索'}
-              aria-disabled={webSearchDisabled}
-              onClick={() => void toggleWebSearch()}
-              className={[
-                'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors duration-150',
-                webSearchDisabled
-                  ? 'cursor-not-allowed border-subtle bg-panel text-muted opacity-40'
-                  : preferences.webSearchEnabled
-                    ? 'border-accent bg-accent-dim text-accent'
-                    : 'border-subtle bg-panel text-muted hover:text-ink',
-              ].join(' ')}
+            <div
+              className="relative"
+              onMouseEnter={() => setWebSearchPanelOpen(true)}
+              onMouseLeave={() => setWebSearchPanelOpen(false)}
             >
-              <Globe size={12} />
-              联网搜索
-            </button>
+              <button
+                type="button"
+                title={webSearchDisabled ? '仅 DeepSeek 服务商支持联网搜索' : '联网搜索'}
+                aria-disabled={webSearchDisabled}
+                onClick={() => void toggleWebSearch()}
+                className={[
+                  'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors duration-150',
+                  webSearchDisabled
+                    ? 'cursor-not-allowed border-subtle bg-panel text-muted opacity-40'
+                    : preferences.webSearchEnabled
+                      ? 'border-accent bg-accent-dim text-accent'
+                      : 'border-subtle bg-panel text-muted hover:text-ink',
+                ].join(' ')}
+              >
+                <Globe size={12} />
+                联网搜索
+              </button>
+
+              {/* 悬停弹窗：外层留出 8px 内边距，鼠标从按钮移入弹窗时不闪烁 */}
+              {webSearchPanelOpen && (
+                <div className="absolute left-0 top-full z-30 pt-2">
+                  <div className="panel-pop w-[240px] rounded-lg border border-subtle bg-panel p-3 shadow-lg">
+                    <p className="mb-2 text-[12px] font-medium text-ink">搜索方式</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[12px] text-body">强制搜索</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={forcedSearch}
+                        aria-label="强制搜索"
+                        disabled={webSearchDisabled}
+                        onClick={() => void toggleForcedSearch()}
+                        className={[
+                          'relative h-5 w-9 flex-none rounded-full border transition-colors duration-150',
+                          forcedSearch ? 'border-accent bg-accent-dim' : 'border-subtle bg-elevated',
+                          webSearchDisabled ? 'cursor-not-allowed opacity-40' : '',
+                        ].join(' ')}
+                      >
+                        <span
+                          className={[
+                            'absolute top-0.5 h-3.5 w-3.5 rounded-full transition-[left,background-color] duration-150',
+                            forcedSearch ? 'left-[18px] bg-accent' : 'left-0.5 bg-muted',
+                          ].join(' ')}
+                        />
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[11px] leading-[1.5] text-muted">
+                      关闭时使用智能搜索（模型自主判断是否联网）
+                    </p>
+                    {webSearchDisabled && (
+                      <p className="mt-1 text-[11px] leading-[1.5] text-muted">仅支持 DeepSeek</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </Panel>
         {selectedNodeIds.length > 1 && (
@@ -1243,6 +1430,19 @@ function CanvasInner() {
           <ZoomPanel />
         </Panel>
       </ReactFlow>
+
+      {/* 拖入 JSON 文件时的高亮提示：始终挂载，用透明度做 150ms 过渡 */}
+      <div
+        className={[
+          'pointer-events-none absolute inset-0 z-40 flex items-center justify-center border-2 border-dashed border-accent bg-accent-dim transition-opacity duration-150',
+          dragActive ? 'opacity-100' : 'opacity-0',
+        ].join(' ')}
+        aria-hidden={!dragActive}
+      >
+        <p className="rounded-lg border border-subtle bg-panel px-3 py-1.5 text-[12px] text-accent">
+          松开以导入画布文件
+        </p>
+      </div>
 
       {nodes.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">

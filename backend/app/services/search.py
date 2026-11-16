@@ -45,6 +45,37 @@ def _normalize(item: dict) -> dict:
     }
 
 
+def normalize_tool_source(item: dict) -> dict:
+    """服务端工具返回的单条来源转前端结构。
+
+    server_tool_event / server_tool_calls 里的来源用 published_at 表示日期，
+    且通常只有 snippet（没有长摘要），此时用 snippet 兜底 summary。
+    """
+    snippet = str(item.get("snippet") or "")
+    return {
+        "title": item.get("title") or "",
+        "url": item.get("url") or "",
+        "snippet": snippet,
+        "summary": str(item.get("summary") or snippet)[:SUMMARY_MAX_CHARS],
+        "siteName": item.get("site_name") or item.get("siteName") or "",
+        "date": item.get("published_at") or item.get("date") or None,
+    }
+
+
+def merge_sources(current: list[dict], incoming: list[dict]) -> bool:
+    """按 url 去重合并来源；有新来源加入时返回 True。"""
+    seen = {item.get("url") for item in current}
+    added = False
+    for item in incoming:
+        url = item.get("url")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        current.append(item)
+        added = True
+    return added
+
+
 async def search_web(query: str, runtime: dict) -> list[dict]:
     """根据运行时设置发起联网搜索。
 

@@ -4,6 +4,8 @@ import type { SourceDTO, SuggestionDTO } from './types'
 /** 流式回答的回调集合 */
 export interface StreamHandlers {
   onSources?: (list: SourceDTO[]) => void
+  /** 画布自动标题生成事件 */
+  onTitle?: (payload: { title: string; projectId: string }) => void
   onReasoning?: (text: string) => void
   onDelta?: (text: string) => void
   onSuggestions?: (list: SuggestionDTO[]) => void
@@ -141,6 +143,17 @@ function dispatchEvent(rawEvent: string, handlers: StreamHandlers): boolean {
       if (list) handlers.onSuggestions?.(list)
       return false
     }
+    case 'title': {
+      // 画布自动标题：字段不完整时忽略，不中断回答
+      const parsed = parseJson(data)
+      if (typeof parsed === 'object' && parsed !== null) {
+        const record = parsed as { title?: unknown; projectId?: unknown }
+        if (typeof record.title === 'string' && typeof record.projectId === 'string') {
+          handlers.onTitle?.({ title: record.title, projectId: record.projectId })
+        }
+      }
+      return false
+    }
     case 'done':
       handlers.onDone?.(parseJson(data))
       return true
@@ -155,22 +168,17 @@ function dispatchEvent(rawEvent: string, handlers: StreamHandlers): boolean {
 }
 
 /**
- * 调用 POST /api/nodes/{id}/answer 并逐行解析 SSE。
- * Mock 模式下自动改走本地定时器模拟，调用方无需区分。
+ * 调用指定 SSE 接口并逐行解析事件块。
+ * answer 与 continue 的事件形状完全一致，统一走这里。
  */
-export async function streamAnswer(
-  nodeId: string,
+async function streamFrom(
+  path: string,
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (isMock()) {
-    await mockStreamAnswer(nodeId, handlers, signal)
-    return
-  }
-
   let res: Response
   try {
-    res = await fetch(`/api/nodes/${nodeId}/answer`, { method: 'POST', signal })
+    res = await fetch(path, { method: 'POST', signal })
   } catch (err) {
     if (isAbortError(err)) return
     handlers.onError?.('无法连接后端服务，请确认后端已启动')
@@ -223,4 +231,26 @@ export async function streamAnswer(
   } catch (err) {
     if (!isAbortError(err)) handlers.onError?.('流式连接中断，请重试')
   }
+}
+
+/** 调用 POST /api/nodes/{id}/answer；Mock 模式下自动改走本地定时器模拟 */
+export async function streamAnswer(
+  nodeId: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (isMock()) {
+    await mockStreamAnswer(nodeId, handlers, signal)
+    return
+  }
+  await streamFrom(`/api/nodes/${nodeId}/answer`, handlers, signal)
+}
+
+/** 续写被暂停的回答：以已有内容为前缀继续生成，事件形状与 answer 一致 */
+export async function streamContinue(
+  nodeId: string,
+  handlers: StreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  await streamFrom(`/api/nodes/${nodeId}/continue`, handlers, signal)
 }

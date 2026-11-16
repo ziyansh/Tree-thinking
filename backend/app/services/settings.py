@@ -7,8 +7,9 @@
 from sqlalchemy.orm import Session
 
 from app import config
-from app.models import AppSetting
+from app.models import AppSetting, User, UserSetting
 from app.schemas import EDGE_COLOR_PATTERN
+from app.services import auth
 
 # 单行设置的固定主键
 SETTINGS_ID = 1
@@ -75,6 +76,9 @@ CANVAS_STYLES = ("none", "dots")
 # 模型搜索上限：注入模型的资料条数，0 表示不设限
 DEFAULT_SEARCH_LIMIT = 0
 MAX_SEARCH_LIMIT = 50
+# 联网搜索模式：smart（模型自主搜索）/ forced（预检索注入）
+DEFAULT_WEB_SEARCH_MODE = "smart"
+WEB_SEARCH_MODES = ("smart", "forced")
 
 # 服务商：DeepSeek（默认）/ OpenAI
 DEFAULT_PROVIDER = "deepseek"
@@ -152,9 +156,36 @@ def _mask(api_key: str) -> str:
     return f"{api_key[:3]}••••{api_key[-4:]}"
 
 
-def effective(db: Session) -> dict:
+def _settings_row(
+    db: Session, user: User | None
+) -> AppSetting | UserSetting | None:
+    """取当前生效的设置行：local 用 app_settings，server 用该用户的 user_settings。"""
+    if auth.is_server_mode() and user is not None:
+        return db.get(UserSetting, user.id)
+    return db.get(AppSetting, SETTINGS_ID)
+
+
+def _writable_row(db: Session, user: User | None) -> AppSetting | UserSetting:
+    """取可写的设置行，不存在时新建一行。"""
+    row = _settings_row(db, user)
+    if row is not None:
+        return row
+    if auth.is_server_mode() and user is not None:
+        row = UserSetting(user_id=user.id)
+    else:
+        row = AppSetting(id=SETTINGS_ID)
+    db.add(row)
+    return row
+
+
+def _row_secret(row: AppSetting | UserSetting | None, name: str) -> str:
+    """读取并解密数据库里的 Key；无 enc: 前缀的旧明文直接返回。"""
+    return auth.decrypt_secret(getattr(row, name) if row is not None else None)
+
+
+def effective(db: Session, user: User | None = None) -> dict:
     """取得当前生效的设置，供模型调用链路使用（包含明文 Key，禁止返回前端）。"""
-    row = db.get(AppSetting, SETTINGS_ID)
+    row = _settings_row(db, user)
 
     provider = _effective_choice(
         row.provider if row else None, PROVIDERS, DEFAULT_PROVIDER
@@ -162,7 +193,7 @@ def effective(db: Session) -> dict:
 
     # DeepSeek：数据库值优先，其次 .env
     deepseek_api_key = (
-        (row.api_key if row and row.api_key else config.DEEPSEEK_API_KEY) or ""
+        _row_secret(row, "api_key") or config.DEEPSEEK_API_KEY or ""
     ).strip()
     deepseek_base_url = _effective_text(
         row.base_url if row else None, config.DEEPSEEK_BASE_URL
@@ -182,8 +213,7 @@ def effective(db: Session) -> dict:
 
     # OpenAI：独立保存，数据库为空时回落到 .env / 默认值
     openai_api_key = (
-        (row.openai_api_key if row and row.openai_api_key else config.OPENAI_API_KEY)
-        or ""
+        _row_secret(row, "openai_api_key") or config.OPENAI_API_KEY or ""
     ).strip()
     openai_base_url = _effective_text(
         row.openai_base_url if row else None,
@@ -316,6 +346,11 @@ def effective(db: Session) -> dict:
             row.time_format if row else None, TIME_FORMATS, DEFAULT_TIME_FORMAT
         ),
         "web_search_enabled": web_search_enabled,
+        "web_search_mode": _effective_choice(
+            row.web_search_mode if row else None,
+            WEB_SEARCH_MODES,
+            DEFAULT_WEB_SEARCH_MODE,
+        ),
         "sources_panel_ratio": _effective_float(
             row.sources_panel_ratio if row else None,
             DEFAULT_SOURCES_PANEL_RATIO,
@@ -345,9 +380,9 @@ def effective(db: Session) -> dict:
     }
 
 
-def dto(db: Session) -> dict:
+def dto(db: Session, user: User | None = None) -> dict:
     """给前端的设置视图：不包含明文 Key，只给出是否已配置与脱敏值。"""
-    values = effective(db)
+    values = effective(db, user)
     return {
         "provider": values["provider"],
         # DeepSeek 沿用原有字段名
@@ -387,6 +422,8 @@ def dto(db: Session) -> dict:
         "timeFormat": values["time_format"],
         # 联网搜索开关
         "webSearchEnabled": values["web_search_enabled"],
+        # 联网搜索模式：smart / forced
+        "webSearchMode": values["web_search_mode"],
         # 来源抽屉高度比例，前端用于所有卡片的抽屉高度
         "sourcesPanelRatio": values["sources_panel_ratio"],
         # 画布拖动惯性与背景样式
@@ -398,15 +435,12 @@ def dto(db: Session) -> dict:
     }
 
 
-def update(db: Session, patch: dict) -> dict:
+def update(db: Session, patch: dict, user: User | None = None) -> dict:
     """更新设置并返回最新视图。
 
     api_key 传空或不传表示「保持原样」，避免用户只改模型时把 Key 清掉。
     """
-    row = db.get(AppSetting, SETTINGS_ID)
-    if row is None:
-        row = AppSetting(id=SETTINGS_ID)
-        db.add(row)
+    row = _writable_row(db, user)
 
     if patch.get("provider") is not None:
         row.provider = _effective_choice(
@@ -415,7 +449,8 @@ def update(db: Session, patch: dict) -> dict:
 
     api_key = (patch.get("api_key") or "").strip()
     if api_key:
-        row.api_key = api_key
+        # 入库前加密；旧明文会在本次保存时自动转成密文
+        row.api_key = auth.encrypt_secret(api_key)
 
     if patch.get("base_url") is not None:
         row.base_url = patch["base_url"].strip()
@@ -427,7 +462,7 @@ def update(db: Session, patch: dict) -> dict:
     # OpenAI 独立配置：Key 留空保持原值，其余字段按合法范围夹取
     openai_api_key = (patch.get("openai_api_key") or "").strip()
     if openai_api_key:
-        row.openai_api_key = openai_api_key
+        row.openai_api_key = auth.encrypt_secret(openai_api_key)
     if patch.get("openai_base_url") is not None:
         row.openai_base_url = patch["openai_base_url"].strip()
     if patch.get("openai_model") is not None:
@@ -543,6 +578,10 @@ def update(db: Session, patch: dict) -> dict:
         )
     if patch.get("web_search_enabled") is not None:
         row.web_search_enabled = bool(patch["web_search_enabled"])
+    if patch.get("web_search_mode") is not None:
+        row.web_search_mode = _effective_choice(
+            patch["web_search_mode"], WEB_SEARCH_MODES, DEFAULT_WEB_SEARCH_MODE
+        )
     if patch.get("sources_panel_ratio") is not None:
         row.sources_panel_ratio = _effective_float(
             patch["sources_panel_ratio"],
@@ -571,5 +610,11 @@ def update(db: Session, patch: dict) -> dict:
             MAX_SEARCH_LIMIT,
         )
 
+    # 旧明文 Key 在下一次保存时自动转成密文
+    for name in ("api_key", "openai_api_key"):
+        value = getattr(row, name)
+        if value and not value.startswith(auth.ENC_PREFIX):
+            setattr(row, name, auth.encrypt_secret(value))
+
     db.commit()
-    return dto(db)
+    return dto(db, user)

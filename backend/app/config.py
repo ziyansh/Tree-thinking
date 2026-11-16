@@ -50,6 +50,19 @@ SUGGESTION_COUNT: int = _read_int("SUGGESTION_COUNT", 3)
 # 是否默认开启联网搜索；页面「设置」里的开关优先
 WEB_SEARCH_ENABLED: bool = _read_bool("WEB_SEARCH_ENABLED", False)
 
+# 运行模式：local（单用户本地）/ server（多用户服务器）
+APP_MODE: str = (os.getenv("APP_MODE", "local") or "local").strip().lower()
+# 会话签名与加密密钥；server 模式必填
+AUTH_SECRET: str = os.getenv("AUTH_SECRET", "")
+# 会话 Cookie 是否只走 HTTPS（本地 http 调试时可设为 false）
+AUTH_COOKIE_SECURE: bool = _read_bool("AUTH_COOKIE_SECURE", True)
+# 允许跨域访问的前端地址，逗号分隔
+ALLOWED_ORIGINS: list[str] = [
+    item.strip()
+    for item in os.getenv("ALLOWED_ORIGINS", "http://localhost:5173").split(",")
+    if item.strip()
+]
+
 
 def _resolve_db_path(raw: str) -> Path:
     """把 DB_PATH 解析为绝对路径：相对路径按仓库根目录解析，兼容 Windows 路径。"""

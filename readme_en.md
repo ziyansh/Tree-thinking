@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.2.4** | [中文说明](readme.md)
+> Current version: **0.3.1** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -27,6 +27,8 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 - **Modified time**: chat and note cards show the last modified time at the bottom-right outside the card (`yyyy-mm-dd hh:mm`, with AM/PM in 12-hour mode), updated as edits happen.
 
 ## Quick Start
+
+> Deploying to a server for multiple users? See the [server deployment guide](docs/deploy_en.md).
 
 ### Requirements
 
@@ -194,6 +196,25 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.3.1 — 2026-11-15
+- Added: session titles — when the root card answers for the first time, DeepSeek generates the canvas title within the answer stream (no extra billing, no separate model request); a manual canvas rename is kept.
+- Added: document parsing — PDF, Word (DOC/DOCX), and PowerPoint (PPT/PPTX) attachments are parsed by the backend through the DeepSeek Files API (`text_recognition`), so the model can answer from their content; a parsing failure does not affect attachment storage.
+- Added: search modes — smart search (default) lets the model decide whether to go online, using DeepSeek's server-side web tool; forced search keeps the previous retrieve-then-answer flow and caps sources via “Forced search limit” (1–50). Choose one under Settings → Model service → DeepSeek options, or toggle forced search in the panel that appears when hovering the “Web search” button in the canvas toolbar; both stay in sync and persist, with forced search off by default. Answers that used the web tool in smart mode cannot “Continue generating” — the paused state disables that button and suggests “Re-enter prompt” instead.
+- Bumped the version to 0.3.1.
+
+### 0.3.0 — 2026-11-15
+- Fixed: answer bodies failed to scroll on macOS Chrome, including a broken scrollbar.
+- Added: stop-generating now has three states — with no output the card is deleted (the root card returns to input mode); with partial output the card pauses behind frosted glass and offers “Continue generating” and “Re-enter prompt”; the backend adds a continuation endpoint.
+- Added: when there are no suggestions, the custom-direction input appears expanded by default and collapses on blur; fixed it being prefilled with a deleted card's content after stop-generating removed that card.
+- Improved: card titles are clamped to two lines with an ellipsis, and refresh automatically after a resubmit (manual renames are kept).
+- Improved: note cards now stack above suggestions.
+- Fixed: jitter when zooming with the wheel while left-dragging the canvas; both now work at the same time.
+- Improved: the model search limit now accepts 1–50 (a legacy 0 is shown and saved as 50).
+- Added: server deployment mode `APP_MODE=local|server` — multi-user sign-up / sign-in / sign-out, bcrypt password hashing, HttpOnly session cookies, per-user isolation of canvases / nodes / attachments / settings, and Fernet-encrypted API keys; local mode still needs no login.
+- Added: the sidebar download button exports a canvas history file, and dropping a JSON file imports it and switches to that canvas automatically.
+- Docs: added bilingual deployment guides `docs/deploy.md` and `docs/deploy_en.md`.
+- Bumped the version to 0.3.0.
 
 ### 0.2.4 — 2026-11-13
 - Added: a “View my prompt” icon in the card title bar opens a drawer from the card top showing the user's original prompt; double-click to edit in a composer matching “custom direction”, with the circular button meaning “Resubmit”.

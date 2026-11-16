@@ -499,6 +499,36 @@ button:not(:disabled):active {
   animation: panel-pop 180ms var(--motion-ease-out);
 }
 
+/* 暂停遮罩：200ms 淡入 + 4px 上移，提示「生成被打断、等待选择」 */
+@keyframes pause-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+.pause-in {
+  animation: pause-in 200ms var(--motion-ease-out);
+}
+
+/* 登录页卡片：200ms 淡入 */
+@keyframes auth-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.auth-panel {
+  animation: auth-in var(--motion-base) var(--motion-ease-out);
+}
+
 /* 拖动 / 自动整理期间把节点提升为合成层，避免逐帧重绘卡片内容 */
 .react-flow__node.dragging,
 .layout-animating .react-flow__node {
@@ -576,6 +606,8 @@ button:not(:disabled):active {
   .error-in,
   .chip-in,
   .panel-pop,
+  .pause-in,
+  .auth-panel,
   .tab-panel-in {
     animation: reduced-fade-in 120ms linear both;
   }

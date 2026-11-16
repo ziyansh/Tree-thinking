@@ -11,9 +11,11 @@ import re
 import uuid
 from pathlib import Path
 
+import httpx
 from fastapi import HTTPException, UploadFile
 
 from app import config
+from app.services import auth
 
 # 单文件最大 20MB
 MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -23,6 +25,11 @@ MAX_FILES_PER_NODE = 10
 MAX_TEXT_CHARS_PER_FILE = 20000
 # 单次请求所有文本附件合计最多 60000 字符
 MAX_TEXT_CHARS_TOTAL = 60000
+
+# 需要走 DeepSeek Files API 解析的文档扩展名
+PARSE_EXTENSIONS = {".pdf", ".doc", ".docx", ".ppt", ".pptx"}
+# Files API 超时：上传 120 秒 + 解析 120 秒，取 180 秒留出余量
+PARSE_TIMEOUT_SECONDS = 180.0
 
 # 可作为图片内容块传给模型的 MIME
 IMAGE_MIME_TYPES = ("image/jpeg", "image/png", "image/gif", "image/webp")
@@ -48,8 +55,61 @@ def _kind_of(name: str, mime: str) -> str:
     return "other"
 
 
-async def save_upload(file: UploadFile) -> dict:
-    """分块读取并保存上传文件，返回元数据（含访问地址）。"""
+def _owner_of(user) -> str:
+    """附件归属：local 模式为空串，server 模式写入当前用户 id。"""
+    if auth.is_server_mode() and user is not None:
+        return user.id
+    return ""
+
+
+def is_owned(meta: dict, user) -> bool:
+    """附件是否属于当前用户；local 模式不做校验。"""
+    if not auth.is_server_mode() or user is None:
+        return True
+    return meta.get("owner_id") == user.id
+
+
+async def parse_document(
+    content: bytes, name: str, runtime: dict | None = None
+) -> str | None:
+    """把文档上传到 DeepSeek Files API 解析，成功返回 file_id。
+
+    仅 DeepSeek 且有 Key 时尝试；任何失败只记日志并返回 None，不影响附件保存。
+    """
+    values = runtime or {}
+    if values.get("provider") != "deepseek":
+        return None
+    api_key = (values.get("api_key") or "").strip()
+    base_url = (values.get("base_url") or "").rstrip("/")
+    if not api_key or not base_url:
+        return None
+    # Files API 的地址是 {base}/files；用户把接口地址填成带 /v1 时去掉，避免 404
+    if base_url.endswith("/v1"):
+        base_url = base_url[: -len("/v1")]
+
+    try:
+        async with httpx.AsyncClient(timeout=PARSE_TIMEOUT_SECONDS) as client:
+            response = await client.post(
+                f"{base_url}/files",
+                headers={"Authorization": f"Bearer {api_key}"},
+                # purpose 必须排在 file 之前，否则接口按 400 拒绝
+                data={"purpose": "text_recognition"},
+                files={"file": (name or "document", content)},
+            )
+        if response.status_code != 200:
+            logging.warning("文档解析返回非 200 状态码：%s", response.status_code)
+            return None
+        file_id = response.json().get("id")
+        return str(file_id) if file_id else None
+    except Exception as exc:  # 网络异常、超时、响应非 JSON 等一律降级
+        logging.warning("文档解析失败：%s", exc)
+        return None
+
+
+async def save_upload(
+    file: UploadFile, user=None, runtime: dict | None = None
+) -> dict:
+    """分块读取并保存上传文件，返回元数据（含访问地址与归属）。"""
     chunks: list[bytes] = []
     size = 0
     while True:
@@ -75,10 +135,22 @@ async def save_upload(file: UploadFile) -> dict:
         "size": size,
         "kind": kind,
         "ext": ext,
+        # 归属用户 id：local 模式为空串
+        "owner_id": _owner_of(user),
     }
 
     config.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    (config.UPLOAD_DIR / f"{attachment_id}{ext}").write_bytes(b"".join(chunks))
+    payload = b"".join(chunks)
+    (config.UPLOAD_DIR / f"{attachment_id}{ext}").write_bytes(payload)
+
+    # 文档类附件交给 DeepSeek Files API 解析；失败只记日志，不影响附件保存
+    file_id = None
+    if ext.lower() in PARSE_EXTENSIONS:
+        file_id = await parse_document(payload, name, runtime)
+    if file_id:
+        meta["fileId"] = file_id
+    meta["parsed"] = bool(file_id)
+
     (config.UPLOAD_DIR / f"{attachment_id}.json").write_text(
         json.dumps(meta, ensure_ascii=False), encoding="utf-8"
     )
@@ -97,8 +169,8 @@ def load_meta(attachment_id: str) -> dict | None:
     return meta if isinstance(meta, dict) else None
 
 
-def resolve_ids(ids: list[str]) -> list[dict]:
-    """校验附件 id 列表：去重、最多 10 个；任一不存在则整单拒绝。"""
+def resolve_ids(ids: list[str], user=None) -> list[dict]:
+    """校验附件 id 列表：去重、最多 10 个；任一不存在或不属于本人则整单拒绝。"""
     unique: list[str] = []
     for attachment_id in ids or []:
         if attachment_id not in unique:
@@ -108,7 +180,7 @@ def resolve_ids(ids: list[str]) -> list[dict]:
     metas: list[dict] = []
     for attachment_id in unique:
         meta = load_meta(attachment_id)
-        if meta is None:
+        if meta is None or not is_owned(meta, user):
             raise HTTPException(status_code=400, detail="附件不存在或已失效")
         metas.append({**meta, "url": f"/api/attachments/{attachment_id}"})
     return metas
@@ -134,17 +206,25 @@ def _attachment_items(node) -> list[dict]:
     return [item for item in items if isinstance(item, dict)]
 
 
-def build_message_parts(node) -> tuple[str, list[dict]]:
-    """把节点附件转成（追加文本, 图片内容块列表）。
+def build_message_parts(node) -> tuple[str, list[dict], list[dict]]:
+    """把节点附件转成（追加文本, 图片内容块, 文档内容块）。
 
     文本附件按「【附件：名称】内容」拼接到问题后面；
-    图片附件转 data URL 内容块；缺失文件或其它类型直接跳过并记日志。
+    图片附件转 data URL 内容块；
+    已由 Files API 解析的附件按 fileId 注入文档内容块；
+    缺失文件或其它类型直接跳过并记日志。
     """
     text_parts: list[str] = []
     images: list[dict] = []
+    documents: list[dict] = []
     total_chars = 0
 
     for meta in _attachment_items(node):
+        # 已解析的文档通过 fileId 引用，不依赖本地文件内容
+        file_id = meta.get("fileId")
+        if file_id:
+            documents.append({"type": "file", "file_id": file_id})
+
         path = file_path(meta)
         if path is None:
             logging.warning("附件文件缺失，跳过：%s", meta.get("id"))
@@ -182,7 +262,7 @@ def build_message_parts(node) -> tuple[str, list[dict]]:
             content = content[: min(MAX_TEXT_CHARS_PER_FILE, remaining)]
             text_parts.append(f"\n\n【附件：{name}】\n{content}")
             total_chars += len(content)
-        else:
+        elif not file_id:
             logging.warning("不支持的附件类型，跳过：%s", meta.get("id"))
 
-    return "".join(text_parts), images
+    return "".join(text_parts), images, documents

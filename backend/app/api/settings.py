@@ -4,19 +4,27 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.models import User
 from app.schemas import SettingsPatch
 from app.services import settings as settings_service
+from app.services.auth import require_user
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
 @router.get("")
-def read_settings(db: Session = Depends(get_db)) -> dict:
+def read_settings(
+    db: Session = Depends(get_db), user: User | None = Depends(require_user)
+) -> dict:
     """返回脱敏后的当前设置（不包含明文 Key）。"""
-    return settings_service.dto(db)
+    return settings_service.dto(db, user)
 
 
 @router.put("")
-def write_settings(payload: SettingsPatch, db: Session = Depends(get_db)) -> dict:
+def write_settings(
+    payload: SettingsPatch,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(require_user),
+) -> dict:
     """更新设置；未提交的字段保持原值，apiKey 留空表示不修改。"""
-    return settings_service.update(db, payload.model_dump(exclude_none=True))
+    return settings_service.update(db, payload.model_dump(exclude_none=True), user)

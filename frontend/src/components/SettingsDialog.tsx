@@ -6,6 +6,8 @@ import type {
   CanvasStyle,
   ConnectionStyle,
   ModelProvider,
+  NoteLinkReleaseAction,
+  NoteLinkStyle,
   ReasoningEffort,
   SettingsDTO,
   SettingsPatch,
@@ -62,6 +64,9 @@ interface SettingsForm {
   themeHue: number
   edgeWidth: number
   edgeColor: string
+  noteLinkStyle: NoteLinkStyle
+  noteLinkWidth: number
+  noteLinkReleaseAction: NoteLinkReleaseAction
   themeMode: ThemeMode
   timeFormat: TimeFormat
   canvasStyle: CanvasStyle
@@ -102,6 +107,9 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     themeHue: data.themeHue,
     edgeWidth: data.edgeWidth,
     edgeColor: data.edgeColor,
+    noteLinkStyle: data.noteLinkStyle ?? 'orthogonal',
+    noteLinkWidth: data.noteLinkWidth ?? 1.5,
+    noteLinkReleaseAction: data.noteLinkReleaseAction ?? 'none',
     themeMode: data.themeMode,
     timeFormat: data.timeFormat,
     canvasStyle: data.canvasStyle,
@@ -474,6 +482,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     themeHue: 173,
     edgeWidth: 1.5,
     edgeColor: '#3a3f4a',
+    noteLinkStyle: 'orthogonal',
+    noteLinkWidth: 1.5,
+    noteLinkReleaseAction: 'none',
     themeMode: 'system',
     timeFormat: '24h',
     canvasStyle: 'none',
@@ -557,6 +568,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         themeHue: form.themeHue,
         edgeWidth: form.edgeWidth,
         edgeColor: form.edgeColor,
+        noteLinkStyle: form.noteLinkStyle,
+        noteLinkWidth: form.noteLinkWidth,
+        noteLinkReleaseAction: form.noteLinkReleaseAction,
         themeMode: form.themeMode,
         timeFormat: form.timeFormat,
         canvasStyle: form.canvasStyle,
@@ -1004,6 +1018,50 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           min={0}
                           max={50}
                           step={1}
+                        />
+                      </Row>
+                    </Section>
+
+                    <Section title="笔记卡片">
+                      <Row
+                        label="笔记卡片连线样式"
+                        hint="仅作用于笔记卡片连接线；默认直角线"
+                      >
+                        <ChoiceGroup
+                          value={form.noteLinkStyle}
+                          options={[
+                            { value: 'curved', label: '曲线' },
+                            { value: 'orthogonal', label: '直角线' },
+                          ]}
+                          onChange={(noteLinkStyle) => setForm({ ...form, noteLinkStyle })}
+                        />
+                      </Row>
+
+                      <Row label="笔记卡片连线粗细" hint="0.5–6，步长 0.5；仅作用于笔记卡片连接线">
+                        <SliderNumber
+                          value={form.noteLinkWidth}
+                          onChange={(noteLinkWidth) => setForm({ ...form, noteLinkWidth })}
+                          min={0.5}
+                          max={6}
+                          step={0.5}
+                        />
+                      </Row>
+
+                      <Row
+                        label="释放连线动作"
+                        hint="从回答卡片连接点拖出的连线在空白处释放时的行为；默认无动作"
+                      >
+                        <SelectRow
+                          ariaLabel="释放连线动作"
+                          value={form.noteLinkReleaseAction}
+                          options={[
+                            { value: 'none', label: '无动作' },
+                            { value: 'shift-note', label: '按住 Shift 创建空白笔记' },
+                            { value: 'note', label: '创建空白笔记' },
+                          ]}
+                          onChange={(noteLinkReleaseAction) =>
+                            setForm({ ...form, noteLinkReleaseAction })
+                          }
                         />
                       </Row>
                     </Section>

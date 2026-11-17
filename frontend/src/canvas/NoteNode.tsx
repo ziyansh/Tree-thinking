@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react'
+import { Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import { Pin, Trash2 } from 'lucide-react'
 import {
@@ -14,6 +15,7 @@ import { CORNER_ZONES, EDGE_ZONES, IconButton } from './CardNode'
 import type { ResizeEdge } from './CardNode'
 import { formatModifiedTime } from '../lib/time'
 import { useSpacePressed } from '../lib/spaceKey'
+import { NOTE_LINK_DOT, startNoteLinkDrag, useNoteLinkDragSignal } from './noteLink'
 
 /** 笔记卡片：双击空白画布创建，标题/正文独立编辑，拥有自己的宽高 */
 function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
@@ -33,6 +35,10 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
   // 滚轮逻辑：悬停笔记正文时滚动内容或缩放画布；按住空格时始终缩放
   const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
   const spacePressed = useSpacePressed()
+  // 连线拖拽状态：从回答端出发时笔记端连接点可连接
+  const linkDrag = useNoteLinkDragSignal()
+  const linkConnectable = linkDrag.active && linkDrag.sourceKind === 'answer'
+  const linkSnapped = linkConnectable && linkDrag.snappedNodeId === node.id
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
   /** 新建 1.2 秒内的笔记播放一次入场动画 */
   const createdAtMs = node.createdAt ? Date.parse(node.createdAt) : Number.NaN
@@ -255,8 +261,30 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
         </span>
       )}
 
+      {/* 笔记连接点：标题行最左侧、靠近左边框；标题行留出左侧空间避免遮挡 */}
+      <Handle
+        id="note-link-in"
+        type="target"
+        position={Position.Left}
+        isConnectable={false}
+        title="拖动连接到回答卡片"
+        aria-label="拖动连接到回答卡片"
+        onPointerDown={(event) => startNoteLinkDrag(event, node.id, 'note')}
+        onClick={(event) => event.stopPropagation()}
+        className={[
+          'note-link-handle nodrag nopan',
+          linkConnectable ? 'is-connectable' : '',
+          linkSnapped ? 'is-snapped' : '',
+        ].join(' ')}
+        style={{
+          left: NOTE_LINK_DOT.left,
+          top: NOTE_LINK_DOT.top,
+          transform: 'none',
+        }}
+      />
+
       {/* 标题栏同时作为拖动手柄：空白处可拖动整张笔记 */}
-      <div className="card-drag-handle flex shrink-0 items-start gap-2">
+      <div className="card-drag-handle flex shrink-0 items-start gap-2 pl-[22px]">
         {editingTitle ? (
           <input
             ref={titleInputRef}

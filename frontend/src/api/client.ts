@@ -10,6 +10,7 @@ import type {
   ImportResult,
   NodeCreateInput,
   NodeDTO,
+  NoteLinkDTO,
   ProjectDTO,
   SettingsDTO,
   SettingsPatch,
@@ -164,6 +165,20 @@ export interface ApiClient {
   deleteNode(id: string): Promise<void>
   /** 在画布指定坐标新建笔记卡片 */
   createNote(projectId: string, position: { x: number; y: number }): Promise<NodeDTO>
+  /** 笔记卡片连接列表 */
+  listNoteLinks(projectId: string): Promise<NoteLinkDTO[]>
+  /** 建立回答卡片到笔记卡片的连接，重复连接由后端幂等返回 */
+  createNoteLink(
+    projectId: string,
+    input: { answerNodeId: string; noteNodeId: string },
+  ): Promise<NoteLinkDTO>
+  /** 删除单条笔记连接 */
+  deleteNoteLink(projectId: string, linkId: string): Promise<void>
+  /** 全量覆盖笔记连接（撤销恢复使用） */
+  syncNoteLinks(
+    projectId: string,
+    links: { answerNodeId: string; noteNodeId: string }[],
+  ): Promise<NoteLinkDTO[]>
   /** 批量恢复节点（撤销删除），保留原 id */
   restoreNodes(projectId: string, nodes: NodeDTO[]): Promise<void>
   /** 保存当前画布快照，返回保存时间 */
@@ -248,6 +263,24 @@ const realApi: ApiClient = {
     request<NodeDTO>(`/projects/${projectId}/notes`, {
       method: 'POST',
       body: JSON.stringify(position),
+    }),
+
+  listNoteLinks: (projectId) => request<NoteLinkDTO[]>(`/projects/${projectId}/links`),
+
+  createNoteLink: (projectId, input) =>
+    request<NoteLinkDTO>(`/projects/${projectId}/links`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+
+  deleteNoteLink: (projectId, linkId) =>
+    request<void>(`/projects/${projectId}/links/${linkId}`, { method: 'DELETE' }),
+
+  // 全量覆盖：body 为当前应保留的连接，撤销恢复时使用
+  syncNoteLinks: (projectId, links) =>
+    request<NoteLinkDTO[]>(`/projects/${projectId}/links`, {
+      method: 'PUT',
+      body: JSON.stringify({ links }),
     }),
 
   // 后端按原 id 恢复，已存在的 id 会被跳过

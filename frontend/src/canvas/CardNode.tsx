@@ -31,6 +31,11 @@ import { AttachmentChips, useAttachmentUploads, usePasteAttachments, useFileDrop
 import { WebSearchToggle } from './WebSearchToggle'
 import { ThinkingToggle } from './ThinkingToggle'
 import { PromptDrawer } from './PromptDrawer'
+import {
+  ANSWER_LINK_DOT,
+  startNoteLinkDrag,
+  useNoteLinkDragSignal,
+} from './noteLink'
 
 /** Markdown 正文样式：颜色只取自主题令牌，避免卡片被长回答撑高 */
 const MARKDOWN_CLASS = [
@@ -181,6 +186,10 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
   const spacePressed = useSpacePressed()
   const wheelScrollClass = wheelMode === 'scroll-card' && !spacePressed ? 'nowheel' : ''
+  // 连线拖拽状态：从笔记端出发时回答端连接点可连接
+  const linkDrag = useNoteLinkDragSignal()
+  const linkConnectable = linkDrag.active && linkDrag.sourceKind === 'note'
+  const linkSnapped = linkConnectable && linkDrag.snappedNodeId === node.id
   // 回答正文是主要阅读区：始终保留原生滚动（按住空格时仍交给画布缩放）
   const answerScrollClass = spacePressed ? '' : 'nowheel'
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
@@ -470,6 +479,30 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
       <Handle id="source-right" type="source" position={Position.Right} isConnectable={false} style={{ opacity: 0 }} />
       <Handle id="source-top" type="source" position={Position.Top} isConnectable={false} style={{ opacity: 0 }} />
       <Handle id="source-bottom" type="source" position={Position.Bottom} isConnectable={false} style={{ opacity: 0 }} />
+
+      {/* 笔记连接点：与底部工具栏「重新提问 / 新建分支」同一行，靠近右边框 */}
+      <Handle
+        id="note-link-out"
+        type="source"
+        position={Position.Right}
+        isConnectable={false}
+        title="拖动连接到笔记"
+        aria-label="拖动连接到笔记"
+        onPointerDown={(event) => startNoteLinkDrag(event, node.id, 'answer')}
+        onClick={(event) => event.stopPropagation()}
+        className={[
+          'note-link-handle nodrag nopan',
+          linkConnectable ? 'is-connectable' : '',
+          linkSnapped ? 'is-snapped' : '',
+        ].join(' ')}
+        style={{
+          right: ANSWER_LINK_DOT.right,
+          bottom: ANSWER_LINK_DOT.bottom,
+          top: 'auto',
+          left: 'auto',
+          transform: 'none',
+        }}
+      />
 
       {/* 提问抽屉：浮在卡片上方，展示并可重新提交用户原始提问 */}
       {promptOpen && (

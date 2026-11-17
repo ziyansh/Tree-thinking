@@ -57,6 +57,12 @@ DEFAULT_EDGE_WIDTH = 1.5
 MIN_EDGE_WIDTH = 0.5
 MAX_EDGE_WIDTH = 6
 DEFAULT_EDGE_COLOR = "#3a3f4a"
+# 笔记连接线：样式默认直角线，粗细沿用普通连线范围，释放动作默认无
+DEFAULT_NOTE_LINK_STYLE = "orthogonal"
+NOTE_LINK_STYLES = ("curved", "orthogonal")
+DEFAULT_NOTE_LINK_WIDTH = 1.5
+DEFAULT_NOTE_LINK_RELEASE_ACTION = "none"
+NOTE_LINK_RELEASE_ACTIONS = ("none", "shift-note", "note")
 DEFAULT_THEME_MODE = "system"
 THEME_MODES = ("system", "light", "dark")
 DEFAULT_TIME_FORMAT = "24h"
@@ -339,6 +345,22 @@ def effective(db: Session, user: User | None = None) -> dict:
         "edge_color": _effective_color(
             row.edge_color if row else None, DEFAULT_EDGE_COLOR
         ),
+        "note_link_style": _effective_choice(
+            row.note_link_style if row else None,
+            NOTE_LINK_STYLES,
+            DEFAULT_NOTE_LINK_STYLE,
+        ),
+        "note_link_width": _effective_float(
+            row.note_link_width if row else None,
+            DEFAULT_NOTE_LINK_WIDTH,
+            MIN_EDGE_WIDTH,
+            MAX_EDGE_WIDTH,
+        ),
+        "note_link_release_action": _effective_choice(
+            row.note_link_release_action if row else None,
+            NOTE_LINK_RELEASE_ACTIONS,
+            DEFAULT_NOTE_LINK_RELEASE_ACTION,
+        ),
         "theme_mode": _effective_choice(
             row.theme_mode if row else None, THEME_MODES, DEFAULT_THEME_MODE
         ),
@@ -418,6 +440,10 @@ def dto(db: Session, user: User | None = None) -> dict:
         "themeHue": values["theme_hue"],
         "edgeWidth": values["edge_width"],
         "edgeColor": values["edge_color"],
+        # 笔记连接线：样式、粗细与拖放释放动作
+        "noteLinkStyle": values["note_link_style"],
+        "noteLinkWidth": values["note_link_width"],
+        "noteLinkReleaseAction": values["note_link_release_action"],
         "themeMode": values["theme_mode"],
         "timeFormat": values["time_format"],
         # 联网搜索开关
@@ -568,6 +594,23 @@ def update(db: Session, patch: dict, user: User | None = None) -> dict:
         )
     if patch.get("edge_color") is not None:
         row.edge_color = _effective_color(patch["edge_color"], DEFAULT_EDGE_COLOR)
+    if patch.get("note_link_style") is not None:
+        row.note_link_style = _effective_choice(
+            patch["note_link_style"], NOTE_LINK_STYLES, DEFAULT_NOTE_LINK_STYLE
+        )
+    if patch.get("note_link_width") is not None:
+        row.note_link_width = _effective_float(
+            patch["note_link_width"],
+            DEFAULT_NOTE_LINK_WIDTH,
+            MIN_EDGE_WIDTH,
+            MAX_EDGE_WIDTH,
+        )
+    if patch.get("note_link_release_action") is not None:
+        row.note_link_release_action = _effective_choice(
+            patch["note_link_release_action"],
+            NOTE_LINK_RELEASE_ACTIONS,
+            DEFAULT_NOTE_LINK_RELEASE_ACTION,
+        )
     if patch.get("theme_mode") is not None:
         row.theme_mode = _effective_choice(
             patch["theme_mode"], THEME_MODES, DEFAULT_THEME_MODE

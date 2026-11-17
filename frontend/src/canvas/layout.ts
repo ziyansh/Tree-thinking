@@ -1,3 +1,4 @@
+import type { NoteLinkDTO } from '../api/types'
 import type { GraphFlowNode } from '../store/graphStore'
 import { GHOST_WIDTH, suggestionGhostHeight } from './ghosts'
 
@@ -226,4 +227,48 @@ export function computeAutoLayout(
   const positions = lanePositions(chatCards, size, connectionStyle, gap)
   resolveOverlaps(positions, chatCards, size, gap)
   return positions
+}
+
+/**
+ * 自动整理后让笔记跟随母卡片：
+ * 收集笔记连接的全部回答卡片在布局前后的位移，取平均加到笔记原位，
+ * 使笔记与母卡片作为整体平移；无连接或连接的回答未参与布局时保持原位。
+ */
+export function followNotesWithLinks(
+  cards: GraphFlowNode[],
+  links: NoteLinkDTO[],
+  positions: LayoutPositions,
+): void {
+  /** 笔记 id → 连接的回答卡片 id 列表 */
+  const answersByNote = new Map<string, string[]>()
+  for (const link of links) {
+    const list = answersByNote.get(link.noteNodeId) ?? []
+    list.push(link.answerNodeId)
+    answersByNote.set(link.noteNodeId, list)
+  }
+
+  for (const card of cards) {
+    if (card.data.node.nodeType !== 'note') continue
+    const answerIds = answersByNote.get(card.id)
+    if (!answerIds || answerIds.length === 0) continue
+
+    let sumX = 0
+    let sumY = 0
+    let count = 0
+    for (const answerId of answerIds) {
+      const answer = cards.find((item) => item.id === answerId)
+      const target = positions.get(answerId)
+      if (!answer || !target) continue
+      sumX += target.x - answer.position.x
+      sumY += target.y - answer.position.y
+      count += 1
+    }
+    // 没有任何母卡片参与布局时不做移动
+    if (count === 0) continue
+
+    positions.set(card.id, {
+      x: card.position.x + sumX / count,
+      y: card.position.y + sumY / count,
+    })
+  }
 }

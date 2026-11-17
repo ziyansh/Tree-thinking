@@ -7,8 +7,11 @@ import type {
 import {
   Background,
   Panel,
+  Position,
   ReactFlow,
   ReactFlowProvider,
+  getBezierPath,
+  getSmoothStepPath,
   useReactFlow,
   useViewport,
 } from '@xyflow/react'
@@ -21,9 +24,16 @@ import { BranchInputNode } from './BranchInputNode'
 import { GhostInputNode } from './GhostInputNode'
 import { GhostNode } from './GhostNode'
 import { buildBranchInputNodes, buildGhostNodes } from './ghosts'
-import { computeAutoLayout } from './layout'
-import { BusEdge, DirectEdge, MainEdge } from './edges'
+import { computeAutoLayout, followNotesWithLinks } from './layout'
+import { BusEdge, DirectEdge, MainEdge, NoteLinkEdge } from './edges'
 import type { Rect } from './edges'
+import {
+  NOTE_LINK_START_EVENT,
+  answerLinkAnchor,
+  noteLinkAnchor,
+  setNoteLinkDragSignal,
+} from './noteLink'
+import type { NoteLinkSourceKind, NoteLinkStartPayload } from './noteLink'
 import { NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, useGraphStore } from '../store/graphStore'
 import type { GraphFlowNode } from '../store/graphStore'
 import { DOT_COLORS, resolveTheme } from '../lib/theme'
@@ -44,11 +54,12 @@ const nodeTypes = {
   'branch-input': BranchInputNode,
 }
 
-/** 自定义边：主链 / 直接分支 / 共用母线 */
+/** 自定义边：主链 / 直接分支 / 共用母线 / 笔记连接 */
 const edgeTypes = {
   main: MainEdge,
   direct: DirectEdge,
   bus: BusEdge,
+  'note-link': NoteLinkEdge,
 }
 
 /** ghost 卡片尺寸，与 GhostNode / GhostInputNode 的 280×44 保持一致 */
@@ -125,6 +136,25 @@ interface PanePointerState {
   timer: number | null
 }
 
+/** 笔记连线拖拽会话：起点节点、指针位置与当前吸附目标 */
+interface NoteLinkDragSession {
+  nodeId: string
+  kind: NoteLinkSourceKind
+  /** 起点连接点的画布坐标 */
+  origin: { x: number; y: number }
+  /** 指针的画布坐标（未吸附时的预览终点） */
+  pointerFlow: { x: number; y: number }
+  snappedNodeId: string | null
+  snappedAnchor: { x: number; y: number } | null
+}
+
+/** 预览线：用屏幕坐标绘制，起点每次按当前视口从画布坐标换算 */
+interface NoteLinkPreview {
+  start: { x: number; y: number }
+  end: { x: number; y: number }
+  sourceKind: NoteLinkSourceKind
+}
+
 /** 收集一组节点及其全部后代 id（去重），用于拖动时同步移动 */
 function collectSubtreeIds(cards: GraphFlowNode[], rootIds: string[]): string[] {
   const ids = [...new Set(rootIds)]
@@ -155,6 +185,31 @@ function cardRectSize(
   }
   return cardSize
 }
+
+/** 卡片在画布坐标中的矩形 */
+function nodeRect(
+  card: GraphFlowNode,
+  cardSize: { width: number; height: number },
+): Rect {
+  return {
+    x: card.position.x,
+    y: card.position.y,
+    ...cardRectSize(card, cardSize),
+  }
+}
+
+/** 点是否落在卡片矩形内（含边界） */
+function pointInRect(point: { x: number; y: number }, rect: Rect): boolean {
+  return (
+    point.x >= rect.x &&
+    point.x <= rect.x + rect.width &&
+    point.y >= rect.y &&
+    point.y <= rect.y + rect.height
+  )
+}
+
+/** 连线吸附半径：屏幕像素，按当前 zoom 换算到画布坐标 */
+const NOTE_LINK_SNAP_SCREEN = 24
 
 /** 在候选对齐线中找最近的偏移量；超过阈值的线忽略，无可用线时返回 0 */
 function findSnapOffset(targets: number[], lines: number[]): number {
@@ -216,6 +271,7 @@ function PanelButton({
 
 function CanvasInner() {
   const nodes = useGraphStore((state) => state.nodes)
+  const links = useGraphStore((state) => state.links)
   const cardSize = useGraphStore((state) => state.cardSize)
   const preferences = useGraphStore((state) => state.preferences)
   const branchInputs = useGraphStore((state) => state.branchInputs)
@@ -284,6 +340,15 @@ function CanvasInner() {
   /** 自动整理位置动画帧与取消标记 */
   const layoutAnimationRef = useRef<number | null>(null)
   const layoutCanceledRef = useRef(false)
+  /** 笔记连线预览：当前会话与淡出状态 */
+  const [linkPreview, setLinkPreview] = useState<NoteLinkPreview | null>(null)
+  const [linkPreviewLeaving, setLinkPreviewLeaving] = useState(false)
+  const linkPreviewTimerRef = useRef<number | null>(null)
+  const linkDragRef = useRef<NoteLinkDragSession | null>(null)
+  /** 当前 hover 的笔记连接线 id，供 Delete 删除 */
+  const hoveredLinkRef = useRef<string | null>(null)
+  /** 连线拖拽结束时间：抑制随后补发的 click 改变选中态 */
+  const lastLinkDragEndRef = useRef(0)
 
   // 空格按住时左键可平移（由 capture 逻辑接管）；平时只有中键平移，左键空白用于拖动/点击判定
 
@@ -292,6 +357,247 @@ function CanvasInner() {
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     [],
   )
+
+  /** 记录连接线 hover：Delete 时只删除当前悬停的那条连线 */
+  const handleNoteLinkHover = useCallback((linkId: string | null) => {
+    hoveredLinkRef.current = linkId
+  }, [])
+
+  // 悬停连线时按 Delete：capture 阶段拦截，避免 App 的全局 Delete 删除卡片
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const linkId = hoveredLinkRef.current
+      if (event.key !== 'Delete' || !linkId) return
+      const active = document.activeElement as HTMLElement | null
+      if (
+        active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          active.tagName === 'SELECT' ||
+          active.isContentEditable)
+      ) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      hoveredLinkRef.current = null
+      const state = useGraphStore.getState()
+      state.pushUndo('删除连接')
+      void state.deleteNoteLink(linkId)
+    }
+    // capture 阶段先于 App 的 window 冒泡监听
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [])
+
+  /**
+   * 从连接点开始一次连线拖拽：记录起点并挂载全局指针监听，
+   * 预览线、吸附与松手判定都在这里完成。
+   */
+  const beginNoteLinkDrag = useCallback(
+    (payload: NoteLinkStartPayload) => {
+      if (linkDragRef.current) return
+      const initialState = useGraphStore.getState()
+      const card = initialState.nodes.find((item) => item.id === payload.nodeId)
+      const container = containerRef.current
+      if (!card || !container) return
+      // 起点类型必须与卡片类型一致
+      const nodeType = card.data.node.nodeType
+      if (payload.kind === 'answer' ? nodeType !== 'chat' : nodeType !== 'note') return
+
+      const rect = nodeRect(card, initialState.cardSize)
+      const origin = payload.kind === 'answer' ? answerLinkAnchor(rect) : noteLinkAnchor(rect)
+      const bounds = container.getBoundingClientRect()
+
+      /** 画布坐标 → 画布容器内的屏幕坐标，按当前视口换算 */
+      const toScreen = (point: { x: number; y: number }) => {
+        const viewport = getViewport()
+        return {
+          x: point.x * viewport.zoom + viewport.x,
+          y: point.y * viewport.zoom + viewport.y,
+        }
+      }
+
+      /** 找指针附近最近的可连接连接点：屏幕距离 24px 内吸附 */
+      const findSnap = (
+        pointerFlow: { x: number; y: number },
+        zoom: number,
+      ): { nodeId: string; anchor: { x: number; y: number } } | null => {
+        const current = useGraphStore.getState()
+        // 回答端只能连笔记，笔记端只能连回答
+        const wantNote = payload.kind === 'answer'
+        let best: { nodeId: string; anchor: { x: number; y: number } } | null = null
+        let bestDistance = NOTE_LINK_SNAP_SCREEN + 1
+        for (const item of current.nodes) {
+          const isNote = item.data.node.nodeType === 'note'
+          if (isNote !== wantNote) continue
+          const targetRect = nodeRect(item, current.cardSize)
+          const anchor = isNote ? noteLinkAnchor(targetRect) : answerLinkAnchor(targetRect)
+          const distance = Math.hypot(anchor.x - pointerFlow.x, anchor.y - pointerFlow.y) * zoom
+          if (distance <= NOTE_LINK_SNAP_SCREEN && distance < bestDistance) {
+            bestDistance = distance
+            best = { nodeId: item.id, anchor }
+          }
+        }
+        return best
+      }
+
+      /** 命中任意目标类型卡片的矩形（用于松手时不需要精确落在连接点） */
+      const findNodeAt = (
+        pointerFlow: { x: number; y: number },
+        wantNote: boolean,
+      ): GraphFlowNode | null => {
+        const current = useGraphStore.getState()
+        // 后创建的节点通常在上层，倒序命中
+        for (let index = current.nodes.length - 1; index >= 0; index -= 1) {
+          const item = current.nodes[index]
+          const isNote = item.data.node.nodeType === 'note'
+          if (isNote !== wantNote) continue
+          if (pointInRect(pointerFlow, nodeRect(item, current.cardSize))) return item
+        }
+        return null
+      }
+
+      linkDragRef.current = {
+        nodeId: payload.nodeId,
+        kind: payload.kind,
+        origin,
+        pointerFlow: screenToFlowPosition({ x: payload.clientX, y: payload.clientY }),
+        snappedNodeId: null,
+        snappedAnchor: null,
+      }
+
+      // 上一次的淡出计时未结束时先清掉，新的预览立即出现
+      if (linkPreviewTimerRef.current !== null) {
+        window.clearTimeout(linkPreviewTimerRef.current)
+        linkPreviewTimerRef.current = null
+      }
+      setLinkPreviewLeaving(false)
+      setLinkPreview({
+        start: toScreen(origin),
+        end: {
+          x: payload.clientX - bounds.left,
+          y: payload.clientY - bounds.top,
+        },
+        sourceKind: payload.kind,
+      })
+      setNoteLinkDragSignal({ active: true, sourceKind: payload.kind, snappedNodeId: null })
+
+      const handleMove = (event: PointerEvent) => {
+        const session = linkDragRef.current
+        if (!session) return
+        const pointerFlow = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+        const zoom = getViewport().zoom
+        const snapped = findSnap(pointerFlow, zoom)
+        session.pointerFlow = pointerFlow
+        session.snappedNodeId = snapped?.nodeId ?? null
+        session.snappedAnchor = snapped?.anchor ?? null
+        const endFlow = snapped ? snapped.anchor : pointerFlow
+        setLinkPreview({
+          start: toScreen(session.origin),
+          end: toScreen(endFlow),
+          sourceKind: session.kind,
+        })
+        setNoteLinkDragSignal({
+          active: true,
+          sourceKind: session.kind,
+          snappedNodeId: session.snappedNodeId,
+        })
+      }
+
+      /** 新建连接：已存在时只提示，不重复写入 */
+      const connect = (answerNodeId: string, noteNodeId: string) => {
+        const current = useGraphStore.getState()
+        const exists = current.links.some(
+          (link) => link.answerNodeId === answerNodeId && link.noteNodeId === noteNodeId,
+        )
+        if (exists) {
+          current.showToast('连接已存在')
+          return
+        }
+        current.pushUndo('连接笔记')
+        void current.createNoteLink(answerNodeId, noteNodeId)
+      }
+
+      const finish = (event: PointerEvent | null) => {
+        const session = linkDragRef.current
+        if (!session) return
+        window.removeEventListener('pointermove', handleMove)
+        window.removeEventListener('pointerup', handleUp)
+        window.removeEventListener('pointercancel', handleCancel)
+        linkDragRef.current = null
+        // 抑制松手后补发的 click，避免误改选中态或清空选择
+        lastLinkDragEndRef.current = performance.now()
+
+        const zoom = getViewport().zoom
+        const pointerFlow = event
+          ? screenToFlowPosition({ x: event.clientX, y: event.clientY })
+          : session.pointerFlow
+        // 松手时重新判定吸附：优先命中被吸附的连接点
+        const snapped = event
+          ? findSnap(pointerFlow, zoom)
+          : session.snappedNodeId && session.snappedAnchor
+            ? { nodeId: session.snappedNodeId, anchor: session.snappedAnchor }
+            : null
+        const endFlow = snapped ? snapped.anchor : pointerFlow
+
+        // 结束高亮；预览线保留 140ms 做淡出
+        setNoteLinkDragSignal({ active: false, sourceKind: null, snappedNodeId: null })
+        setLinkPreview({
+          start: toScreen(session.origin),
+          end: toScreen(endFlow),
+          sourceKind: session.kind,
+        })
+        setLinkPreviewLeaving(true)
+        if (linkPreviewTimerRef.current !== null) {
+          window.clearTimeout(linkPreviewTimerRef.current)
+        }
+        linkPreviewTimerRef.current = window.setTimeout(() => {
+          linkPreviewTimerRef.current = null
+          setLinkPreview(null)
+          setLinkPreviewLeaving(false)
+        }, 140)
+
+        const current = useGraphStore.getState()
+        if (session.kind === 'note') {
+          // 从笔记端出发：命中任意回答卡片即可，未命中则取消
+          const answerId = snapped?.nodeId ?? findNodeAt(pointerFlow, false)?.id ?? null
+          if (answerId) connect(answerId, session.nodeId)
+          return
+        }
+
+        // 从回答端出发：命中任意笔记卡片即可
+        const noteId = snapped?.nodeId ?? findNodeAt(pointerFlow, true)?.id ?? null
+        if (noteId) {
+          connect(session.nodeId, noteId)
+          return
+        }
+        // 未命中笔记卡片：按设置（或按住 Shift）创建空白笔记并连接
+        const action = current.preferences.noteLinkReleaseAction
+        const shouldCreate =
+          action === 'note' || (action === 'shift-note' && (event?.shiftKey ?? false))
+        if (!shouldCreate) return
+        void current.createNoteLinkedTo(pointerFlow.x, pointerFlow.y, session.nodeId)
+      }
+
+      const handleUp = (event: PointerEvent) => finish(event)
+      const handleCancel = () => finish(null)
+
+      window.addEventListener('pointermove', handleMove)
+      window.addEventListener('pointerup', handleUp)
+      window.addEventListener('pointercancel', handleCancel)
+    },
+    [getViewport, screenToFlowPosition],
+  )
+
+  // 节点内连接点按下后广播开始事件
+  useEffect(() => {
+    const handleStart = (event: Event) => {
+      beginNoteLinkDrag((event as CustomEvent<NoteLinkStartPayload>).detail)
+    }
+    window.addEventListener(NOTE_LINK_START_EVENT, handleStart)
+    return () => window.removeEventListener(NOTE_LINK_START_EVENT, handleStart)
+  }, [beginNoteLinkDrag])
 
   /** 停止当前平移惯性动画 */
   const stopInertia = useCallback(() => {
@@ -786,6 +1092,29 @@ function CanvasInner() {
     [nodes, ghosts, branchInputNodes, cardZ, noteZ, ghostZ, branchInputZ],
   )
 
+  /** 连线拖拽中：已有 note-link 整体变淡，预览线单独绘制 */
+  const noteLinkDragging = linkPreview !== null
+
+  // 预览线路径：曲线用 bezier，直角线用 0 圆角 smoothstep；坐标已是画布容器内屏幕坐标
+  const previewPath = useMemo(() => {
+    if (!linkPreview) return ''
+    const { start, end, sourceKind } = linkPreview
+    // 回答端从右侧出线，笔记端从左侧出线
+    const sourcePosition = sourceKind === 'answer' ? Position.Right : Position.Left
+    const targetPosition = sourceKind === 'answer' ? Position.Left : Position.Right
+    const params = {
+      sourceX: start.x,
+      sourceY: start.y,
+      sourcePosition,
+      targetX: end.x,
+      targetY: end.y,
+      targetPosition,
+    }
+    return preferences.noteLinkStyle === 'curved'
+      ? getBezierPath(params)[0]
+      : getSmoothStepPath({ ...params, borderRadius: 0 })[0]
+  }, [linkPreview, preferences.noteLinkStyle])
+
   // 卡片之间为主链/分支实线；卡片指向 ghost 的连线复用主链边并保持虚线
   const edges = useMemo<Edge[]>(() => {
     const { cardWidth, cardHeight, cardGap, connectionStyle, edgeColor, edgeWidth } = preferences
@@ -914,8 +1243,28 @@ function CanvasInner() {
       })
     }
 
+    // 回答卡片与笔记卡片之间的连接：端点由两侧卡片内的连接点 Handle 定位
+    for (const link of links) {
+      if (!rects.has(link.answerNodeId) || !rects.has(link.noteNodeId)) continue
+      result.push({
+        id: `note-link-${link.id}`,
+        source: link.answerNodeId,
+        target: link.noteNodeId,
+        type: 'note-link',
+        sourceHandle: 'note-link-out',
+        targetHandle: 'note-link-in',
+        data: {
+          color: edgeColor,
+          width: preferences.noteLinkWidth,
+          orthogonal: preferences.noteLinkStyle === 'orthogonal',
+          dimmed: noteLinkDragging,
+          onHoverChange: handleNoteLinkHover,
+        },
+      })
+    }
+
     return result
-  }, [nodes, ghosts, preferences])
+  }, [nodes, ghosts, preferences, links, noteLinkDragging, handleNoteLinkHover])
 
   // 拖拽开始：确定本次要移动的集合（自身子树或多选集合的子树），记录初始坐标
   const handleNodeDragStart = useCallback((_event: MouseEvent | TouchEvent, node: Node) => {
@@ -947,6 +1296,27 @@ function CanvasInner() {
       // 拖动未选中的卡片：先改为单选，只移动该卡片及其子树
       if (!state.selectedNodeIds.includes(node.id)) state.setSelected(node.id)
       moveIds = collectSubtreeIds(state.nodes, [node.id])
+    }
+
+    // 单独拖动笔记时只移动笔记本身；其余情况让「母卡片全部在移动集合中」的笔记随动
+    const singleNoteDrag = !multiSelected && dragged.nodeType === 'note'
+    if (!singleNoteDrag) {
+      const moving = new Set(moveIds)
+      const answersByNote = new Map<string, string[]>()
+      for (const link of state.links) {
+        const list = answersByNote.get(link.noteNodeId) ?? []
+        list.push(link.answerNodeId)
+        answersByNote.set(link.noteNodeId, list)
+      }
+      answersByNote.forEach((answerIds, noteId) => {
+        if (moving.has(noteId)) return
+        // 笔记被未参与移动的另一张母卡片连接时保持原位
+        if (answerIds.length === 0 || !answerIds.every((id) => moving.has(id))) return
+        const note = state.nodes.find((item) => item.id === noteId)?.data.node
+        if (!note || note.pinned) return
+        moving.add(noteId)
+        moveIds.push(noteId)
+      })
     }
 
     const positions = new Map<string, { x: number; y: number }>()
@@ -1058,6 +1428,8 @@ function CanvasInner() {
       state.preferences.connectionStyle,
       state.preferences.cardGap,
     )
+    // 笔记不参与排版，但按母卡片的平均位移跟随平移，无连接时保持原位
+    followNotesWithLinks(state.nodes, state.links, positions)
     if (positions.size === 0) return
     // 整理会改变全部坐标，先压入撤销快照
     state.pushUndo('自动整理')
@@ -1236,6 +1608,7 @@ function CanvasInner() {
       if (inertiaRef.current !== null) window.cancelAnimationFrame(inertiaRef.current)
       if (layoutAnimationRef.current !== null) window.cancelAnimationFrame(layoutAnimationRef.current)
       if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current)
+      if (linkPreviewTimerRef.current !== null) window.clearTimeout(linkPreviewTimerRef.current)
     }
   }, [])
 
@@ -1291,6 +1664,8 @@ function CanvasInner() {
           bumpUiLayer(node.id)
           // 拖拽松手后浏览器仍可能补发 click，此时保持原来的多选集合
           if (performance.now() - lastDragEndRef.current < 100) return
+          // 连线拖拽结束后同样忽略补发的 click
+          if (performance.now() - lastLinkDragEndRef.current < 150) return
           if (event.ctrlKey || event.metaKey) {
             toggleSelected(node.id)
           } else {
@@ -1303,6 +1678,8 @@ function CanvasInner() {
             suppressPaneClickRef.current = false
             return
           }
+          // 连线拖拽松手后补发的点击同样不取消选择
+          if (performance.now() - lastLinkDragEndRef.current < 150) return
           clearSelection()
         }}
         onNodeDragStart={handleNodeDragStart}
@@ -1430,6 +1807,23 @@ function CanvasInner() {
           <ZoomPanel />
         </Panel>
       </ReactFlow>
+
+      {/* 连线预览：画布容器内屏幕坐标，随视口换算并随手势实时更新 */}
+      {linkPreview && (
+        <svg
+          className={['note-link-preview', linkPreviewLeaving ? 'is-leaving' : ''].join(' ')}
+          aria-hidden="true"
+        >
+          <path
+            d={previewPath}
+            fill="none"
+            stroke="var(--accent)"
+            strokeWidth={preferences.noteLinkWidth}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
 
       {/* 拖入 JSON 文件时的高亮提示：始终挂载，用透明度做 150ms 过渡 */}
       <div

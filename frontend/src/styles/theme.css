@@ -575,6 +575,83 @@ button:not(:disabled):active {
   color: var(--accent);
 }
 
+/* ---------- 笔记卡片连线（v0.3.4） ---------- */
+/* 连接点：默认低调，hover / 可连接 / 被吸附时逐级强调 */
+.react-flow__handle.note-link-handle {
+  width: 9px;
+  height: 9px;
+  min-width: 9px;
+  min-height: 9px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: transparent;
+  /* React Flow 默认让连接点不可命中，这里改回可交互 */
+  pointer-events: all !important;
+  /* 高于卡片内容，避免被标题行等元素压住 */
+  z-index: 5;
+  cursor: crosshair;
+  transition:
+    scale 120ms var(--motion-ease-out),
+    border-color 120ms var(--motion-ease-out),
+    background-color 120ms var(--motion-ease-out),
+    box-shadow 120ms var(--motion-ease-out);
+}
+
+.react-flow__handle.note-link-handle:hover {
+  scale: 1.35;
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* 拖拽连线期间，所有可连接的连接点高亮为强调色 */
+.react-flow__handle.note-link-handle.is-connectable {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* 被吸附的连接点：放大并加一圈光环 */
+.react-flow__handle.note-link-handle.is-snapped {
+  scale: 1.7;
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-dim);
+}
+
+/* 正式连线：hover 高亮时颜色与粗细平滑过渡 */
+.note-link-edge-path {
+  transition:
+    stroke 120ms var(--motion-ease-out),
+    stroke-width 120ms var(--motion-ease-out),
+    opacity 120ms var(--motion-ease-out);
+}
+
+/* 预览线：画布容器内的屏幕坐标覆盖层，出现 / 消失做 140ms 淡入淡出 */
+.note-link-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  animation: note-link-preview-in 140ms var(--motion-ease-out);
+  transition: opacity 140ms var(--motion-ease-out);
+}
+
+.note-link-preview.is-leaving {
+  opacity: 0;
+}
+
+@keyframes note-link-preview-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* 减弱动态：禁用位移、缩放与惯性，仅保留 120ms 淡入淡出 */
 @keyframes reduced-fade-in {
   from {
@@ -637,5 +714,23 @@ button:not(:disabled):active {
   .streaming-caret {
     animation: none;
     opacity: 1;
+  }
+
+  /* 连线预览只保留淡入淡出；连接点不做缩放，用颜色与光环区分状态 */
+  .note-link-preview {
+    animation: reduced-fade-in 120ms linear both;
+    transition-duration: 120ms;
+  }
+
+  .react-flow__handle.note-link-handle {
+    transition:
+      border-color 120ms linear,
+      background-color 120ms linear,
+      box-shadow 120ms linear;
+  }
+
+  .react-flow__handle.note-link-handle:hover,
+  .react-flow__handle.note-link-handle.is-snapped {
+    scale: 1;
   }
 }

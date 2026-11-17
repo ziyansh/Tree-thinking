@@ -5,6 +5,7 @@ import { streamAnswer } from '../api/sse'
 import type {
   ExportFile,
   NodeDTO,
+  NoteLinkDTO,
   ProjectDTO,
   SettingsDTO,
   SettingsPatch,
@@ -76,6 +77,9 @@ export type Preferences = Pick<
   | 'themeHue'
   | 'edgeWidth'
   | 'edgeColor'
+  | 'noteLinkStyle'
+  | 'noteLinkWidth'
+  | 'noteLinkReleaseAction'
   | 'themeMode'
   | 'timeFormat'
   | 'provider'
@@ -105,6 +109,9 @@ const DEFAULT_PREFERENCES: Preferences = {
   themeHue: 173,
   edgeWidth: 1.5,
   edgeColor: '#3a3f4a',
+  noteLinkStyle: 'orthogonal',
+  noteLinkWidth: 1.5,
+  noteLinkReleaseAction: 'none',
   themeMode: 'system',
   timeFormat: '24h',
   provider: 'deepseek',
@@ -135,6 +142,9 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     themeHue: settings.themeHue,
     edgeWidth: settings.edgeWidth,
     edgeColor: settings.edgeColor,
+    noteLinkStyle: settings.noteLinkStyle ?? 'orthogonal',
+    noteLinkWidth: settings.noteLinkWidth ?? 1.5,
+    noteLinkReleaseAction: settings.noteLinkReleaseAction ?? 'none',
     themeMode: settings.themeMode,
     timeFormat: settings.timeFormat,
     provider: settings.provider,
@@ -166,6 +176,9 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     themeHue: patch.themeHue ?? base.themeHue,
     edgeWidth: patch.edgeWidth ?? base.edgeWidth,
     edgeColor: patch.edgeColor ?? base.edgeColor,
+    noteLinkStyle: patch.noteLinkStyle ?? base.noteLinkStyle,
+    noteLinkWidth: patch.noteLinkWidth ?? base.noteLinkWidth,
+    noteLinkReleaseAction: patch.noteLinkReleaseAction ?? base.noteLinkReleaseAction,
     themeMode: patch.themeMode ?? base.themeMode,
     timeFormat: patch.timeFormat ?? base.timeFormat,
     provider: patch.provider ?? base.provider,
@@ -193,9 +206,10 @@ function toFlowNode(node: NodeDTO): GraphFlowNode {
 /** 流式中断控制器按节点维护，不进入 store 状态 */
 const controllers = new Map<string, AbortController>()
 
-/** 撤销快照：动作发生前的整份节点数据、动作名与当时的全局卡片尺寸 */
+/** 撤销快照：动作发生前的整份节点、连接数据、动作名与当时的全局卡片尺寸 */
 interface UndoEntry {
   nodes: NodeDTO[]
+  links: NoteLinkDTO[]
   label: string
   cardSize: { width: number; height: number }
 }
@@ -274,6 +288,11 @@ function collectSubtree(nodes: GraphFlowNode[], rootIds: string[]): Set<string> 
   return ids
 }
 
+/** 过滤掉引用了被删节点的连接（后端会级联删除，这里同步保持本地一致） */
+function dropLinksForNodes(links: NoteLinkDTO[], ids: Set<string>): NoteLinkDTO[] {
+  return links.filter((link) => !ids.has(link.answerNodeId) && !ids.has(link.noteNodeId))
+}
+
 /** 元卡片：无父节点且为问答卡片（笔记节点同样 parentId 为空，不能当作元问题） */
 function findRootNode(nodes: NodeDTO[]): NodeDTO | undefined {
   return nodes.find((node) => node.parentId === null && node.nodeType === 'chat')
@@ -283,6 +302,8 @@ interface GraphState {
   projects: ProjectDTO[]
   currentProjectId: string | null
   nodes: GraphFlowNode[]
+  /** 回答卡片与笔记卡片之间的连接 */
+  links: NoteLinkDTO[]
   /** 主选中：最后点击的卡片，供底部追问条绑定 */
   selectedNodeId: string | null
   /** 多选集合；主选中始终包含在内 */
@@ -356,6 +377,14 @@ interface GraphState {
   continueGeneration: (nodeId: string) => Promise<void>
   /** 在画布指定坐标新建笔记卡片并选中 */
   createNoteAt: (x: number, y: number) => Promise<void>
+  /** 新建笔记卡片并连接到指定回答卡片，返回新笔记 id */
+  createNoteLinkedTo: (x: number, y: number, answerNodeId: string) => Promise<string | null>
+  /** 建立回答卡片到笔记卡片的连接 */
+  createNoteLink: (answerNodeId: string, noteNodeId: string) => Promise<void>
+  /** 删除单条笔记连接（乐观更新，失败回滚） */
+  deleteNoteLink: (linkId: string) => Promise<void>
+  /** 全量覆盖笔记连接（撤销恢复用），失败只提示 */
+  syncNoteLinks: (links: { answerNodeId: string; noteNodeId: string }[]) => Promise<void>
   /** 更新笔记标题（乐观更新，失败回滚） */
   updateNoteTitle: (nodeId: string, title: string) => Promise<void>
   /** 更新笔记正文（乐观更新，失败回滚） */
@@ -398,10 +427,48 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     cardSize: { width: preferences.cardWidth, height: preferences.cardHeight },
   })
 
+  /** 新建笔记并写入 store（不含撤销与错误提示，供 createNoteAt / createNoteLinkedTo 复用） */
+  const createNoteNode = async (x: number, y: number): Promise<NodeDTO | null> => {
+    const projectId = get().currentProjectId
+    if (!projectId) return null
+    const note = await api.createNote(projectId, { x, y })
+    // 新建后立即选中，用户可直接编辑标题与正文
+    set((state) => ({
+      nodes: [...state.nodes, toFlowNode(note)],
+      selectedNodeId: note.id,
+      selectedNodeIds: [note.id],
+    }))
+    return note
+  }
+
+  /** 调用后端建立笔记连接并写入本地，失败时提示（不处理撤销） */
+  const linkNote = async (
+    answerNodeId: string,
+    noteNodeId: string,
+  ): Promise<NoteLinkDTO | null> => {
+    const projectId = get().currentProjectId
+    if (!projectId) return null
+    try {
+      const link = await api.createNoteLink(projectId, { answerNodeId, noteNodeId })
+      set((state) => ({
+        // 重复连接后端返回已有记录，按 id 去重
+        links: state.links.some((item) => item.id === link.id)
+          ? state.links
+          : [...state.links, link],
+      }))
+      return link
+    } catch (err) {
+      console.warn('创建笔记连接失败', err)
+      get().showToast('创建笔记连接失败')
+      return null
+    }
+  }
+
   return {
     projects: [],
     currentProjectId: null,
     nodes: [],
+    links: [],
     selectedNodeId: null,
     selectedNodeIds: [],
     isStreamingIds: [],
@@ -427,6 +494,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       set({
         currentProjectId: id,
         nodes,
+        links: graph.links ?? [],
         selectedNodeId: root?.id ?? null,
         selectedNodeIds: root ? [root.id] : [],
         isStreamingIds: [],
@@ -446,9 +514,11 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       const snapshot: NodeDTO[] = JSON.parse(
         JSON.stringify(get().nodes.map((item) => item.data.node)),
       )
+      // 连接关系同样深拷贝，撤销时按快照全量覆盖
+      const links: NoteLinkDTO[] = JSON.parse(JSON.stringify(get().links))
       const stack = undoStacks.get(projectId) ?? []
       // 卡片尺寸一并快照，撤销「调整卡片大小」时可恢复全局尺寸
-      stack.push({ nodes: snapshot, label, cardSize: { ...get().cardSize } })
+      stack.push({ nodes: snapshot, links, label, cardSize: { ...get().cardSize } })
       const depth = Math.max(1, get().preferences.undoSteps)
       while (stack.length > depth) stack.shift()
       undoStacks.set(projectId, stack)
@@ -530,8 +600,25 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         return
       }
 
+      // 节点恢复完成后按快照全量覆盖连接；失败只提示，不阻塞节点恢复
+      try {
+        const links = await api.syncNoteLinks(
+          projectId,
+          entry.links.map((link) => ({
+            answerNodeId: link.answerNodeId,
+            noteNodeId: link.noteNodeId,
+          })),
+        )
+        set({ links })
+      } catch (err) {
+        console.warn('撤销笔记连接失败', err)
+        get().showToast('恢复笔记连接失败')
+      }
+
       set((state) => ({
         isStreamingIds: state.isStreamingIds.filter((id) => !createdIds.has(id)),
+        // 被删除的新增节点仍可能残留在本地连接里，先过滤再由 openProject 校准
+        links: dropLinksForNodes(state.links, createdIds),
       }))
       // 全部 API 成功后重新拉取图，保证 store 与后端一致，并清空选择
       await get().openProject(projectId)
@@ -567,6 +654,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         projects: [graph.project, ...state.projects],
         currentProjectId: graph.project.id,
         nodes,
+        links: graph.links ?? [],
         selectedNodeId: root?.id ?? null,
         selectedNodeIds: root ? [root.id] : [],
         isStreamingIds: [],
@@ -609,6 +697,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           projects: rest,
           currentProjectId: null,
           nodes: [],
+          links: [],
           selectedNodeId: null,
           selectedNodeIds: [],
           branchInputs: [],
@@ -664,6 +753,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         projects: [],
         currentProjectId: null,
         nodes: [],
+        links: [],
         selectedNodeId: null,
         selectedNodeIds: [],
         isStreamingIds: [],
@@ -757,6 +847,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
 
       set((state) => ({
         nodes: state.nodes.filter((item) => !removing.has(item.id)),
+        links: dropLinksForNodes(state.links, removing),
         selectedNodeId: null,
         selectedNodeIds: [],
         isStreamingIds: state.isStreamingIds.filter((id) => !removing.has(id)),
@@ -966,6 +1057,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
 
       set((state) => ({
         nodes: state.nodes.filter((item) => !removing.has(item.id)),
+        links: dropLinksForNodes(state.links, removing),
         isStreamingIds: state.isStreamingIds.filter((id) => !removing.has(id)),
         selectedNodeId: state.selectedNodeId && removing.has(state.selectedNodeId) ? null : state.selectedNodeId,
         selectedNodeIds: state.selectedNodeIds.filter((id) => !removing.has(id)),
@@ -1041,6 +1133,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
 
       set((state) => ({
         nodes: state.nodes.filter((item) => !removing.has(item.id)),
+        links: dropLinksForNodes(state.links, removing),
         isStreamingIds: state.isStreamingIds.filter((id) => !removing.has(id)),
         selectedNodeId: parentId,
         selectedNodeIds: parentId ? [parentId] : [],
@@ -1180,17 +1273,66 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       if (!projectId) return
       get().pushUndo('新建笔记')
       try {
-        const note = await api.createNote(projectId, { x, y })
-        // 新建后立即选中，用户可直接编辑标题与正文
-        set((state) => ({
-          nodes: [...state.nodes, toFlowNode(note)],
-          selectedNodeId: note.id,
-          selectedNodeIds: [note.id],
-        }))
+        await createNoteNode(x, y)
       } catch (err) {
         console.warn('创建笔记失败', err)
         dropLastUndo(projectId)
         window.alert('创建笔记失败，请稍后重试')
+      }
+    },
+
+    createNoteLinkedTo: async (x, y, answerNodeId) => {
+      const projectId = get().currentProjectId
+      if (!projectId) return null
+      get().pushUndo('新增笔记')
+      let note: NodeDTO | null
+      try {
+        note = await createNoteNode(x, y)
+      } catch (err) {
+        console.warn('创建笔记失败', err)
+        dropLastUndo(projectId)
+        window.alert('创建笔记失败，请稍后重试')
+        return null
+      }
+      // 笔记已创建：连接失败只提示，不影响笔记本身
+      if (note) await linkNote(answerNodeId, note.id)
+      return note?.id ?? null
+    },
+
+    createNoteLink: async (answerNodeId, noteNodeId) => {
+      const projectId = get().currentProjectId
+      if (!projectId) return
+      get().pushUndo('新增笔记连接')
+      const link = await linkNote(answerNodeId, noteNodeId)
+      if (!link) dropLastUndo(projectId)
+    },
+
+    deleteNoteLink: async (linkId) => {
+      const projectId = get().currentProjectId
+      if (!projectId) return
+      get().pushUndo('删除笔记连接')
+      const previous = get().links
+      // 先乐观移除，失败再回滚
+      set({ links: previous.filter((link) => link.id !== linkId) })
+      try {
+        await api.deleteNoteLink(projectId, linkId)
+      } catch (err) {
+        console.warn('删除笔记连接失败', err)
+        dropLastUndo(projectId)
+        set({ links: previous })
+        get().showToast('删除笔记连接失败')
+      }
+    },
+
+    syncNoteLinks: async (links) => {
+      const projectId = get().currentProjectId
+      if (!projectId) return
+      try {
+        const saved = await api.syncNoteLinks(projectId, links)
+        set({ links: saved })
+      } catch (err) {
+        console.warn('同步笔记连接失败', err)
+        get().showToast('同步笔记连接失败')
       }
     },
 
@@ -1443,6 +1585,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
 
       set((state) => ({
         nodes: state.nodes.filter((item) => !removing.has(item.id)),
+        links: dropLinksForNodes(state.links, removing),
         selectedNodeId:
           state.selectedNodeId && removing.has(state.selectedNodeId) ? null : state.selectedNodeId,
         selectedNodeIds: state.selectedNodeIds.filter((id) => !removing.has(id)),

@@ -7,11 +7,11 @@ from typing import AsyncIterator, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete
+from sqlalchemy import delete, or_
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal, get_db
-from app.models import ConversationNode, Project, User
+from app.models import ConversationNode, NoteLink, Project, User
 from app.schemas import NodePatch, NodeQuestion, NodeStopRequest, SuggestionRequest
 from app.services import attachments, llm, naming, suggestions
 from app.services import search as search_service
@@ -203,6 +203,15 @@ def delete_node(
         raise HTTPException(status_code=400, detail="元问题卡片不可删除")
 
     node_ids = collect_subtree_ids(db, node.id)
+    # 被删除节点参与的回答 ↔ 笔记连接一并删除
+    db.execute(
+        delete(NoteLink).where(
+            or_(
+                NoteLink.answer_node_id.in_(node_ids),
+                NoteLink.note_node_id.in_(node_ids),
+            )
+        )
+    )
     db.execute(delete(ConversationNode).where(ConversationNode.id.in_(node_ids)))
     db.commit()
     return {"ok": True, "deleted": len(node_ids)}

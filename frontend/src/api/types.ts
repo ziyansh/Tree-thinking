@@ -95,10 +95,20 @@ export interface ProjectDTO {
   updatedAt?: string
 }
 
+/** 笔记卡片连接：从回答卡片（answerNodeId）指向笔记卡片（noteNodeId） */
+export interface NoteLinkDTO {
+  id: string
+  projectId: string
+  answerNodeId: string
+  noteNodeId: string
+}
+
 /** 画布图数据：项目 + 全部节点（边由 parentId 在前端派生） */
 export interface GraphDTO {
   project: ProjectDTO
   nodes: NodeDTO[]
+  /** 回答卡片与笔记卡片之间的连接 */
+  links: NoteLinkDTO[]
 }
 
 /** 创建子节点的入参 */
@@ -125,6 +135,12 @@ export type WheelMode = 'scroll-card' | 'zoom-canvas'
 
 /** 画布背景样式：无 / 点状 */
 export type CanvasStyle = 'none' | 'dots'
+
+/** 笔记卡片连线样式：曲线 / 直角线 */
+export type NoteLinkStyle = 'curved' | 'orthogonal'
+
+/** 从回答卡片连接点拖出连线后的释放动作 */
+export type NoteLinkReleaseAction = 'none' | 'shift-note' | 'note'
 
 /** 模型服务商：DeepSeek / OpenAI */
 export type ModelProvider = 'deepseek' | 'openai'
@@ -187,6 +203,12 @@ export interface SettingsDTO {
   edgeWidth: number
   /** 连线颜色（默认 #3a3f4a） */
   edgeColor: string
+  /** 笔记卡片连线样式（默认 orthogonal） */
+  noteLinkStyle: NoteLinkStyle
+  /** 笔记卡片连线粗细（默认 1.5，范围与 edgeWidth 相同） */
+  noteLinkWidth: number
+  /** 从回答卡片连接点拖出连线的释放动作（默认 none） */
+  noteLinkReleaseAction: NoteLinkReleaseAction
   /** 主题模式（默认跟随系统） */
   themeMode: ThemeMode
   /** 时间制式（默认 24 小时制） */
@@ -229,6 +251,8 @@ export interface ExportFile {
     viewport: Viewport | null
   }
   nodes: NodeDTO[]
+  /** 回答卡片与笔记卡片的连接（id 为导出时节点 id，导入由后端重映射） */
+  links?: { answerNodeId: string; noteNodeId: string }[]
 }
 
 /** 导入结果：新建的画布与根节点 id */
@@ -269,6 +293,12 @@ export interface SettingsPatch {
   themeHue?: number
   edgeWidth?: number
   edgeColor?: string
+  /** 笔记卡片连线样式 */
+  noteLinkStyle?: NoteLinkStyle
+  /** 笔记卡片连线粗细（范围与 edgeWidth 相同） */
+  noteLinkWidth?: number
+  /** 从回答卡片连接点拖出连线的释放动作 */
+  noteLinkReleaseAction?: NoteLinkReleaseAction
   themeMode?: ThemeMode
   timeFormat?: TimeFormat
   /** 是否开启联网搜索 */

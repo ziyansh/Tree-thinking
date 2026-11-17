@@ -91,12 +91,15 @@ def _request_params(
             params["reasoning_effort"] = options["reasoning_effort"]
         return params
 
-    # DeepSeek：思考模式与会话标题都通过 extra_body 传递，可同时生效
+    # DeepSeek：思考模式默认开启，关闭时必须显式传 disabled，否则模型仍会思考
     params = {}
     extra_body: dict = {}
     if options["thinking_enabled"]:
         params["reasoning_effort"] = "high"
         extra_body["thinking"] = {"type": "enabled"}
+    else:
+        extra_body["thinking"] = {"type": "disabled"}
+    # 会话标题与思考开关共用 extra_body，可同时生效
     if enable_title:
         extra_body["title"] = {"enabled": True}
     if extra_body:

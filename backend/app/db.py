@@ -90,6 +90,10 @@ _EXTRA_COLUMNS = {
         "theme_hue": "FLOAT",
         "edge_width": "FLOAT",
         "edge_color": "VARCHAR(16)",
+        # 笔记连接线样式、粗细与释放动作（旧库补列）
+        "note_link_style": "VARCHAR(16)",
+        "note_link_width": "FLOAT",
+        "note_link_release_action": "VARCHAR(16)",
         "theme_mode": "VARCHAR(16)",
         "time_format": "VARCHAR(8)",
         # 联网搜索开关与搜索模式（smart / forced）
@@ -107,6 +111,10 @@ _EXTRA_COLUMNS = {
     "user_settings": {
         # server 模式每用户设置：联网搜索模式（旧库补列）
         "web_search_mode": "VARCHAR(16)",
+        # 笔记连接线样式、粗细与释放动作（旧库补列）
+        "note_link_style": "VARCHAR(16)",
+        "note_link_width": "FLOAT",
+        "note_link_release_action": "VARCHAR(16)",
     },
 }
 

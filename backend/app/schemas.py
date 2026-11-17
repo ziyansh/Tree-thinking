@@ -244,6 +244,28 @@ class NoteCreate(CamelModel):
     y: float
 
 
+class NoteLinkOut(CamelModel):
+    """笔记连接 DTO：回答卡片 → 笔记卡片。"""
+
+    id: str
+    project_id: str
+    answer_node_id: str
+    note_node_id: str
+
+
+class NoteLinkCreate(CamelModel):
+    """新建 / 导入单条笔记连接：answerNodeId 必须是回答卡片，noteNodeId 必须是笔记卡片。"""
+
+    answer_node_id: str
+    note_node_id: str
+
+
+class NoteLinksSync(CamelModel):
+    """全量覆盖笔记连接（撤销用）：提交的列表即最终状态。"""
+
+    links: list[NoteLinkCreate] = []
+
+
 class NodeRestoreItem(CamelModel):
     """批量恢复的单个节点：前端此前拿到的完整节点结构（camelCase）。
 
@@ -352,6 +374,10 @@ class SettingsPatch(CamelModel):
     theme_hue: float | None = None
     edge_width: float | None = None
     edge_color: str | None = None
+    # 笔记连接线：样式（curved / orthogonal）、粗细、拖放释放动作
+    note_link_style: Literal["curved", "orthogonal"] | None = None
+    note_link_width: float | None = None
+    note_link_release_action: Literal["none", "shift-note", "note"] | None = None
     theme_mode: Literal["system", "light", "dark"] | None = None
     time_format: Literal["24h", "12h"] | None = None
     # 联网搜索开关
@@ -455,6 +481,8 @@ class ImportPayload(CamelModel):
     exported_at: str | None = None
     project: ImportProject = ImportProject()
     nodes: list[ImportNode] = []
+    # 笔记连接：引用的是导入文件里的旧节点 id
+    links: list[NoteLinkCreate] = []
 
 
 class AuthCredentials(CamelModel):

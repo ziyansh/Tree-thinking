@@ -1,5 +1,6 @@
+import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { BaseEdge } from '@xyflow/react'
+import { BaseEdge, getBezierPath, getSmoothStepPath } from '@xyflow/react'
 import type { Edge, EdgeProps } from '@xyflow/react'
 
 /** 卡片矩形（画布坐标） */
@@ -27,6 +28,21 @@ export type RouteEdgeData = {
 }
 
 type RouteEdge = Edge<RouteEdgeData>
+
+/** 笔记连接线的数据：外观来自设置，hover / 拖拽态由画布透传 */
+export type NoteLinkEdgeData = {
+  color: string
+  width: number
+  /** true = 直角线，false = 曲线 */
+  orthogonal: boolean
+  /** 连线拖拽期间整体变淡 */
+  dimmed?: boolean
+  /** 鼠标进入 / 离开时回写当前 hover 的连线 id */
+  onHoverChange?: (linkId: string | null) => void
+  [key: string]: unknown
+}
+
+type NoteLinkEdgeType = Edge<NoteLinkEdgeData>
 
 interface Point {
   x: number
@@ -262,6 +278,86 @@ export function DirectEdge({ sourceX, sourceY, targetX, targetY, data }: EdgePro
         )
 
   return <BaseEdge path={orthogonalPath(points)} style={visualStyle(data)} />
+}
+
+/**
+ * 笔记连接线：回答卡片底部连接点 → 笔记卡片标题行连接点。
+ * 曲线用 bezier、直角线用 0 圆角 smoothstep；hover 时加粗并切换为强调色。
+ */
+export function NoteLinkEdge({
+  id,
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+  data,
+}: EdgeProps<NoteLinkEdgeType>) {
+  const [hovered, setHovered] = useState(false)
+  const hoveredRef = useRef(false)
+  const onHoverChange = data?.onHoverChange
+
+  // 连线被删除或卸载时清空 hover 记录，避免 Delete 指向已不存在的连线
+  useEffect(
+    () => () => {
+      if (!hoveredRef.current) return
+      hoveredRef.current = false
+      onHoverChange?.(null)
+    },
+    [onHoverChange],
+  )
+
+  const updateHover = (next: boolean) => {
+    if (hoveredRef.current === next) return
+    hoveredRef.current = next
+    setHovered(next)
+    onHoverChange?.(next ? id : null)
+  }
+
+  const orthogonal = data?.orthogonal ?? true
+  const width = data?.width ?? 1.5
+  const [path] = orthogonal
+    ? getSmoothStepPath({
+        sourceX,
+        sourceY,
+        sourcePosition,
+        targetX,
+        targetY,
+        targetPosition,
+        borderRadius: 0,
+      })
+    : getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition })
+
+  const dimmed = data?.dimmed ?? false
+
+  return (
+    <g
+      className="note-link-edge"
+      onMouseEnter={() => updateHover(true)}
+      onMouseLeave={() => updateHover(false)}
+    >
+      {/* 透明加宽路径：扩大 hover 命中范围 */}
+      <path
+        d={path}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={Math.max(14, width + 10)}
+        style={{ pointerEvents: dimmed ? 'none' : 'stroke' }}
+      />
+      <path
+        d={path}
+        fill="none"
+        className="note-link-edge-path"
+        style={{
+          stroke: hovered ? 'var(--accent)' : (data?.color ?? 'var(--edge)'),
+          strokeWidth: hovered ? width + 1 : width,
+          opacity: dimmed ? 0.25 : 1,
+          pointerEvents: 'none',
+        }}
+      />
+    </g>
+  )
 }
 
 /** 共用母线边：父卡片右边 → 水平引线 → 纵向母线 → 子卡片左边，母线被遮挡时右移 */

@@ -12,10 +12,11 @@ from sqlalchemy.orm import Session
 
 from app import config
 from app.db import get_db
-from app.models import ConversationNode, Project, User
+from app.models import ConversationNode, NoteLink, Project, User
 from app.schemas import (
     ImportPayload,
     NoteCreate,
+    NoteLinkOut,
     NodeCreate,
     ProjectCreate,
     ProjectListItem,
@@ -239,9 +240,46 @@ def import_project(
                 y=item.y,
             )
         )
+    # 笔记连接：旧 id 换成新 id；引用缺失或类型不匹配的项直接跳过
+    node_types = {item.id: item.node_type for item in payload.nodes}
+    link_pairs: list[tuple[str, str]] = []
+    seen_links: set[tuple[str, str]] = set()
+    for link in payload.links:
+        answer_old = link.answer_node_id
+        note_old = link.note_node_id
+        if (
+            answer_old not in id_map
+            or note_old not in id_map
+            or answer_old == note_old
+            or node_types.get(answer_old) != "chat"
+            or node_types.get(note_old) != "note"
+        ):
+            continue
+        key = (id_map[answer_old], id_map[note_old])
+        if key in seen_links:
+            continue
+        seen_links.add(key)
+        link_pairs.append(key)
+
+    links = [
+        NoteLink(
+            project_id=project.id,
+            answer_node_id=answer_id,
+            note_node_id=note_id,
+        )
+        for answer_id, note_id in link_pairs
+    ]
+    db.add_all(links)
     db.commit()
     db.refresh(project)
-    return {"project": _project_dto(project), "nodeId": id_map[root_item.id]}
+    return {
+        "project": _project_dto(project),
+        "nodeId": id_map[root_item.id],
+        "links": [
+            NoteLinkOut.model_validate(link).model_dump(by_alias=True)
+            for link in links
+        ],
+    }
 
 
 @router.patch("/{project_id}")
@@ -323,6 +361,8 @@ def delete_project(
     ).all()
     if node_ids:
         db.execute(delete(ConversationNode).where(ConversationNode.id.in_(node_ids)))
+    # 连接随画布一起删除
+    db.execute(delete(NoteLink).where(NoteLink.project_id == project_id))
     db.delete(project)
     db.commit()
     return {"ok": True}
@@ -357,6 +397,11 @@ def export_project(
         .where(ConversationNode.project_id == project_id)
         .order_by(ConversationNode.created_at)
     ).all()
+    links = db.scalars(
+        select(NoteLink)
+        .where(NoteLink.project_id == project_id)
+        .order_by(NoteLink.created_at)
+    ).all()
 
     exported_at = datetime.now(timezone.utc)
     payload = {
@@ -365,6 +410,11 @@ def export_project(
         "exportedAt": exported_at.isoformat(),
         "project": {"name": project.name, "viewport": _viewport_of(project)},
         "nodes": [node_to_dto(node) for node in nodes],
+        # 笔记连接使用导出时的节点 id，导入时按旧 id → 新 id 映射重建
+        "links": [
+            {"answerNodeId": link.answer_node_id, "noteNodeId": link.note_node_id}
+            for link in links
+        ],
     }
 
     stamp = exported_at.strftime("%Y%m%d")

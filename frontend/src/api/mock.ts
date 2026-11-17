@@ -7,6 +7,7 @@ import type {
   GraphDTO,
   ImportResult,
   NodeDTO,
+  NoteLinkDTO,
   ProjectDTO,
   SettingsDTO,
   SettingsPatch,
@@ -26,6 +27,8 @@ export function isMock(): boolean {
 interface MockDb {
   projects: ProjectDTO[]
   nodes: NodeDTO[]
+  /** 回答卡片与笔记卡片之间的连接 */
+  links: NoteLinkDTO[]
 }
 
 const nowIso = () => new Date().toISOString()
@@ -100,7 +103,7 @@ function seedDb(): MockDb {
     createdAt: nowIso(),
     updatedAt: nowIso(),
   }
-  return { projects: [project], nodes: [makeRoot(project.id)] }
+  return { projects: [project], nodes: [makeRoot(project.id)], links: [] }
 }
 
 function saveDb(db: MockDb): void {
@@ -115,9 +118,14 @@ function loadDb(): MockDb {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw) as MockDb
+      const parsed = JSON.parse(raw) as Partial<MockDb>
       if (Array.isArray(parsed.projects) && parsed.projects.length > 0 && Array.isArray(parsed.nodes)) {
-        return parsed
+        // 旧数据结构没有 links 字段，按空数组兼容
+        return {
+          projects: parsed.projects,
+          nodes: parsed.nodes,
+          links: Array.isArray(parsed.links) ? parsed.links : [],
+        }
       }
     }
   } catch {
@@ -162,6 +170,9 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   themeHue: 173,
   edgeWidth: 1.5,
   edgeColor: '#3a3f4a',
+  noteLinkStyle: 'orthogonal',
+  noteLinkWidth: 1.5,
+  noteLinkReleaseAction: 'none',
   themeMode: 'system',
   timeFormat: '24h',
   webSearchEnabled: false,
@@ -355,6 +366,10 @@ export const mockApi: ApiClient = {
       exportedAt: nowIso(),
       project: { name: project.name, viewport: project.viewport },
       nodes: db.nodes.filter((item) => item.projectId === id).map((node) => ({ ...node })),
+      // 只导出连接两端的节点 id，导入时按新 id 重映射
+      links: db.links
+        .filter((link) => link.projectId === id)
+        .map((link) => ({ answerNodeId: link.answerNodeId, noteNodeId: link.noteNodeId })),
     }
     return new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
   },
@@ -404,8 +419,18 @@ export const mockApi: ApiClient = {
     const root = nodes.find((node) => node.parentId === null && node.nodeType === 'chat')
     if (!root) throw new Error('导入文件缺少根节点')
 
+    // 连接按旧 id → 新 id 重映射，两端节点不存在时跳过该条连接
+    const links: NoteLinkDTO[] = []
+    for (const link of payload.links ?? []) {
+      const answerNodeId = idMap.get(link.answerNodeId)
+      const noteNodeId = idMap.get(link.noteNodeId)
+      if (!answerNodeId || !noteNodeId) continue
+      links.push({ id: uid('l'), projectId: project.id, answerNodeId, noteNodeId })
+    }
+
     db.projects.unshift(project)
     db.nodes.push(...nodes)
+    db.links.push(...links)
     syncProjectMeta(db, project.id)
     saveDb(db)
     return { project: { ...project }, nodeId: root.id }
@@ -432,7 +457,7 @@ export const mockApi: ApiClient = {
     db.projects.unshift(project)
     db.nodes.push(root)
     saveDb(db)
-    const graph: GraphDTO = { project: { ...project }, nodes: [{ ...root }] }
+    const graph: GraphDTO = { project: { ...project }, nodes: [{ ...root }], links: [] }
     return graph
   },
 
@@ -471,6 +496,8 @@ export const mockApi: ApiClient = {
     const db = getDb()
     db.projects = db.projects.filter((item) => item.id !== id)
     db.nodes = db.nodes.filter((item) => item.projectId !== id)
+    // 画布删除时一并清理连接
+    db.links = db.links.filter((item) => item.projectId !== id)
     saveDb(db)
   },
 
@@ -482,6 +509,9 @@ export const mockApi: ApiClient = {
     return {
       project: { ...project },
       nodes: db.nodes.filter((item) => item.projectId === projectId).map((node) => ({ ...node })),
+      links: db.links
+        .filter((item) => item.projectId === projectId)
+        .map((item) => ({ ...item })),
     }
   },
 
@@ -586,6 +616,84 @@ export const mockApi: ApiClient = {
     return { ...note }
   },
 
+  async listNoteLinks(projectId) {
+    await delay(40)
+    return getDb()
+      .links.filter((item) => item.projectId === projectId)
+      .map((item) => ({ ...item }))
+  },
+
+  async createNoteLink(projectId, input) {
+    await delay(50)
+    const db = getDb()
+    if (!db.projects.some((item) => item.id === projectId)) throw new Error('画布不存在')
+    const answer = db.nodes.find((item) => item.id === input.answerNodeId)
+    const note = db.nodes.find((item) => item.id === input.noteNodeId)
+    if (!answer || answer.projectId !== projectId) throw new Error('回答卡片不存在')
+    if (!note || note.projectId !== projectId) throw new Error('笔记卡片不存在')
+    if (answer.nodeType !== 'chat') throw new Error('连接起点必须是回答卡片')
+    if (note.nodeType !== 'note') throw new Error('连接终点必须是笔记卡片')
+    // 重复连接幂等：直接返回已有记录
+    const existing = db.links.find(
+      (item) => item.answerNodeId === answer.id && item.noteNodeId === note.id,
+    )
+    if (existing) return { ...existing }
+    const link: NoteLinkDTO = {
+      id: uid('l'),
+      projectId,
+      answerNodeId: answer.id,
+      noteNodeId: note.id,
+    }
+    db.links.push(link)
+    saveDb(db)
+    return { ...link }
+  },
+
+  async deleteNoteLink(projectId, linkId) {
+    await delay(40)
+    const db = getDb()
+    db.links = db.links.filter(
+      (item) => !(item.projectId === projectId && item.id === linkId),
+    )
+    saveDb(db)
+  },
+
+  async syncNoteLinks(projectId, links) {
+    await delay(60)
+    const db = getDb()
+    if (!db.projects.some((item) => item.id === projectId)) throw new Error('画布不存在')
+    // 只允许连接本画布内的回答卡片与笔记卡片，重复连接按首次出现去重
+    const nodes = new Map(
+      db.nodes.filter((item) => item.projectId === projectId).map((item) => [item.id, item]),
+    )
+    const next: NoteLinkDTO[] = []
+    const seen = new Set<string>()
+    for (const item of links) {
+      const answer = nodes.get(item.answerNodeId)
+      const note = nodes.get(item.noteNodeId)
+      if (!answer || answer.nodeType !== 'chat') throw new Error('连接起点必须是回答卡片')
+      if (!note || note.nodeType !== 'note') throw new Error('连接终点必须是笔记卡片')
+      const key = `${answer.id}->${note.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      // 已有记录复用原 id，保证全量覆盖的幂等性
+      const existing = db.links.find(
+        (link) =>
+          link.projectId === projectId &&
+          link.answerNodeId === answer.id &&
+          link.noteNodeId === note.id,
+      )
+      next.push(
+        existing
+          ? { ...existing }
+          : { id: uid('l'), projectId, answerNodeId: answer.id, noteNodeId: note.id },
+      )
+    }
+    db.links = [...db.links.filter((item) => item.projectId !== projectId), ...next]
+    saveDb(db)
+    return next.map((item) => ({ ...item }))
+  },
+
   async restoreNodes(projectId, nodes) {
     await delay(80)
     const db = getDb()
@@ -629,6 +737,10 @@ export const mockApi: ApiClient = {
       }
     }
     db.nodes = db.nodes.filter((item) => !ids.has(item.id))
+    // 节点删除后级联清理引用了这些节点的连接
+    db.links = db.links.filter(
+      (item) => !ids.has(item.answerNodeId) && !ids.has(item.noteNodeId),
+    )
     syncProjectMeta(db, node.projectId)
     saveDb(db)
   },
@@ -852,6 +964,14 @@ export const mockApi: ApiClient = {
     }
     if (patch.edgeColor !== undefined && /^#[0-9a-fA-F]{6}$/.test(patch.edgeColor)) {
       settings.edgeColor = patch.edgeColor.toLowerCase()
+    }
+    // 笔记连线：粗细与 edgeWidth 使用同一范围 0.5–6
+    if (patch.noteLinkStyle !== undefined) settings.noteLinkStyle = patch.noteLinkStyle
+    if (patch.noteLinkWidth !== undefined) {
+      settings.noteLinkWidth = Math.min(6, Math.max(0.5, patch.noteLinkWidth))
+    }
+    if (patch.noteLinkReleaseAction !== undefined) {
+      settings.noteLinkReleaseAction = patch.noteLinkReleaseAction
     }
     if (patch.themeMode !== undefined) settings.themeMode = patch.themeMode
     if (patch.timeFormat !== undefined) settings.timeFormat = patch.timeFormat

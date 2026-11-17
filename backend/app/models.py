@@ -3,7 +3,15 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -86,6 +94,24 @@ class ConversationNode(Base):
     updated_at: Mapped[datetime] = mapped_column(default=_now, onupdate=_now)
 
 
+class NoteLink(Base):
+    """笔记连接：一张回答卡片指向一张笔记卡片，同一组合只能有一条记录。"""
+
+    __tablename__ = "note_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "answer_node_id", "note_node_id", name="uq_note_link"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    # 起点必须是 chat 节点，终点必须是 note 节点（接口层校验）
+    answer_node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), index=True)
+    note_node_id: Mapped[str] = mapped_column(ForeignKey("nodes.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(default=_now)
+
+
 class _SettingsFields:
     """设置项公共列：app_settings 与 user_settings 字段完全一致。
 
@@ -144,6 +170,10 @@ class _SettingsFields:
     # 连线粗细与颜色；为空表示 1.5 与 #3a3f4a
     edge_width: Mapped[float | None] = mapped_column(Float, nullable=True)
     edge_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # 笔记连接线：样式 curved / orthogonal，粗细，拖放释放动作
+    note_link_style: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    note_link_width: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note_link_release_action: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 主题模式：system / light / dark；为空表示 system
     theme_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 时间制式：24h / 12h；为空表示 24h

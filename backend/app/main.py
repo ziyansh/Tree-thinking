@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import config
-from app.api import attachments, auth, nodes, projects, settings
+from app.api import attachments, auth, links, nodes, projects, settings
 from app.db import init_db
 
 
@@ -33,6 +33,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(projects.router)
+app.include_router(links.router)
 app.include_router(nodes.router)
 app.include_router(settings.router)
 app.include_router(attachments.router)

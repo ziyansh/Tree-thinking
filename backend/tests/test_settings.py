@@ -294,3 +294,13 @@ def test_openai_request_params():
         "reasoning_effort": "high",
         "extra_body": {"thinking": {"type": "enabled"}},
     }
+
+
+def test_deepseek_thinking_disabled_is_sent_explicitly():
+    """关闭思考时必须显式发送 disabled：DeepSeek 默认开启思考，不传仍会思考。"""
+    options = llm._resolve(
+        {"provider": "deepseek", "api_key": "sk-ds", "thinking_enabled": False}
+    )
+    assert llm._request_params(options) == {
+        "extra_body": {"thinking": {"type": "disabled"}},
+    }

@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.3.1** | [中文说明](readme.md)
+> Current version: **0.3.4** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -196,6 +196,17 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.3.4 — 2026-11-17
+- Added: links between answer cards and note cards. Each answer card has a link dot at the right of its bottom toolbar, and each note card has one at the left of its title; drag from either end to connect. While dragging, the preview line is highlighted, connectable dots light up, other links dim, and nearby dots snap.
+- Added: links are saved with the canvas, included in export/import, and undoable; hover a link and press `Delete` to remove it.
+- Added: Settings → Canvas → Note cards: link style (curved / orthogonal, default orthogonal), link width (default 1.5, same range as the regular edges), and release action (none / hold Shift to create a blank note / create a blank note).
+- Improved: dragging an answer card moves its linked note cards together; a note shared by several answer cards follows only when all of its parents move together; auto-layout shifts notes with their parents to keep relative positions.
+- Bumped the version to 0.3.4.
+
+### 0.3.3 — 2026-11-16
+- Fixed: the model still returned reasoning after “Deep thinking” was turned off. DeepSeek enables thinking by default, and the previous request sent no parameter when disabled, so the server kept the default. The request now explicitly sends `{"thinking": {"type": "disabled"}}`, with a regression test added.
+- Bumped the version to 0.3.3.
 
 ### 0.3.1 — 2026-11-15
 - Added: session titles — when the root card answers for the first time, DeepSeek generates the canvas title within the answer stream (no extra billing, no separate model request); a manual canvas rename is kept.

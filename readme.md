@@ -191,6 +191,10 @@ Tree_thinking/
 - **如何撤销或保存**：在非输入框状态下按 `Ctrl+Z` 撤销当前画布的上一步（包含卡片尺寸修改），按 `Ctrl+S` 保存；选中卡片后按 `Delete` 可快速删除；自动保存间隔与撤销步数可在「设置 → 画布」中修改。
 - **笔记卡片如何创建与调整大小**：双击画布空白处创建；拖动四边或四角手柄调整独立尺寸，标题与正文双击进入编辑（正文编辑时 Tab 插入 4 个空格），删除按钮在标题栏右侧。
 - **只想改默认值**：编辑 `backend/.env` 后重启后端；页面里保存过的设置优先级更高。
+- **Windows 控制台日志出现 `[32mINFO[0m` 这类乱码**：旧版 Windows 控制台（conhost）默认不解析 ANSI 颜色转义码，`start.bat` 启动的前后端日志会把颜色代码原样打印出来；Windows Terminal、macOS 与 Linux 终端不受影响。任选一种方式解决：
+  1. 改用 Windows Terminal 运行 `start.bat`（Windows 11 通常已默认使用它）；
+  2. 为当前用户启用虚拟终端：在 PowerShell 执行 `reg add "HKCU\Console" /v VirtualTerminalLevel /t REG_DWORD /d 1 /f`，然后关闭并重新打开命令行窗口；
+  3. 直接关闭彩色日志：后端启动命令加 `--no-use-colors`，前端启动前设置环境变量 `NO_COLOR=1`。
 - **`.env` 被忽略 / 提交被钩子拦截**：这是预期行为，环境变量文件与疑似 Key 不应入库。请把真实 Key 留在本地被忽略的 `.env` 中，只提交 `.env.example` 这类不含密钥的模板；钩子会列出命中文件，在该文件移除 `sk-` 开头的 Key 或非空的 `DEEPSEEK_API_KEY` 后重新提交。
 
 ## 更新日志（Changelog）

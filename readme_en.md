@@ -191,6 +191,10 @@ Tree_thinking/
 - **How do I undo or save**: with no input focused, press `Ctrl+Z` to undo the last action on the current canvas (including card-size changes) and `Ctrl+S` to save. Select cards and press `Delete` for quick deletion. The autosave interval and undo depth live under Settings → Canvas.
 - **How do I create or resize a note**: double-click empty canvas to create one; drag any edge or corner handle to resize it independently. Double-click the title or body to edit; press Tab in the body editor to insert four spaces. The delete button sits at the right of the title bar.
 - **Change defaults only**: edit `backend/.env` and restart the backend; settings saved in the UI take precedence.
+- **Windows console shows garbled `[32mINFO[0m` logs**: the legacy Windows console (conhost) does not interpret ANSI color escape codes by default, so the backend and frontend logs started by `start.bat` print the raw codes. Windows Terminal, macOS, and Linux terminals are not affected. Pick one fix:
+  1. Run `start.bat` in Windows Terminal (the default on most Windows 11 setups);
+  2. Enable virtual terminal processing for the current user: run `reg add "HKCU\Console" /v VirtualTerminalLevel /t REG_DWORD /d 1 /f` in PowerShell, then close and reopen the console windows;
+  3. Disable colored logs: add `--no-use-colors` to the backend command and set the `NO_COLOR=1` environment variable before starting the frontend.
 - **`.env` is ignored / the commit hook blocks a commit**: this is expected — environment files and suspected keys must not enter the repository. Keep the real key in a local, ignored `.env` and commit only key-free templates such as `.env.example`; the hook prints the offending file, so remove any `sk-` key or non-empty `DEEPSEEK_API_KEY` from it and commit again.
 
 ## Changelog

@@ -170,9 +170,10 @@ class _SettingsFields:
     # 连线粗细与颜色；为空表示 1.5 与 #3a3f4a
     edge_width: Mapped[float | None] = mapped_column(Float, nullable=True)
     edge_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    # 笔记连接线：样式 curved / orthogonal，粗细，拖放释放动作
+    # 笔记连接线：样式 curved / orthogonal，粗细，颜色，拖放释放动作
     note_link_style: Mapped[str | None] = mapped_column(String(16), nullable=True)
     note_link_width: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note_link_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     note_link_release_action: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 主题模式：system / light / dark；为空表示 system
     theme_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)

@@ -6,6 +6,12 @@ import uuid
 from sqlalchemy import select
 
 from app.models import NoteLink
+# 跨用户用例沿用认证测试里的 server 模式夹具（tests 为包，可直接导入）
+from tests.test_auth import (  # noqa: F401
+    server_client,
+    server_mode,
+    server_session_factory,
+)
 
 
 def _create_project(client, name: str = "连接测试") -> dict:
@@ -271,24 +277,25 @@ def test_delete_project_removes_links(client, session_factory):
 
 
 def test_note_link_settings_defaults_and_update(client):
-    """默认直角线 1.5 / none；保存 curved 与 shift-note 生效，粗细夹取。"""
+    """默认直角线 1.5 / #3a3f4a / none；保存 curved 与 shift-note 生效，粗细夹取。"""
     defaults = client.get("/api/settings").json()
     assert defaults["noteLinkStyle"] == "orthogonal"
     assert defaults["noteLinkWidth"] == 1.5
+    assert defaults["noteLinkColor"] == "#3a3f4a"
     assert defaults["noteLinkReleaseAction"] == "none"
 
     updated = client.put(
         "/api/settings",
         json={
             "noteLinkStyle": "curved",
-            "noteLinkWidth": 99,
+            "noteLinkWidth": 20,
             "noteLinkReleaseAction": "shift-note",
         },
     )
     assert updated.status_code == 200
     body = updated.json()
     assert body["noteLinkStyle"] == "curved"
-    assert body["noteLinkWidth"] == 6
+    assert body["noteLinkWidth"] == 12
     assert body["noteLinkReleaseAction"] == "shift-note"
 
     # 过小夹到 0.5；再次读取保持
@@ -319,3 +326,54 @@ def test_note_link_export_json_serializable(client):
 
     exported = client.get(f"/api/projects/{project_id}/export").json()
     assert json.loads(json.dumps(exported))["links"]
+
+
+# ---------- F. 取图返回连接 ----------
+
+
+def test_graph_returns_links(client):
+    """创建连接后 GET graph 返回对应 links，project/nodes 字段保持不变。"""
+    data = _create_project(client)
+    project_id = data["project"]["id"]
+    root_id = data["rootNode"]["id"]
+    chat = _create_chat(client, project_id, root_id, "回答")
+    note = _create_note(client, project_id)
+    _post_link(client, project_id, chat["id"], note["id"])
+
+    graph = client.get(f"/api/projects/{project_id}/graph").json()
+    assert len(graph["links"]) == 1
+    link = graph["links"][0]
+    assert link["id"]
+    assert link["projectId"] == project_id
+    assert link["answerNodeId"] == chat["id"]
+    assert link["noteNodeId"] == note["id"]
+    # 原有字段不受影响
+    assert graph["project"]["id"] == project_id
+    assert {node["id"] for node in graph["nodes"]} >= {root_id, chat["id"], note["id"]}
+
+
+def test_graph_links_empty_without_connection(client):
+    """没有任何连接时 links 为空数组，而不是缺字段。"""
+    data = _create_project(client)
+    graph = client.get(f"/api/projects/{data['project']['id']}/graph").json()
+    assert graph["links"] == []
+
+
+def test_graph_cross_user_still_404(server_client):
+    """其他用户访问别人的画布图仍然 404（不泄露连接信息）。"""
+    server_client.post(
+        "/api/auth/register", json={"username": "alice", "password": "password123"}
+    )
+    data = _create_project(server_client, "A 的画布")
+    project_id = data["project"]["id"]
+    chat = _create_chat(server_client, project_id, data["rootNode"]["id"], "回答")
+    note = _create_note(server_client, project_id)
+    _post_link(server_client, project_id, chat["id"], note["id"])
+
+    server_client.post("/api/auth/logout")
+    server_client.cookies.clear()
+    server_client.post(
+        "/api/auth/register", json={"username": "bob", "password": "password123"}
+    )
+
+    assert server_client.get(f"/api/projects/{project_id}/graph").status_code == 404

@@ -66,6 +66,7 @@ interface SettingsForm {
   edgeColor: string
   noteLinkStyle: NoteLinkStyle
   noteLinkWidth: number
+  noteLinkColor: string
   noteLinkReleaseAction: NoteLinkReleaseAction
   themeMode: ThemeMode
   timeFormat: TimeFormat
@@ -109,6 +110,7 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     edgeColor: data.edgeColor,
     noteLinkStyle: data.noteLinkStyle ?? 'orthogonal',
     noteLinkWidth: data.noteLinkWidth ?? 1.5,
+    noteLinkColor: data.noteLinkColor ?? '#3a3f4a',
     noteLinkReleaseAction: data.noteLinkReleaseAction ?? 'none',
     themeMode: data.themeMode,
     timeFormat: data.timeFormat,
@@ -259,6 +261,35 @@ function NumberInput({
         max={max}
         step={step}
         className="w-full rounded-md border border-strong bg-canvas px-2 py-1 text-center text-[13px] text-ink outline-none transition-colors duration-150 focus:border-accent"
+      />
+    </div>
+  )
+}
+
+/** 取色器 + 十六进制输入框：回答连线与笔记连线颜色共用 */
+function ColorField({
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  value: string
+  onChange: (value: string) => void
+  ariaLabel: string
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="color"
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-8 w-12 flex-none cursor-pointer rounded-lg border border-subtle bg-elevated p-1"
+      />
+      <input
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={`${INPUT_CLASS} w-[110px]`}
       />
     </div>
   )
@@ -484,6 +515,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     edgeColor: '#3a3f4a',
     noteLinkStyle: 'orthogonal',
     noteLinkWidth: 1.5,
+    noteLinkColor: '#3a3f4a',
     noteLinkReleaseAction: 'none',
     themeMode: 'system',
     timeFormat: '24h',
@@ -570,6 +602,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         edgeColor: form.edgeColor,
         noteLinkStyle: form.noteLinkStyle,
         noteLinkWidth: form.noteLinkWidth,
+        noteLinkColor: form.noteLinkColor,
         noteLinkReleaseAction: form.noteLinkReleaseAction,
         themeMode: form.themeMode,
         timeFormat: form.timeFormat,
@@ -1037,13 +1070,21 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                         />
                       </Row>
 
-                      <Row label="笔记卡片连线粗细" hint="0.5–6，步长 0.5；仅作用于笔记卡片连接线">
+                      <Row label="笔记卡片连线粗细" hint="0.5–12，步长 0.5；仅作用于笔记卡片连接线">
                         <SliderNumber
                           value={form.noteLinkWidth}
                           onChange={(noteLinkWidth) => setForm({ ...form, noteLinkWidth })}
                           min={0.5}
-                          max={6}
+                          max={12}
                           step={0.5}
+                        />
+                      </Row>
+
+                      <Row label="笔记卡片连线颜色" hint="所有笔记卡片连线统一使用该颜色">
+                        <ColorField
+                          ariaLabel="笔记卡片连线颜色"
+                          value={form.noteLinkColor}
+                          onChange={(noteLinkColor) => setForm({ ...form, noteLinkColor })}
                         />
                       </Row>
 
@@ -1124,32 +1165,43 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     </Section>
 
                     <Section title="连线">
-                      <Row label="连线粗细" hint="0.5–6，步长 0.5">
+                      <Row label="回答连线粗细" hint="0.5–12，步长 0.5">
                         <SliderNumber
                           value={form.edgeWidth}
                           onChange={(edgeWidth) => setForm({ ...form, edgeWidth })}
                           min={0.5}
-                          max={6}
+                          max={12}
                           step={0.5}
                         />
                       </Row>
 
-                      <Row label="连线颜色" hint="所有逻辑线统一使用该颜色">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            aria-label="连线颜色"
-                            value={form.edgeColor}
-                            onChange={(event) => setForm({ ...form, edgeColor: event.target.value })}
-                            className="h-8 w-12 flex-none cursor-pointer rounded-lg border border-subtle bg-elevated p-1"
-                          />
-                          <input
-                            type="text"
-                            value={form.edgeColor}
-                            onChange={(event) => setForm({ ...form, edgeColor: event.target.value })}
-                            className={`${INPUT_CLASS} w-[110px]`}
-                          />
-                        </div>
+                      <Row label="回答连线颜色" hint="所有回答卡片连线统一使用该颜色">
+                        <ColorField
+                          ariaLabel="回答连线颜色"
+                          value={form.edgeColor}
+                          onChange={(edgeColor) => setForm({ ...form, edgeColor })}
+                        />
+                      </Row>
+
+                      <Row label="笔记卡片连线样式" hint="仅作用于笔记卡片连接线；默认直角线">
+                        <ChoiceGroup
+                          value={form.noteLinkStyle}
+                          options={[
+                            { value: 'curved', label: '曲线' },
+                            { value: 'orthogonal', label: '直角线' },
+                          ]}
+                          onChange={(noteLinkStyle) => setForm({ ...form, noteLinkStyle })}
+                        />
+                      </Row>
+
+                      <Row label="笔记卡片连线粗细" hint="0.5–12，步长 0.5；仅作用于笔记卡片连接线">
+                        <SliderNumber
+                          value={form.noteLinkWidth}
+                          onChange={(noteLinkWidth) => setForm({ ...form, noteLinkWidth })}
+                          min={0.5}
+                          max={12}
+                          step={0.5}
+                        />
                       </Row>
                     </Section>
 

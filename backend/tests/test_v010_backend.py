@@ -96,8 +96,8 @@ def test_settings_clamp_and_invalid_enum(client):
     assert client.put("/api/settings", json={"undoSteps": 0}).json()["undoSteps"] == 1
     # 自动保存 0 表示关闭，保持 0
     assert client.put("/api/settings", json={"autosaveMinutes": 0}).json()["autosaveMinutes"] == 0
-    # 连线粗细超上限 → 6
-    assert client.put("/api/settings", json={"edgeWidth": 10}).json()["edgeWidth"] == 6
+    # 连线粗细超上限 → 12
+    assert client.put("/api/settings", json={"edgeWidth": 20}).json()["edgeWidth"] == 12
     # 正文字号超上限 → 24，低于下限 → 12
     assert client.put("/api/settings", json={"cardFontSize": 30}).json()["cardFontSize"] == 24
     assert client.put("/api/settings", json={"cardFontSize": 5}).json()["cardFontSize"] == 12

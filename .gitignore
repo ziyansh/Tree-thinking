@@ -56,3 +56,4 @@ Reference_Doc/
 .screenshots/
 .pytest_cache/
 .githooks/
+.vscode/

@@ -69,6 +69,8 @@ export function startNoteLinkDrag(
 export interface NoteLinkDragSignal {
   active: boolean
   sourceKind: NoteLinkSourceKind | null
+  /** 起点节点 id：起点连接点显示为实心强调色 */
+  sourceNodeId: string | null
   /** 当前被吸附的目标节点 id */
   snappedNodeId: string | null
 }
@@ -76,6 +78,7 @@ export interface NoteLinkDragSignal {
 const IDLE_SIGNAL: NoteLinkDragSignal = {
   active: false,
   sourceKind: null,
+  sourceNodeId: null,
   snappedNodeId: null,
 }
 
@@ -87,6 +90,7 @@ export function setNoteLinkDragSignal(next: NoteLinkDragSignal): void {
   if (
     signal.active === next.active &&
     signal.sourceKind === next.sourceKind &&
+    signal.sourceNodeId === next.sourceNodeId &&
     signal.snappedNodeId === next.snappedNodeId
   ) {
     return

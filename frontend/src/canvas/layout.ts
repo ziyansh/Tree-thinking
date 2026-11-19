@@ -1,10 +1,6 @@
 import type { NoteLinkDTO } from '../api/types'
 import type { GraphFlowNode } from '../store/graphStore'
-import { GHOST_WIDTH, suggestionGhostHeight } from './ghosts'
-
-/** ghost 输入箭头高度与纵向间距，与 ghosts.ts 的堆叠规则保持一致 */
-const GHOST_HEIGHT = 44
-const GHOST_GAP = 8
+import { GHOST_WIDTH, collectGhostUsage, ghostGroupHeight, showsGhostGroup } from './ghosts'
 
 /** 节点 id → 左上角坐标；只包含聊天卡片，笔记不参与整理 */
 export type LayoutPositions = Map<string, { x: number; y: number }>
@@ -12,21 +8,6 @@ export type LayoutPositions = Map<string, { x: number; y: number }>
 /** 只保留聊天卡片：笔记卡片保持原位 */
 function chatCardsOf(cards: GraphFlowNode[]): GraphFlowNode[] {
   return cards.filter((card) => card.data.node.nodeType === 'chat')
-}
-
-/** 是否需要为这张卡片预留「猜你想问」占位（与 ghosts.ts 的展示条件一致） */
-function showsGhosts(card: GraphFlowNode): boolean {
-  const node = card.data.node
-  return node.status === 'done' && !node.suggestionsConsumed
-}
-
-/** ghost 组高度：候选方向逐条按估算高度累加，末尾再算输入箭头 44 与间距 8 */
-function ghostGroupHeight(card: GraphFlowNode): number {
-  let height = 0
-  for (const suggestion of card.data.node.suggestions) {
-    height += suggestionGhostHeight(suggestion.text) + GHOST_GAP
-  }
-  return height + GHOST_HEIGHT + GHOST_GAP
 }
 
 /** 布局矩形：聊天卡片或某张卡片右侧的 ghost 组 */
@@ -47,6 +28,8 @@ function collectRects(
   gap: number,
 ): LayoutRect[] {
   const rects: LayoutRect[] = []
+  // 子卡片数量与已消费建议与 ghosts.ts 共用同一份统计
+  const { childCount, usedSuggestions } = collectGhostUsage(cards)
   for (const card of cards) {
     const position = positions.get(card.id)
     if (!position) continue
@@ -61,14 +44,15 @@ function collectRects(
     })
 
     // 猜你想问组从卡片右侧一个卡片间距处开始，纵向从卡片顶部向下堆叠
-    if (!showsGhosts(card)) continue
+    const hasChildren = (childCount.get(card.id) ?? 0) > 0
+    if (!showsGhostGroup(card.data.node, hasChildren)) continue
     rects.push({
       id: card.id,
       kind: 'ghost',
       x: position.x + size.width + gap,
       y: position.y,
       width: GHOST_WIDTH,
-      height: ghostGroupHeight(card),
+      height: ghostGroupHeight(card.data.node, hasChildren, usedSuggestions),
     })
   }
   return rects
@@ -81,6 +65,50 @@ function intersects(a: LayoutRect, b: LayoutRect): boolean {
     a.y < b.y + b.height &&
     b.y < a.y + a.height
   )
+}
+
+/**
+ * 检测某个新卡片矩形是否与「其它聊天卡片右侧的提问区」相交。
+ * 新建分支卡片后用来判断是否需要自动整理；只排除新卡片自身，父卡片的提问区同样参与检测。
+ */
+export function newCardOverlapsGhost(
+  cards: GraphFlowNode[],
+  size: { width: number; height: number },
+  gap: number,
+  newNodeId: string,
+): boolean {
+  const newNode = cards.find((card) => card.id === newNodeId)
+  if (!newNode) return false
+
+  const { childCount, usedSuggestions } = collectGhostUsage(cards)
+  const newRect: LayoutRect = {
+    id: newNodeId,
+    kind: 'card',
+    x: newNode.position.x,
+    y: newNode.position.y,
+    width: size.width,
+    height: size.height,
+  }
+
+  for (const card of cards) {
+    if (card.id === newNodeId) continue
+    const node = card.data.node
+    if (node.nodeType !== 'chat') continue
+    const hasChildren = (childCount.get(card.id) ?? 0) > 0
+    if (!showsGhostGroup(node, hasChildren)) continue
+
+    const ghostRect: LayoutRect = {
+      id: card.id,
+      kind: 'ghost',
+      x: card.position.x + size.width + gap,
+      y: card.position.y,
+      width: GHOST_WIDTH,
+      height: ghostGroupHeight(node, hasChildren, usedSuggestions),
+    }
+    if (intersects(newRect, ghostRect)) return true
+  }
+
+  return false
 }
 
 /** 把节点及其整棵子树整体下推，保持子树内部相对位置不变 */

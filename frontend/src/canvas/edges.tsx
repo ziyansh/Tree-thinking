@@ -31,6 +31,8 @@ type RouteEdge = Edge<RouteEdgeData>
 
 /** 笔记连接线的数据：外观来自设置，hover / 拖拽态由画布透传 */
 export type NoteLinkEdgeData = {
+  /** 后端连接 id：用于 hover 回传与 Delete 删除 */
+  linkId: string
   color: string
   width: number
   /** true = 直角线，false = 曲线 */
@@ -312,7 +314,8 @@ export function NoteLinkEdge({
     if (hoveredRef.current === next) return
     hoveredRef.current = next
     setHovered(next)
-    onHoverChange?.(next ? id : null)
+    // 回传真实连接 id（边 id 与之相同），Delete 时直接按该 id 请求后端
+    onHoverChange?.(next ? (data?.linkId ?? id) : null)
   }
 
   const orthogonal = data?.orthogonal ?? true

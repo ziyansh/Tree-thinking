@@ -55,12 +55,13 @@ MIN_THEME_HUE = 0
 MAX_THEME_HUE = 360
 DEFAULT_EDGE_WIDTH = 1.5
 MIN_EDGE_WIDTH = 0.5
-MAX_EDGE_WIDTH = 6
+MAX_EDGE_WIDTH = 12
 DEFAULT_EDGE_COLOR = "#3a3f4a"
-# 笔记连接线：样式默认直角线，粗细沿用普通连线范围，释放动作默认无
+# 笔记连接线：样式默认直角线，粗细沿用普通连线范围，颜色默认同连线色
 DEFAULT_NOTE_LINK_STYLE = "orthogonal"
 NOTE_LINK_STYLES = ("curved", "orthogonal")
 DEFAULT_NOTE_LINK_WIDTH = 1.5
+DEFAULT_NOTE_LINK_COLOR = "#3a3f4a"
 DEFAULT_NOTE_LINK_RELEASE_ACTION = "none"
 NOTE_LINK_RELEASE_ACTIONS = ("none", "shift-note", "note")
 DEFAULT_THEME_MODE = "system"
@@ -356,6 +357,9 @@ def effective(db: Session, user: User | None = None) -> dict:
             MIN_EDGE_WIDTH,
             MAX_EDGE_WIDTH,
         ),
+        "note_link_color": _effective_color(
+            row.note_link_color if row else None, DEFAULT_NOTE_LINK_COLOR
+        ),
         "note_link_release_action": _effective_choice(
             row.note_link_release_action if row else None,
             NOTE_LINK_RELEASE_ACTIONS,
@@ -440,9 +444,10 @@ def dto(db: Session, user: User | None = None) -> dict:
         "themeHue": values["theme_hue"],
         "edgeWidth": values["edge_width"],
         "edgeColor": values["edge_color"],
-        # 笔记连接线：样式、粗细与拖放释放动作
+        # 笔记连接线：样式、粗细、颜色与拖放释放动作
         "noteLinkStyle": values["note_link_style"],
         "noteLinkWidth": values["note_link_width"],
+        "noteLinkColor": values["note_link_color"],
         "noteLinkReleaseAction": values["note_link_release_action"],
         "themeMode": values["theme_mode"],
         "timeFormat": values["time_format"],
@@ -604,6 +609,10 @@ def update(db: Session, patch: dict, user: User | None = None) -> dict:
             DEFAULT_NOTE_LINK_WIDTH,
             MIN_EDGE_WIDTH,
             MAX_EDGE_WIDTH,
+        )
+    if patch.get("note_link_color") is not None:
+        row.note_link_color = _effective_color(
+            patch["note_link_color"], DEFAULT_NOTE_LINK_COLOR
         )
     if patch.get("note_link_release_action") is not None:
         row.note_link_release_action = _effective_choice(

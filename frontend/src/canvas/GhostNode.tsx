@@ -42,7 +42,7 @@ function GhostNodeInner({
     <div
       onClick={() => void handleClick()}
       className={[
-        'group relative flex min-h-[44px] w-max min-w-[280px] max-w-[420px] cursor-pointer items-center gap-1.5 rounded-lg border border-ghost-border bg-ghost-bg px-2.5 py-2',
+        'group glass-surface relative flex min-h-[44px] w-max min-w-[280px] max-w-[420px] cursor-pointer items-center gap-1.5 rounded-lg border border-ghost-border px-2.5 py-2',
         'transition-colors duration-150 hover:border-accent',
         pending ? 'pointer-events-none opacity-60' : '',
       ].join(' ')}

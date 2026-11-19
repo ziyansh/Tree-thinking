@@ -24,7 +24,7 @@ import { BranchInputNode } from './BranchInputNode'
 import { GhostInputNode } from './GhostInputNode'
 import { GhostNode } from './GhostNode'
 import { buildBranchInputNodes, buildGhostNodes } from './ghosts'
-import { computeAutoLayout, followNotesWithLinks } from './layout'
+import { computeAutoLayout, followNotesWithLinks, newCardOverlapsGhost } from './layout'
 import { BusEdge, DirectEdge, MainEdge, NoteLinkEdge } from './edges'
 import type { Rect } from './edges'
 import {
@@ -41,6 +41,7 @@ import { useSpacePressed } from '../lib/spaceKey'
 import {
   bumpUiLayer,
   dropUiLayer,
+  getFocusedInput,
   getUiLayerVersion,
   resolveLayerZ,
   subscribeUiLayer,
@@ -68,6 +69,10 @@ const GHOST_SIZE = { width: 280, height: 44 }
 /** 点状画布的网格步长（px），Shift 平移吸附与背景点阵一致 */
 const CANVAS_DOT_GAP = 24
 
+/** 缩放范围：最大 500%，最小保持 10% */
+const MAX_ZOOM = 5
+const MIN_ZOOM = 0.1
+
 /**
  * 拖入内容是否为可导入的 JSON 文件：
  * 拖拽阶段拿不到文件名，能拿到 MIME 时先排除明显的非 JSON 文件；
@@ -78,27 +83,6 @@ function hasJsonDrag(dataTransfer: DataTransfer): boolean {
   return Array.from(dataTransfer.items).every(
     (item) => item.kind !== 'file' || item.type === '' || item.type === 'application/json',
   )
-}
-
-/**
- * 以 60Hz 上限调度一次回调：高刷新率屏幕会跳过多余的帧，
- * 避免同一份状态在一帧内被重复写回。
- */
-function scheduleAt60(
-  callback: () => void,
-  frameRef: { current: number | null },
-  lastAtRef: { current: number },
-): void {
-  frameRef.current = window.requestAnimationFrame(() => {
-    const now = performance.now()
-    if (now - lastAtRef.current < 16) {
-      scheduleAt60(callback, frameRef, lastAtRef)
-      return
-    }
-    lastAtRef.current = now
-    frameRef.current = null
-    callback()
-  })
 }
 
 /** 画布点阵颜色：按解析后的主题取值，跟随系统时监听系统深浅色切换 */
@@ -227,16 +211,27 @@ function findSnapOffset(targets: number[], lines: number[]): number {
 function ZoomPanel() {
   const { zoomIn, zoomOut, fitView } = useReactFlow()
   const { zoom } = useViewport()
+  // 达到缩放上下限时禁用按钮，避免继续点击无反馈
+  const atMax = zoom >= MAX_ZOOM - 0.001
+  const atMin = zoom <= MIN_ZOOM + 0.001
 
   return (
-    <div className="mb-5 flex items-center gap-1 rounded-lg border border-subtle bg-panel p-1">
-      <PanelButton title="缩小" onClick={() => void zoomOut({ duration: 150 })}>
+    <div className="glass-surface mb-5 flex items-center gap-1 rounded-lg border border-subtle p-1">
+      <PanelButton
+        title="缩小"
+        disabled={atMin}
+        onClick={() => void zoomOut({ duration: 150 })}
+      >
         <Minus size={14} />
       </PanelButton>
       <span className="w-10 text-center text-[12px] tabular-nums text-muted">
         {Math.round(zoom * 100)}%
       </span>
-      <PanelButton title="放大" onClick={() => void zoomIn({ duration: 150 })}>
+      <PanelButton
+        title="放大"
+        disabled={atMax}
+        onClick={() => void zoomIn({ duration: 150 })}
+      >
         <Plus size={14} />
       </PanelButton>
       <span className="mx-0.5 h-5 w-px bg-subtle" />
@@ -250,10 +245,12 @@ function ZoomPanel() {
 function PanelButton({
   title,
   onClick,
+  disabled = false,
   children,
 }: {
   title: string
   onClick: () => void
+  disabled?: boolean
   children: ReactNode
 }) {
   return (
@@ -261,8 +258,14 @@ function PanelButton({
       type="button"
       title={title}
       aria-label={title}
+      disabled={disabled}
       onClick={onClick}
-      className="flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
+      className={[
+        'flex h-7 w-7 items-center justify-center rounded-md text-muted transition-colors duration-150',
+        disabled
+          ? 'cursor-not-allowed opacity-40'
+          : 'hover:bg-ghost-border hover:text-ink',
+      ].join(' ')}
     >
       {children}
     </button>
@@ -275,6 +278,8 @@ function CanvasInner() {
   const cardSize = useGraphStore((state) => state.cardSize)
   const preferences = useGraphStore((state) => state.preferences)
   const branchInputs = useGraphStore((state) => state.branchInputs)
+  /** 新建分支卡片后的落点检测信号（一次性） */
+  const layoutCheckNodeId = useGraphStore((state) => state.layoutCheckNodeId)
   const currentProjectId = useGraphStore((state) => state.currentProjectId)
   const project = useGraphStore((state) =>
     state.projects.find((item) => item.id === state.currentProjectId) ?? null,
@@ -301,6 +306,8 @@ function CanvasInner() {
   const [dragActive, setDragActive] = useState(false)
   /** 自动整理插值中：给节点加合成层提示，减少逐帧重绘 */
   const [layoutAnimating, setLayoutAnimating] = useState(false)
+  /** 是否正在拖动卡片：给画布外层加 class，供样式关闭拖动期间的重效果 */
+  const [isNodeDragging, setIsNodeDragging] = useState(false)
   /** 空白处指针状态：按下坐标、延迟计时与是否已进入平移 */
   const pointerRef = useRef<PanePointerState | null>(null)
   /** 平移开始时的视口，位移按屏幕像素累加 */
@@ -319,8 +326,6 @@ function CanvasInner() {
   /** 拖动坐标更新按帧合并：高刷新率指针事件只触发一次重渲染 */
   const dragFrameRef = useRef<number | null>(null)
   const dragPendingRef = useRef<{ x: number; y: number } | null>(null)
-  /** 上一次拖动写回的时间：把更新频率限制在 60Hz */
-  const dragFrameAtRef = useRef(0)
   /** 拖拽结束时间：抑制拖拽后的 click 把多选收缩成单选 */
   const lastDragEndRef = useRef(0)
   /** 空格手动平移：记录起始指针与按下时的视口 */
@@ -418,7 +423,7 @@ function CanvasInner() {
         }
       }
 
-      /** 找指针附近最近的可连接连接点：屏幕距离 24px 内吸附 */
+      /** 找指针附近最近的可连接连接点：指针落在卡片矩形内或连接点 24px 内吸附 */
       const findSnap = (
         pointerFlow: { x: number; y: number },
         zoom: number,
@@ -428,6 +433,9 @@ function CanvasInner() {
         const wantNote = payload.kind === 'answer'
         let best: { nodeId: string; anchor: { x: number; y: number } } | null = null
         let bestDistance = NOTE_LINK_SNAP_SCREEN + 1
+        // 指针整张卡片范围内优先吸附；多张卡片重叠时取连接点最近者
+        let inside: { nodeId: string; anchor: { x: number; y: number } } | null = null
+        let insideDistance = Number.POSITIVE_INFINITY
         for (const item of current.nodes) {
           const isNote = item.data.node.nodeType === 'note'
           if (isNote !== wantNote) continue
@@ -438,8 +446,12 @@ function CanvasInner() {
             bestDistance = distance
             best = { nodeId: item.id, anchor }
           }
+          if (pointInRect(pointerFlow, targetRect) && distance < insideDistance) {
+            insideDistance = distance
+            inside = { nodeId: item.id, anchor }
+          }
         }
-        return best
+        return inside ?? best
       }
 
       /** 命中任意目标类型卡片的矩形（用于松手时不需要精确落在连接点） */
@@ -481,7 +493,12 @@ function CanvasInner() {
         },
         sourceKind: payload.kind,
       })
-      setNoteLinkDragSignal({ active: true, sourceKind: payload.kind, snappedNodeId: null })
+      setNoteLinkDragSignal({
+        active: true,
+        sourceKind: payload.kind,
+        sourceNodeId: payload.nodeId,
+        snappedNodeId: null,
+      })
 
       const handleMove = (event: PointerEvent) => {
         const session = linkDragRef.current
@@ -501,18 +518,22 @@ function CanvasInner() {
         setNoteLinkDragSignal({
           active: true,
           sourceKind: session.kind,
+          sourceNodeId: session.nodeId,
           snappedNodeId: session.snappedNodeId,
         })
       }
 
-      /** 新建连接：已存在时只提示，不重复写入 */
+      /** 连接切换：已存在则断开，不存在则新建 */
       const connect = (answerNodeId: string, noteNodeId: string) => {
         const current = useGraphStore.getState()
-        const exists = current.links.some(
+        const existing = current.links.find(
           (link) => link.answerNodeId === answerNodeId && link.noteNodeId === noteNodeId,
         )
-        if (exists) {
-          current.showToast('连接已存在')
+        if (existing) {
+          // 重复连接同一条线：视为断开已有连接
+          current.pushUndo('删除连接')
+          void current.deleteNoteLink(existing.id)
+          current.showToast('已断开连接')
           return
         }
         current.pushUndo('连接笔记')
@@ -542,7 +563,7 @@ function CanvasInner() {
         const endFlow = snapped ? snapped.anchor : pointerFlow
 
         // 结束高亮；预览线保留 140ms 做淡出
-        setNoteLinkDragSignal({ active: false, sourceKind: null, snappedNodeId: null })
+        setNoteLinkDragSignal({ active: false, sourceKind: null, sourceNodeId: null, snappedNodeId: null })
         setLinkPreview({
           start: toScreen(session.origin),
           end: toScreen(endFlow),
@@ -711,14 +732,6 @@ function CanvasInner() {
     if (!element) return
 
     const handleWheel = (event: WheelEvent) => {
-      // 可滚动区域（卡片正文、思考过程、参考资料抽屉等）完全交给原生滚动：
-      // 不 preventDefault、不缩放、不平移，滚到边界也不会冒泡成画布缩放
-      const target = event.target as Element | null
-      if (target?.closest('.nowheel')) return
-
-      // 开始滚轮操作即停止正在播放的平移惯性
-      stopInertia()
-
       // 缩放由 React Flow 在本次事件中完成，下一帧再按当前指针位置重设平移基准，
       // 保证拖动过程中缩放跟手、不回弹
       const recalibrateLater = () => {
@@ -727,11 +740,23 @@ function CanvasInner() {
         window.requestAnimationFrame(() => recalibratePanBaseline(pointerX, pointerY))
       }
 
-      // 空格按住时滚轮始终缩放画布，交给 React Flow
+      // 空格按住时滚轮始终缩放画布：先于 .nowheel 放行逻辑处理，
+      // 阻止该区域原生滚动、停止惯性后交给 React Flow 完成缩放
       if (spacePressed) {
+        event.preventDefault()
+        stopInertia()
         recalibrateLater()
         return
       }
+
+      // 未按空格：可滚动区域（卡片正文、思考过程、参考资料抽屉等）完全交给原生滚动：
+      // 不 preventDefault、不缩放、不平移，滚到边界也不会冒泡成画布缩放
+      const target = event.target as Element | null
+      if (target?.closest('.nowheel')) return
+
+      // 开始滚轮操作即停止正在播放的平移惯性
+      stopInertia()
+
       // 触控板捏合：ctrlKey 由浏览器自动附带，交给 React Flow 的缩放
       if (event.ctrlKey || event.metaKey) {
         recalibrateLater()
@@ -1028,6 +1053,8 @@ function CanvasInner() {
   )
   // 动态层级：同类元素中最新显示 / 状态更新 / 获焦者排在最上面
   const layerVersion = useSyncExternalStore(subscribeUiLayer, getUiLayerVersion)
+  // 当前获得焦点的输入框：使用独立的「聚焦输入」区段，高于笔记与分支输入
+  const focusedInputKey = useSyncExternalStore(subscribeUiLayer, getFocusedInput)
 
   // 新出现的卡片与状态变化的卡片自动置顶（流式回答的 streaming / done 都算状态更新）
   const nodeStateRef = useRef(new Map<string, string>())
@@ -1046,7 +1073,7 @@ function CanvasInner() {
     })
   }, [nodes])
 
-  // 聊天卡片与笔记分属不同层级区段：笔记高于猜你想问，分支输入条仍在最上层
+  // 聊天卡片与笔记分属不同层级区段：猜你想问高于笔记，分支输入条仍在最上层
   const { cardZ, noteZ } = useMemo(() => {
     const chatIds: string[] = []
     const noteIds: string[] = []
@@ -1072,6 +1099,14 @@ function CanvasInner() {
     ),
     [branchInputNodes, layerVersion],
   )
+  // 聚焦输入只保留一个 key，区段内序号固定从基线开始
+  const focusedInputZ = useMemo(
+    () =>
+      focusedInputKey
+        ? resolveLayerZ('focusedInput', [focusedInputKey])
+        : new Map<string, number>(),
+    [focusedInputKey],
+  )
 
   const allNodes = useMemo(
     () => [
@@ -1083,13 +1118,26 @@ function CanvasInner() {
         draggable: !item.data.node.pinned,
         dragHandle: '.card-drag-handle',
       })),
-      ...ghosts.map((item) => ({ ...item, zIndex: ghostZ.get(item.id) })),
+      ...ghosts.map((item) => ({
+        ...item,
+        // 聚焦中的自定义输入升到「聚焦输入」区段，压在笔记卡片之上
+        zIndex: focusedInputZ.get(item.id) ?? ghostZ.get(item.id),
+      })),
       ...branchInputNodes.map((item) => ({
         ...item,
-        zIndex: branchInputZ.get(item.id),
+        zIndex: focusedInputZ.get(item.id) ?? branchInputZ.get(item.id),
       })),
     ],
-    [nodes, ghosts, branchInputNodes, cardZ, noteZ, ghostZ, branchInputZ],
+    [
+      nodes,
+      ghosts,
+      branchInputNodes,
+      cardZ,
+      noteZ,
+      ghostZ,
+      branchInputZ,
+      focusedInputZ,
+    ],
   )
 
   /** 连线拖拽中：已有 note-link 整体变淡，预览线单独绘制 */
@@ -1247,14 +1295,16 @@ function CanvasInner() {
     for (const link of links) {
       if (!rects.has(link.answerNodeId) || !rects.has(link.noteNodeId)) continue
       result.push({
-        id: `note-link-${link.id}`,
+        // 直接用后端连接 id，hover 回传后 Delete 可以按真实 id 删除
+        id: link.id,
         source: link.answerNodeId,
         target: link.noteNodeId,
         type: 'note-link',
         sourceHandle: 'note-link-out',
         targetHandle: 'note-link-in',
         data: {
-          color: edgeColor,
+          linkId: link.id,
+          color: preferences.noteLinkColor,
           width: preferences.noteLinkWidth,
           orthogonal: preferences.noteLinkStyle === 'orthogonal',
           dimmed: noteLinkDragging,
@@ -1326,16 +1376,17 @@ function CanvasInner() {
     }
     dragOriginRef.current = { rootId: node.id, positions }
     dragPendingRef.current = null
-    dragFrameAtRef.current = 0
+    setIsNodeDragging(true)
   }, [stopInertia])
 
-  /** 把待处理的拖动偏移写回 store；调用频率由 scheduleAt60 控制 */
+  /** 把待处理的拖动偏移写回 store；每帧最多执行一次 */
   const applyDragOffset = useCallback(() => {
     dragFrameRef.current = null
     const origin = dragOriginRef.current
     const offset = dragPendingRef.current
     if (!origin || !offset) return
     useGraphStore.setState((state) => ({
+      // 只替换移动集合内的卡片，其余节点保持同一引用，减少下游无谓重算
       nodes: state.nodes.map((item) => {
         const start = origin.positions.get(item.id)
         if (!start) return item
@@ -1385,14 +1436,16 @@ function CanvasInner() {
     }
 
     dragPendingRef.current = { x: offsetX, y: offsetY }
+    // 跟随 requestAnimationFrame 调度：每帧只写一次 store，不额外限制刷新率
     if (dragFrameRef.current === null) {
-      scheduleAt60(() => applyDragOffset(), dragFrameRef, dragFrameAtRef)
+      dragFrameRef.current = window.requestAnimationFrame(applyDragOffset)
     }
   }, [applyDragOffset])
 
   // 松手后批量保存本次移动的所有节点坐标
   const handleNodeDragStop = useCallback(
     (_event: MouseEvent | TouchEvent, _node: Node) => {
+      setIsNodeDragging(false)
       const origin = dragOriginRef.current
       if (!origin) return
       // 把最后一帧尚未写回的坐标补齐，再保存
@@ -1503,6 +1556,29 @@ function CanvasInner() {
       setLayoutAnimating(false)
     }
   }, [prefersReducedMotion])
+
+  // 新建分支卡片后的落点检测：压住其它卡片的提问区时自动整理一次
+  useEffect(() => {
+    if (!layoutCheckNodeId) return
+    // 等一帧让新卡片的坐标写回画布后再检测
+    const frame = window.requestAnimationFrame(() => {
+      const state = useGraphStore.getState()
+      // 信号已被清空或替换（例如连续新建）时放弃本次检测
+      if (state.layoutCheckNodeId !== layoutCheckNodeId) return
+      const overlap = newCardOverlapsGhost(
+        state.nodes,
+        state.cardSize,
+        state.preferences.cardGap,
+        layoutCheckNodeId,
+      )
+      state.clearLayoutCheck()
+      if (!overlap) return
+      // 正在整理或用户正在拖动时跳过，避免打断用户操作
+      if (layoutAnimationRef.current !== null || dragOriginRef.current !== null) return
+      void handleAutoLayout()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [layoutCheckNodeId, handleAutoLayout])
 
   // 联网搜索仅 DeepSeek 服务商支持；失败时 store 会回滚，这里只告警
   const webSearchDisabled = preferences.provider !== 'deepseek'
@@ -1621,6 +1697,8 @@ function CanvasInner() {
         spacePressed ? 'space-panning' : '',
         isPanning ? 'cursor-grabbing' : spacePressed ? 'cursor-grab' : '',
         layoutAnimating ? 'layout-animating' : '',
+        // 拖动期间由样式层关闭毛玻璃/阴影等重效果
+        isNodeDragging ? 'is-node-dragging' : '',
       ].join(' ')}
       // 空格按下时在 capture 阶段接管指针，卡片/输入框上的拖动也一律平移画布
       onPointerDownCapture={handleSpacePanDown}
@@ -1641,16 +1719,21 @@ function CanvasInner() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView={false}
-        minZoom={0.1}
-        maxZoom={2}
+        minZoom={MIN_ZOOM}
+        maxZoom={MAX_ZOOM}
         // 双击空白用于新建笔记，关闭默认的双击缩放
         zoomOnDoubleClick={false}
         // 关闭库自带的空格平移激活：否则按住空格滚轮会被强制改为上下平移
         panActivationKeyCode={null}
+        // 空格按住时换成不存在的类名，让 .nowheel 内部的滚轮也交由 React Flow 缩放；
+        // 普通状态下保留 .nowheel 的原生滚动放行
+        noWheelClassName={spacePressed ? 'nowheel-space-zoom' : 'nowheel'}
         // 卡片拖动沿用同一「漂移距离」判定
         nodeDragThreshold={preferences.dragDriftDistance}
         // 取消库内选中自动抬升，层级统一交给 lib/uiLayers 的动态分配器
         elevateNodesOnSelect={false}
+        // 连线始终在卡片之下：禁止选中边或转发节点的层级把边抬到卡片上方
+        elevateEdgesOnSelect={false}
         // 空格按住时卡片不可拖动，左键拖动改为平移画布
         nodesDraggable={!spacePressed}
         // 中键平移由 React Flow 负责；空格左键平移由上面的 capture 逻辑完成
@@ -1696,7 +1779,7 @@ function CanvasInner() {
             <button
               type="button"
               onClick={() => void handleAutoLayout()}
-              className="flex h-7 items-center gap-1.5 rounded-lg border border-subtle bg-panel px-2.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+              className="glass-surface flex h-7 items-center gap-1.5 rounded-lg border border-subtle px-2.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
             >
               <LayoutGrid size={12} />
               自动重排
@@ -1710,10 +1793,10 @@ function CanvasInner() {
               className={[
                 'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors duration-150',
                 thinkingDisabled
-                  ? 'cursor-not-allowed border-subtle bg-panel text-muted opacity-40'
+                  ? 'glass-surface cursor-not-allowed border-subtle text-muted opacity-40'
                   : preferences.thinkingEnabled
-                    ? 'border-accent bg-accent-dim text-accent'
-                    : 'border-subtle bg-panel text-muted hover:text-ink',
+                    ? 'glass-surface border-accent bg-accent-dim text-accent'
+                    : 'glass-surface border-subtle text-muted hover:text-ink',
               ].join(' ')}
             >
               <Brain size={12} />
@@ -1732,10 +1815,10 @@ function CanvasInner() {
                 className={[
                   'flex h-7 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors duration-150',
                   webSearchDisabled
-                    ? 'cursor-not-allowed border-subtle bg-panel text-muted opacity-40'
+                    ? 'glass-surface cursor-not-allowed border-subtle text-muted opacity-40'
                     : preferences.webSearchEnabled
-                      ? 'border-accent bg-accent-dim text-accent'
-                      : 'border-subtle bg-panel text-muted hover:text-ink',
+                      ? 'glass-surface border-accent bg-accent-dim text-accent'
+                      : 'glass-surface border-subtle text-muted hover:text-ink',
                 ].join(' ')}
               >
                 <Globe size={12} />
@@ -1745,7 +1828,7 @@ function CanvasInner() {
               {/* 悬停弹窗：外层留出 8px 内边距，鼠标从按钮移入弹窗时不闪烁 */}
               {webSearchPanelOpen && (
                 <div className="absolute left-0 top-full z-30 pt-2">
-                  <div className="panel-pop w-[240px] rounded-lg border border-subtle bg-panel p-3 shadow-lg">
+                  <div className="glass-surface panel-pop w-[240px] rounded-lg border border-subtle p-3 shadow-lg">
                     <p className="mb-2 text-[12px] font-medium text-ink">搜索方式</p>
                     <div className="flex items-center justify-between gap-3">
                       <span className="text-[12px] text-body">强制搜索</span>
@@ -1784,7 +1867,7 @@ function CanvasInner() {
         </Panel>
         {selectedNodeIds.length > 1 && (
           <Panel position="top-center">
-            <div className="panel-pop flex items-center gap-2 rounded-lg border border-subtle bg-panel px-3 py-1.5">
+            <div className="glass-surface panel-pop flex items-center gap-2 rounded-lg border border-subtle px-3 py-1.5">
               <span className="text-[12px] text-muted">已选 {selectedNodeIds.length} 张</span>
               <button
                 type="button"
@@ -1833,7 +1916,7 @@ function CanvasInner() {
         ].join(' ')}
         aria-hidden={!dragActive}
       >
-        <p className="rounded-lg border border-subtle bg-panel px-3 py-1.5 text-[12px] text-accent">
+        <p className="glass-surface rounded-lg border border-subtle px-3 py-1.5 text-[12px] text-accent">
           松开以导入画布文件
         </p>
       </div>

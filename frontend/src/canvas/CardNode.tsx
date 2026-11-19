@@ -190,6 +190,8 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const linkDrag = useNoteLinkDragSignal()
   const linkConnectable = linkDrag.active && linkDrag.sourceKind === 'note'
   const linkSnapped = linkConnectable && linkDrag.snappedNodeId === node.id
+  // 起点连接点：拖拽期间保持实心强调色，明确连线从哪里出发
+  const linkSource = linkDrag.active && linkDrag.sourceNodeId === node.id
   // 回答正文是主要阅读区：始终保留原生滚动（按住空格时仍交给画布缩放）
   const answerScrollClass = spacePressed ? '' : 'nowheel'
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
@@ -492,6 +494,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
         onClick={(event) => event.stopPropagation()}
         className={[
           'note-link-handle nodrag nopan',
+          linkSource ? 'is-source' : '',
           linkConnectable ? 'is-connectable' : '',
           linkSnapped ? 'is-snapped' : '',
         ].join(' ')}
@@ -628,7 +631,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           onDragLeave={dropZone.onDragLeave}
           onDrop={dropZone.onDrop}
           className={[
-            'nodrag mt-3 flex min-h-0 flex-1 flex-col rounded-lg border p-1 transition-colors duration-150',
+            'glass-surface nodrag mt-3 flex min-h-0 flex-1 flex-col rounded-lg border p-1 transition-colors duration-150',
             dropZone.dragOver ? 'border-accent bg-accent-dim' : 'border-transparent',
           ].join(' ')}
         >
@@ -738,17 +741,16 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
 
             {sourcesOpen && node.sources.length > 0 && (
               <div
-                className={`nodrag ${spacePressed ? '' : 'nowheel'} drawer-in absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-lg`}
+                className={[
+                  `nodrag ${spacePressed ? '' : 'nowheel'} drawer-in absolute inset-x-0 bottom-0 z-30 flex flex-col overflow-hidden rounded-t-lg`,
+                  // 参考资料抽屉使用更通透的一档毛玻璃；拖拽或空格平移时关闭毛玻璃，避免逐帧重算背景模糊
+                  sourcesDragging || spacePressed ? 'bg-panel' : 'glass-surface-airy',
+                ].join(' ')}
                 style={{
                   height: sourcesPanelHeight,
                   maxHeight: '100%',
                   // 拖拽时跟手，非拖拽时高度变化（打开/设置调整）用 220ms 过渡
                   transition: sourcesDragging ? 'none' : 'height 220ms var(--motion-ease-out)',
-                  // 拖拽或空格平移时关闭毛玻璃，避免逐帧重算背景模糊
-                  background: sourcesDragging || spacePressed
-                    ? 'var(--bg-panel)'
-                    : 'color-mix(in srgb, var(--bg-panel) 82%, transparent)',
-                  backdropFilter: sourcesDragging || spacePressed ? 'none' : 'blur(10px)',
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => event.stopPropagation()}
@@ -840,7 +842,8 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                   />
                 </button>
               )}
-              <div className="flex items-center gap-2">
+              {/* 右侧留出 10px：让连接点周围保持清晰的可点击空间 */}
+              <div className="flex items-center gap-2 pr-2.5">
                 <button
                   type="button"
                   onClick={() => {

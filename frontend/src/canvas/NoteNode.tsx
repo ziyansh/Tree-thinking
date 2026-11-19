@@ -39,6 +39,8 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
   const linkDrag = useNoteLinkDragSignal()
   const linkConnectable = linkDrag.active && linkDrag.sourceKind === 'answer'
   const linkSnapped = linkConnectable && linkDrag.snappedNodeId === node.id
+  // 起点连接点：拖拽期间保持实心强调色，明确连线从哪里出发
+  const linkSource = linkDrag.active && linkDrag.sourceNodeId === node.id
   const modifiedTime = formatModifiedTime(node.updatedAt, timeFormat)
   /** 新建 1.2 秒内的笔记播放一次入场动画 */
   const createdAtMs = node.createdAt ? Date.parse(node.createdAt) : Number.NaN
@@ -273,6 +275,7 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
         onClick={(event) => event.stopPropagation()}
         className={[
           'note-link-handle nodrag nopan',
+          linkSource ? 'is-source' : '',
           linkConnectable ? 'is-connectable' : '',
           linkSnapped ? 'is-snapped' : '',
         ].join(' ')}

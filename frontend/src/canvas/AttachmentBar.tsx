@@ -44,7 +44,7 @@ export function AttachmentBar({ node }: AttachmentBarProps) {
             <ChevronRight size={12} className={expanded ? 'rotate-90' : ''} />
           </button>
           {expanded && (
-            <div className={`nodrag ${spacePressed ? '' : 'nowheel'} absolute top-full left-0 z-30 mt-1 w-full rounded-xl border border-subtle bg-panel p-2 shadow-2xl`}>
+            <div className={`glass-surface nodrag ${spacePressed ? '' : 'nowheel'} absolute top-full left-0 z-30 mt-1 w-full rounded-xl border border-subtle p-2 shadow-2xl`}>
               <AttachmentChips items={attachments} compact onOpen={open} />
             </div>
           )}

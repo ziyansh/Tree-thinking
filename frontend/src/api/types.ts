@@ -199,14 +199,16 @@ export interface SettingsDTO {
   undoSteps: number
   /** 主题色相（默认 173，范围 0–360） */
   themeHue: number
-  /** 连线粗细（默认 1.5，范围 0.5–6） */
+  /** 回答卡片连线粗细（默认 1.5，范围 0.5–12） */
   edgeWidth: number
-  /** 连线颜色（默认 #3a3f4a） */
+  /** 回答卡片连线颜色（默认 #3a3f4a） */
   edgeColor: string
   /** 笔记卡片连线样式（默认 orthogonal） */
   noteLinkStyle: NoteLinkStyle
-  /** 笔记卡片连线粗细（默认 1.5，范围与 edgeWidth 相同） */
+  /** 笔记卡片连线粗细（默认 1.5，范围 0.5–12） */
   noteLinkWidth: number
+  /** 笔记卡片连线颜色（默认 #3a3f4a） */
+  noteLinkColor: string
   /** 从回答卡片连接点拖出连线的释放动作（默认 none） */
   noteLinkReleaseAction: NoteLinkReleaseAction
   /** 主题模式（默认跟随系统） */
@@ -295,8 +297,10 @@ export interface SettingsPatch {
   edgeColor?: string
   /** 笔记卡片连线样式 */
   noteLinkStyle?: NoteLinkStyle
-  /** 笔记卡片连线粗细（范围与 edgeWidth 相同） */
+  /** 笔记卡片连线粗细（范围 0.5–12） */
   noteLinkWidth?: number
+  /** 笔记卡片连线颜色 */
+  noteLinkColor?: string
   /** 从回答卡片连接点拖出连线的释放动作 */
   noteLinkReleaseAction?: NoteLinkReleaseAction
   themeMode?: ThemeMode

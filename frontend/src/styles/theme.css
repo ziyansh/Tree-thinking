@@ -21,6 +21,17 @@
   /* 卡片正文字号，运行时由设置覆盖 */
   --card-font-size: 14px;
 
+  /* 毛玻璃材质参数：集中在此，便于统一调整浮层通透度与模糊度 */
+  /* 默认浮层：背景不透明度（越低越透） */
+  --glass-alpha: 72%;
+  /* 默认浮层：背景模糊半径 */
+  --glass-blur: 12px;
+  /* 默认浮层：背景饱和度增强 */
+  --glass-saturate: 140%;
+  /* 通透浮层（参考资料抽屉）：更透、更模糊 */
+  --glass-alpha-airy: 58%;
+  --glass-blur-airy: 18px;
+
   /* 文字选中高亮：低饱和强调色，避免浏览器默认蓝色块 */
   --selection-bg: hsl(var(--theme-hue) 65% 55% / 0.3);
   --selection-text: #f2fffb;
@@ -49,6 +60,12 @@
   --bg-panel: #ffffff;
   --bg-card: #ffffff;
   --bg-elevated: #f0f1f4;
+
+  /* 浅色主题：白色背景下调低不透明度、提高模糊，保证浮层通透但仍可读 */
+  --glass-alpha: 62%;
+  --glass-blur: 16px;
+  --glass-alpha-airy: 44%;
+  --glass-blur-airy: 22px;
 
   /* 边框 */
   --border-subtle: #d9dbe1;
@@ -99,6 +116,39 @@
   --color-ghost-bg: var(--ghost-bg);
   --color-ghost-border: var(--ghost-border);
 }
+
+/* 统一毛玻璃材质：透明底浮层 / 输入容器默认使用该类，禁止再写半透明纯色背景。
+   参数见 :root 的 --glass-* 变量；light 主题下已单独调低不透明度。
+   放在 components 层，拖拽高亮等 Tailwind 工具类仍可覆盖 background。 */
+@layer components {
+  .glass-surface {
+    background: color-mix(in srgb, var(--bg-panel) var(--glass-alpha), transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    transition:
+      background-color 120ms var(--motion-ease-out),
+      backdrop-filter 120ms var(--motion-ease-out);
+  }
+
+  /* 更通透的一档：用于参考资料抽屉，白底 / 浅色主题下避免过于“实” */
+  .glass-surface-airy {
+    background: color-mix(in srgb, var(--bg-panel) var(--glass-alpha-airy), transparent);
+    -webkit-backdrop-filter: blur(var(--glass-blur-airy)) saturate(var(--glass-saturate));
+    backdrop-filter: blur(var(--glass-blur-airy)) saturate(var(--glass-saturate));
+    transition:
+      background-color 120ms var(--motion-ease-out),
+      backdrop-filter 120ms var(--motion-ease-out);
+  }
+}
+
+/* 拖动卡片期间降低开销：毛玻璃临时退化为不透明面板，松手后自动恢复 */
+.is-node-dragging .glass-surface,
+.is-node-dragging .glass-surface-airy {
+  background: var(--bg-panel);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 
 /* 全局字体栈、铺满高度与主题底色 */
 html,
@@ -575,15 +625,15 @@ button:not(:disabled):active {
   color: var(--accent);
 }
 
-/* ---------- 笔记卡片连线（v0.3.4） ---------- */
-/* 连接点：默认低调，hover / 可连接 / 被吸附时逐级强调 */
+/* ---------- 笔记卡片连线（v0.3.4 / v0.3.5） ---------- */
+/* 连接点：空闲态为透明底 + 强调色边框；hover / 可连接 / 被吸附 / 起点逐级强调 */
 .react-flow__handle.note-link-handle {
   width: 9px;
   height: 9px;
   min-width: 9px;
   min-height: 9px;
   padding: 0;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--accent);
   border-radius: 999px;
   background: transparent;
   /* React Flow 默认让连接点不可命中，这里改回可交互 */
@@ -604,18 +654,27 @@ button:not(:disabled):active {
   background: var(--accent-dim);
 }
 
-/* 拖拽连线期间，所有可连接的连接点高亮为强调色 */
-.react-flow__handle.note-link-handle.is-connectable {
+/* 拖拽连线期间：起点与被吸附 / 可连接的连接点使用实心强调色 + 光环 */
+.react-flow__handle.note-link-handle.is-source {
+  scale: 1.5;
   border-color: var(--accent);
-  background: var(--accent-dim);
+  background: var(--accent);
+  box-shadow: 0 0 0 4px var(--accent-dim);
 }
 
-/* 被吸附的连接点：放大并加一圈光环 */
+.react-flow__handle.note-link-handle.is-connectable {
+  scale: 1.45;
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-dim);
+}
+
+/* 被吸附的连接点：进一步放大并加一圈更明显的光环 */
 .react-flow__handle.note-link-handle.is-snapped {
   scale: 1.7;
   border-color: var(--accent);
   background: var(--accent);
-  box-shadow: 0 0 0 4px var(--accent-dim);
+  box-shadow: 0 0 0 5px var(--accent-dim);
 }
 
 /* 正式连线：hover 高亮时颜色与粗细平滑过渡 */
@@ -730,6 +789,8 @@ button:not(:disabled):active {
   }
 
   .react-flow__handle.note-link-handle:hover,
+  .react-flow__handle.note-link-handle.is-source,
+  .react-flow__handle.note-link-handle.is-connectable,
   .react-flow__handle.note-link-handle.is-snapped {
     scale: 1;
   }

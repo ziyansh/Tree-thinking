@@ -5,7 +5,7 @@ import { Paperclip, Send } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import type { BranchInputFlowNode } from './ghosts'
 import { useSpacePressed } from '../lib/spaceKey'
-import { bumpUiLayer, dropUiLayer } from '../lib/uiLayers'
+import { bumpUiLayer, dropUiLayer, getFocusedInput, setFocusedInput } from '../lib/uiLayers'
 import {
   AttachmentChips,
   useAttachmentUploads,
@@ -48,6 +48,8 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   /** 带收起动画地移除输入条 */
   const closeWithAnimation = useCallback(() => {
     if (closing) return
+    // 输入条即将消失：同步退出「聚焦输入」区段
+    if (getFocusedInput() === data.inputId) setFocusedInput(null)
     setClosing(true)
     closeTimerRef.current = window.setTimeout(() => {
       cancelBranchInput(data.inputId)
@@ -65,6 +67,8 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   const handleBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget as Node | null
     if (next && event.currentTarget.contains(next)) return
+    // 焦点已离开容器：退出「聚焦输入」区段（是否保留输入条另按草稿判断）
+    if (getFocusedInput() === data.inputId) setFocusedInput(null)
     if (draftRef.current.trim()) return
     closeWithAnimation()
   }
@@ -81,7 +85,11 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   // 新显示的分支输入条置顶（层级高于卡片与猜你想问）
   useEffect(() => {
     bumpUiLayer(data.inputId)
-    return () => dropUiLayer(data.inputId)
+    return () => {
+      dropUiLayer(data.inputId)
+      // 卸载时若仍记录为本输入条，清理聚焦状态
+      if (getFocusedInput() === data.inputId) setFocusedInput(null)
+    }
   }, [data.inputId])
 
   // 按内容重算高度：只做显示层换行，不插入实际换行符
@@ -109,13 +117,17 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
 
   return (
     <div
-      onFocus={() => bumpUiLayer(data.inputId)}
+      onFocus={() => {
+        // 获得焦点：进入「聚焦输入」区段，压在笔记卡片之上
+        setFocusedInput(data.inputId)
+        bumpUiLayer(data.inputId)
+      }}
       onBlur={handleBlur}
       onDragOver={dropZone.onDragOver}
       onDragLeave={dropZone.onDragLeave}
       onDrop={dropZone.onDrop}
       className={[
-        'relative flex flex-col gap-1.5 rounded-lg border bg-ghost-bg p-2.5 transition-colors duration-150',
+        'glass-surface relative flex flex-col gap-1.5 rounded-lg border p-2.5 transition-colors duration-150',
         closing ? 'composer-out' : '',
         dropZone.dragOver
           ? 'border-accent bg-accent-dim'

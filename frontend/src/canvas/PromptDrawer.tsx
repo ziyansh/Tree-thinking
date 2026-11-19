@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import type { FocusEvent } from 'react'
 import { Paperclip, RefreshCw, X } from 'lucide-react'
 import type { NodeDTO } from '../api/types'
 import { useGraphStore } from '../store/graphStore'
@@ -34,6 +35,10 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
   const [submitting, setSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  /** 抽屉容器：用于判断失焦后焦点是否仍在抽屉内 */
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  /** 系统文件选择框会短暂抢走窗口焦点，期间抑制失焦退出编辑 */
+  const suppressBlurRef = useRef(false)
   // 重新提交时可调整附件，默认沿用该卡片已有附件
   const attachments = useAttachmentUploads(node.attachments)
   const pasteAttachments = usePasteAttachments(attachments)
@@ -57,6 +62,45 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
     element?.focus()
     element?.setSelectionRange(element.value.length, element.value.length)
   }, [editing])
+
+  // 文件选择框关闭后清除抑制标记：选中文件（change）或取消（窗口重新获得焦点）
+  useEffect(() => {
+    if (!editing) return
+    const clearSuppress = () => {
+      suppressBlurRef.current = false
+    }
+    window.addEventListener('focus', clearSuppress)
+    return () => window.removeEventListener('focus', clearSuppress)
+  }, [editing])
+
+  // 编辑态下窗口失焦（切换到其它应用）同样退出编辑，文件选择框打开期间跳过
+  useEffect(() => {
+    if (!editing) return
+    const handleWindowBlur = () => {
+      if (submitting || suppressBlurRef.current) return
+      setEditing(false)
+    }
+    window.addEventListener('blur', handleWindowBlur)
+    return () => window.removeEventListener('blur', handleWindowBlur)
+  }, [editing, submitting])
+
+  /** 焦点移出抽屉容器且不在提交中时，放弃未提交的修改并恢复只读 */
+  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!editing || submitting || suppressBlurRef.current) return
+    const next = event.relatedTarget as Node | null
+    if (next) {
+      if (containerRef.current?.contains(next)) return
+      setEditing(false)
+      return
+    }
+    // 点击非可聚焦元素时 relatedTarget 为 null，延迟确认焦点是否仍留在抽屉内
+    window.setTimeout(() => {
+      const active = document.activeElement
+      if (active && containerRef.current?.contains(active)) return
+      if (suppressBlurRef.current) return
+      setEditing(false)
+    }, 0)
+  }
 
   const resubmit = async () => {
     const text = draft.trim()
@@ -89,14 +133,12 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
 
   return (
     <div
+      ref={containerRef}
       data-modal-open="true"
-      className="drawer-pull-up nodrag nowheel absolute inset-x-0 bottom-full z-30 mb-2 flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-subtle shadow-[0_12px_32px_rgba(0,0,0,0.24)]"
-      style={{
-        background: 'color-mix(in srgb, var(--bg-panel) 94%, transparent)',
-        backdropFilter: 'blur(10px)',
-      }}
+      className="glass-surface drawer-pull-up nodrag nowheel absolute inset-x-0 bottom-full z-30 mb-2 flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-subtle shadow-[0_12px_32px_rgba(0,0,0,0.24)]"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
+      onBlur={handleBlur}
       onDoubleClick={() => {
         if (!editing) setEditing(true)
       }}
@@ -144,7 +186,11 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
                 type="button"
                 title="添加附件"
                 aria-label="添加附件"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => {
+                  // 文件选择框会短暂夺走焦点，先标记抑制失焦退出
+                  suppressBlurRef.current = true
+                  fileInputRef.current?.click()
+                }}
                 className="nodrag flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
               >
                 <Paperclip size={13} />
@@ -156,6 +202,7 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
                 multiple
                 className="nodrag hidden"
                 onChange={(event) => {
+                  suppressBlurRef.current = false
                   const files = Array.from(event.target.files ?? [])
                   event.target.value = ''
                   void attachments.addFiles(files)

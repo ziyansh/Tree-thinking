@@ -26,7 +26,7 @@ export function Toast({ message }: { message: string | null }) {
     <div className="pointer-events-none fixed bottom-24 left-1/2 z-50 -translate-x-1/2">
       <div
         className={[
-          'rounded-full border border-subtle bg-panel px-4 py-1.5 text-[12px] text-ink shadow-lg',
+          'glass-surface rounded-full border border-subtle px-4 py-1.5 text-[12px] text-ink shadow-lg',
           leaving ? 'toast-out' : 'toast-in',
         ].join(' ')}
       >

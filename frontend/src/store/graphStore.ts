@@ -79,6 +79,7 @@ export type Preferences = Pick<
   | 'edgeColor'
   | 'noteLinkStyle'
   | 'noteLinkWidth'
+  | 'noteLinkColor'
   | 'noteLinkReleaseAction'
   | 'themeMode'
   | 'timeFormat'
@@ -111,6 +112,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   edgeColor: '#3a3f4a',
   noteLinkStyle: 'orthogonal',
   noteLinkWidth: 1.5,
+  noteLinkColor: '#3a3f4a',
   noteLinkReleaseAction: 'none',
   themeMode: 'system',
   timeFormat: '24h',
@@ -144,6 +146,7 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     edgeColor: settings.edgeColor,
     noteLinkStyle: settings.noteLinkStyle ?? 'orthogonal',
     noteLinkWidth: settings.noteLinkWidth ?? 1.5,
+    noteLinkColor: settings.noteLinkColor ?? '#3a3f4a',
     noteLinkReleaseAction: settings.noteLinkReleaseAction ?? 'none',
     themeMode: settings.themeMode,
     timeFormat: settings.timeFormat,
@@ -178,6 +181,7 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     edgeColor: patch.edgeColor ?? base.edgeColor,
     noteLinkStyle: patch.noteLinkStyle ?? base.noteLinkStyle,
     noteLinkWidth: patch.noteLinkWidth ?? base.noteLinkWidth,
+    noteLinkColor: patch.noteLinkColor ?? base.noteLinkColor,
     noteLinkReleaseAction: patch.noteLinkReleaseAction ?? base.noteLinkReleaseAction,
     themeMode: patch.themeMode ?? base.themeMode,
     timeFormat: patch.timeFormat ?? base.timeFormat,
@@ -321,6 +325,8 @@ interface GraphState {
   preferences: Preferences
   /** 底部轻提示文案，2 秒后自动清空 */
   toast: string | null
+  /** 新建分支卡片后的一次性检测信号：交给画布判断落点是否遮挡其它卡片的提问区 */
+  layoutCheckNodeId: string | null
 
   loadProjects: () => Promise<void>
   openProject: (id: string) => Promise<void>
@@ -332,6 +338,10 @@ interface GraphState {
   saveCurrentProject: () => Promise<void>
   /** 底部轻提示，2 秒后自动消失 */
   showToast: (message: string) => void
+  /** 请求画布检测某个新卡片是否遮挡其它卡片的提问区（仅新建分支时调用） */
+  requestLayoutCheck: (nodeId: string) => void
+  /** 检测处理完毕后清空请求信号 */
+  clearLayoutCheck: () => void
   createProject: (name?: string) => Promise<void>
   renameProject: (id: string, name: string) => Promise<void>
   /** 首轮回答完成后尝试自动命名；失败只告警，不影响画布 */
@@ -478,6 +488,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     cardSize: { ...DEFAULT_CARD_SIZE },
     preferences: { ...DEFAULT_PREFERENCES },
     toast: null,
+    layoutCheckNodeId: null,
 
     loadProjects: async () => {
       const projects = await api.listProjects()
@@ -645,6 +656,10 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         set({ toast: null })
       }, 2000)
     },
+
+    requestLayoutCheck: (nodeId) => set({ layoutCheckNodeId: nodeId }),
+
+    clearLayoutCheck: () => set({ layoutCheckNodeId: null }),
 
     createProject: async (name) => {
       const graph = await api.createProject(name)
@@ -924,6 +939,8 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       }))
       // 由建议派生的子卡片意味着该轮候选方向已被消费；自定义输入与分支输入同样隐藏整组
       patchNode(parentId, (node) => ({ ...node, suggestionsConsumed: true }))
+      // 新卡片可能压住其它卡片的提问区，交给画布检测后决定是否整理
+      get().requestLayoutCheck(child.id)
 
       await get().runAnswer(child.id)
     },
@@ -1003,6 +1020,8 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           selectedNodeIds: [child.id],
         }
       })
+      // 新卡片可能压住其它卡片的提问区，交给画布检测后决定是否整理
+      get().requestLayoutCheck(child.id)
       await get().runAnswer(child.id)
     },
 

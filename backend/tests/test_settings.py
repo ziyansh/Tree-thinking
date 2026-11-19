@@ -159,6 +159,20 @@ def test_settings_validation(client):
     assert bad_count.status_code == 422
 
 
+def test_settings_note_link_color(client):
+    """笔记连线颜色默认 #3a3f4a；保存后生效并统一小写，非法格式返回 422。"""
+    assert client.get("/api/settings").json()["noteLinkColor"] == "#3a3f4a"
+
+    saved = client.put("/api/settings", json={"noteLinkColor": "#FF0000"})
+    assert saved.status_code == 200
+    assert saved.json()["noteLinkColor"] == "#ff0000"
+    # 落库后再次读取保持一致
+    assert client.get("/api/settings").json()["noteLinkColor"] == "#ff0000"
+
+    bad = client.put("/api/settings", json={"noteLinkColor": "#xyz"})
+    assert bad.status_code == 422
+
+
 def test_answer_uses_saved_settings(client, monkeypatch):
     """保存设置后，回答请求立即使用新的 Key、模型与思考开关（无需重启）。"""
     client.put(

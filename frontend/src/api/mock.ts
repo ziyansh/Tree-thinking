@@ -172,6 +172,7 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   edgeColor: '#3a3f4a',
   noteLinkStyle: 'orthogonal',
   noteLinkWidth: 1.5,
+  noteLinkColor: '#3a3f4a',
   noteLinkReleaseAction: 'none',
   themeMode: 'system',
   timeFormat: '24h',
@@ -960,15 +961,18 @@ export const mockApi: ApiClient = {
       settings.themeHue = Math.min(360, Math.max(0, patch.themeHue))
     }
     if (patch.edgeWidth !== undefined) {
-      settings.edgeWidth = Math.min(6, Math.max(0.5, patch.edgeWidth))
+      settings.edgeWidth = Math.min(12, Math.max(0.5, patch.edgeWidth))
     }
     if (patch.edgeColor !== undefined && /^#[0-9a-fA-F]{6}$/.test(patch.edgeColor)) {
       settings.edgeColor = patch.edgeColor.toLowerCase()
     }
-    // 笔记连线：粗细与 edgeWidth 使用同一范围 0.5–6
+    // 笔记连线：粗细与 edgeWidth 使用同一范围 0.5–12，颜色按 #rrggbb 校验并转小写
     if (patch.noteLinkStyle !== undefined) settings.noteLinkStyle = patch.noteLinkStyle
     if (patch.noteLinkWidth !== undefined) {
-      settings.noteLinkWidth = Math.min(6, Math.max(0.5, patch.noteLinkWidth))
+      settings.noteLinkWidth = Math.min(12, Math.max(0.5, patch.noteLinkWidth))
+    }
+    if (patch.noteLinkColor !== undefined && /^#[0-9a-fA-F]{6}$/.test(patch.noteLinkColor)) {
+      settings.noteLinkColor = patch.noteLinkColor.toLowerCase()
     }
     if (patch.noteLinkReleaseAction !== undefined) {
       settings.noteLinkReleaseAction = patch.noteLinkReleaseAction

@@ -374,9 +374,10 @@ class SettingsPatch(CamelModel):
     theme_hue: float | None = None
     edge_width: float | None = None
     edge_color: str | None = None
-    # 笔记连接线：样式（curved / orthogonal）、粗细、拖放释放动作
+    # 笔记连接线：样式（curved / orthogonal）、粗细、颜色、拖放释放动作
     note_link_style: Literal["curved", "orthogonal"] | None = None
     note_link_width: float | None = None
+    note_link_color: str | None = None
     note_link_release_action: Literal["none", "shift-note", "note"] | None = None
     theme_mode: Literal["system", "light", "dark"] | None = None
     time_format: Literal["24h", "12h"] | None = None
@@ -394,7 +395,7 @@ class SettingsPatch(CamelModel):
     # 模型搜索上限：注入模型的资料条数，0 表示不设限（服务层夹到 0–50）
     search_limit: int | None = None
 
-    @field_validator("edge_color")
+    @field_validator("edge_color", "note_link_color")
     @classmethod
     def _check_edge_color(cls, value: str | None) -> str | None:
         """连线颜色只接受 #rrggbb，统一转小写；其它写法按非法处理。"""

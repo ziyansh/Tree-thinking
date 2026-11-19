@@ -374,14 +374,26 @@ def get_graph(
     db: Session = Depends(get_db),
     user: User | None = Depends(require_user),
 ) -> dict:
-    """取画布及其全部节点；连线由前端按 parentId 派生。"""
+    """取画布及其全部节点与笔记连接；父子连线仍由前端按 parentId 派生。"""
     project = _get_project_or_404(db, project_id, user)
     nodes = db.scalars(
         select(ConversationNode)
         .where(ConversationNode.project_id == project_id)
         .order_by(ConversationNode.created_at)
     ).all()
-    return {"project": _project_dto(project), "nodes": [node_to_dto(node) for node in nodes]}
+    # 笔记连接随图一起返回，避免前端每次切换画布后丢失连接
+    links = db.scalars(
+        select(NoteLink)
+        .where(NoteLink.project_id == project_id)
+        .order_by(NoteLink.created_at)
+    ).all()
+    return {
+        "project": _project_dto(project),
+        "nodes": [node_to_dto(node) for node in nodes],
+        "links": [
+            NoteLinkOut.model_validate(link).model_dump(by_alias=True) for link in links
+        ],
+    }
 
 
 @router.get("/{project_id}/export")

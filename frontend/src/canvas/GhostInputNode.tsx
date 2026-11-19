@@ -10,7 +10,7 @@ import { WebSearchToggle } from './WebSearchToggle'
 import { ThinkingToggle } from './ThinkingToggle'
 import { useSpacePressed } from '../lib/spaceKey'
 import { setActiveGhostInput, useActiveGhostInput } from '../lib/ghostInputFocus'
-import { bumpUiLayer } from '../lib/uiLayers'
+import { bumpUiLayer, getFocusedInput, setFocusedInput } from '../lib/uiLayers'
 
 /**
  * 自定义方向输入箭头：收起时为单行输入，聚焦后展开为多行输入 + 附件区，
@@ -55,9 +55,19 @@ function GhostInputNodeInner({
   const handleBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget as Node | null
     if (next && event.currentTarget.contains(next)) return
+    // 输入框失焦：退出「聚焦输入」区段
+    if (getFocusedInput() === id) setFocusedInput(null)
     setFocused(false)
     setActiveGhostInput(null)
   }
+
+  // 卸载时若仍记录为本输入框，清理聚焦状态
+  useEffect(
+    () => () => {
+      if (getFocusedInput() === id) setFocusedInput(null)
+    },
+    [id],
+  )
 
   // 展开态下只有选中卡片发生非空变化才收起（点击空白画布不收起）
   useEffect(() => {
@@ -65,13 +75,17 @@ function GhostInputNodeInner({
     return useGraphStore.subscribe((state, prev) => {
       if (state.selectedNodeId !== prev.selectedNodeId && state.selectedNodeId !== null) {
         setFocused(false)
+        if (getFocusedInput() === id) setFocusedInput(null)
       }
     })
-  }, [focused])
+  }, [focused, id])
 
   // 切换到另一个自定义输入框也算切换焦点：立即收起当前输入框
   useEffect(() => {
-    if (activeInputId !== null && activeInputId !== id) setFocused(false)
+    if (activeInputId !== null && activeInputId !== id) {
+      setFocused(false)
+      if (getFocusedInput() === id) setFocusedInput(null)
+    }
   }, [activeInputId, id])
 
   /** 上一次的 autoOpen：只在 false → true（含首次挂载）时自动展开并聚焦 */
@@ -123,6 +137,8 @@ function GhostInputNodeInner({
     <div
       onFocus={() => {
         setActiveGhostInput(id)
+        // 获得焦点：进入「聚焦输入」区段，压在笔记卡片之上
+        setFocusedInput(id)
         bumpUiLayer(id)
         setFocused(true)
       }}
@@ -131,7 +147,7 @@ function GhostInputNodeInner({
       onDragLeave={dropZone.onDragLeave}
       onDrop={dropZone.onDrop}
       className={[
-        'relative flex rounded-lg border bg-ghost-bg transition-[width,min-height,border-color,background-color] duration-200 ease-out',
+        'glass-surface relative flex rounded-lg border transition-[width,min-height,border-color,background-color] duration-200 ease-out',
         focused
           ? 'min-h-[120px] w-[460px] flex-col gap-1.5 p-2.5'
           : 'min-h-[44px] w-[280px] items-center gap-1.5 px-2.5 py-1',

@@ -7,12 +7,14 @@
 export const UI_LAYER_BASE = {
   /** 聊天卡片（含卡片内部抽屉） */
   card: 10,
-  /** 猜你想问（建议箭头与自定义方向输入） */
-  ghost: 400,
-  /** 笔记卡片：必须高于猜你想问，避免被建议组遮挡 */
+  /** 笔记卡片：高于卡片，但低于猜你想问 */
   note: 800,
-  /** 新建分支输入条：必须高于卡片、猜你想问与笔记 */
+  /** 猜你想问（建议箭头与自定义方向输入）：必须高于笔记卡片 */
+  ghost: 1000,
+  /** 新建分支输入条：必须高于卡片、笔记与猜你想问 */
   branchInput: 1200,
+  /** 获得焦点的输入框：必须高于笔记卡片，避免输入时被笔记遮挡 */
+  focusedInput: 1600,
 } as const
 
 export type UiLayerKind = keyof typeof UI_LAYER_BASE
@@ -21,10 +23,24 @@ export type UiLayerKind = keyof typeof UI_LAYER_BASE
 let sequence = 0
 /** key → 最近一次置顶序号 */
 const layers = new Map<string, number>()
+/** 当前获得焦点的输入框 key，同一时间只允许一个 */
+let focusedInput: string | null = null
 const listeners = new Set<() => void>()
 
 function notify(): void {
   listeners.forEach((listener) => listener())
+}
+
+/** 设置当前聚焦的输入框；传 null 表示没有输入框持有焦点 */
+export function setFocusedInput(key: string | null): void {
+  if (focusedInput === key) return
+  focusedInput = key
+  notify()
+}
+
+/** 读取当前聚焦输入框的 key */
+export function getFocusedInput(): string | null {
+  return focusedInput
 }
 
 /** 把某个 UI 元素提到同类元素的最上层；已经是全局最新时直接跳过 */

@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.3.4** | [中文说明](readme.md)
+> Current version: **0.3.6** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -196,6 +196,31 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.3.6 — 2026-11-18
+- Fixed: holding Space and scrolling inside `.nowheel` areas such as “My prompt” could not zoom the canvas; Space now takes priority for zooming, while normal scrolling keeps the area's native behavior.
+- Fixed: a newly created branch card could cover another card's suggestions / custom-direction area; overlap with those areas is now detected after creating a branch and triggers one auto-layout when needed.
+- Improved: auto-layout avoidance now matches the actual suggestion visibility rules, including the default expanded custom-direction input when there are no suggestions.
+- Fixed: links between answer cards and note cards were lost after switching canvases; the graph endpoint now returns them, and exported files include them too.
+- 0.3.6 hotfix1: removed the automatic save before switching to or creating another canvas, restoring the previous switching behavior.
+- Bumped the version to 0.3.6.
+
+### 0.3.5 — 2026-11-18
+- Added: a color setting for note-card links (Settings → Canvas → Note cards); link style and width also appear under Settings → Appearance → Edges and stay in sync.
+- Improved: link dots always use the accent border and become solid when dragging a link; snapping now covers the whole target card, not just the dot.
+- Improved: when a note card overlaps the custom-direction or branch input, the focused input is raised above the note card.
+- Improved: all translucent inputs and panels share a frosted-glass material; links always render beneath cards.
+- Improved: the “Re-enter prompt / New branch” buttons shift left to leave room for the link dot.
+- Fixed: deleting a hovered link with Delete failed.
+- Improved: the maximum width for every link type is now 12.
+- Added: dragging a link onto an already-connected pair now disconnects it.
+- Improved: the maximum canvas zoom is now 500%.
+- Improved: suggestions render above note cards, while the focused input stays on top.
+- Improved: every popup on the canvas except the cards themselves (toolbar buttons, suggestions, custom direction, branch input, attachment bar, “My prompt”, sources drawer, etc.) uses frosted glass; the sources drawer uses a more transparent tier.
+- Improved: “My prompt” leaves edit mode and returns to read-only when it loses focus.
+- Improved: card dragging follows the display refresh rate, and frosted glass is temporarily disabled during drags for smoother motion.
+- Docs: added a glossary, layering rules, and frosted-glass conventions to the development docs.
+- Bumped the version to 0.3.5.
 
 ### 0.3.4 — 2026-11-17
 - Added: links between answer cards and note cards. Each answer card has a link dot at the right of its bottom toolbar, and each note card has one at the left of its title; drag from either end to connect. While dragging, the preview line is highlighted, connectable dots light up, other links dim, and nearby dots snap.

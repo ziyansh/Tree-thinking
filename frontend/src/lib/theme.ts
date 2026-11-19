@@ -30,7 +30,7 @@ export function resolveTheme(mode: ThemeMode): ResolvedTheme {
 /** 系统深浅色监听的清理函数（切换模式时先摘掉旧监听，避免重复绑定） */
 let stopSystemWatch: (() => void) | null = null
 
-/** 应用主题：写入 html[data-theme]、主题色相与连线颜色；跟随系统时实时切换 */
+/** 应用主题：写入 html[data-theme]、主题色相与回答卡片连线颜色；跟随系统时实时切换 */
 export function applyTheme(preferences: ThemePreferences): void {
   const root = document.documentElement
   root.dataset.theme = resolveTheme(preferences.themeMode)

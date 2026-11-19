@@ -1,89 +1,108 @@
 @echo off
-chcp 936 >nul
-setlocal EnableExtensions EnableDelayedExpansion
+chcp 437 >nul
+setlocal EnableExtensions
 cd /d "%~dp0"
 
-echo ========================================
-echo   树状对话 - 一键启动（后端 + 前端）
-echo ========================================
+echo ==========================================
+echo   Tree Thinking - One-click launcher
+echo ==========================================
 echo.
 
-REM ---------- 1. 后端虚拟环境 ----------
+REM ---------- 1. Check Python ----------
+set "PY="
+where py >nul 2>nul && set "PY=py -3"
+if not defined PY where python >nul 2>nul && set "PY=python"
+if not defined PY goto :no_python
+
+REM ---------- 2. Check Node.js ----------
+where npm >nul 2>nul || goto :no_node
+
+REM ---------- 3. Backend venv + dependencies ----------
 if not exist "backend\.venv\Scripts\python.exe" (
-    echo [1/4] 未找到后端虚拟环境，正在创建 backend\.venv ...
-    python -m venv backend\.venv
-    if errorlevel 1 goto :no_python
-    echo       正在安装后端依赖，请稍候 ...
-    backend\.venv\Scripts\python.exe -m pip install -q -r backend\requirements.txt
-    if errorlevel 1 goto :pip_failed
-) else (
-    echo [1/4] 后端虚拟环境已就绪
+    echo [1/4] Creating backend virtual environment...
+    %PY% -m venv "backend\.venv"
+    if errorlevel 1 goto :venv_failed
 )
+echo [1/4] Installing backend dependencies...
+"backend\.venv\Scripts\python.exe" -m pip install -q --disable-pip-version-check -r "backend\requirements.txt"
+if errorlevel 1 goto :pip_failed
 
-REM ---------- 2. 前端依赖 ----------
-if not exist "frontend\node_modules" (
-    echo [2/4] 未找到前端依赖，正在执行 npm install ...
-    call npm install --prefix frontend
-    if errorlevel 1 goto :npm_failed
-) else (
-    echo [2/4] 前端依赖已就绪
-)
-
-REM ---------- 3. 默认配置 ----------
-REM 这里只准备配置文件的默认值；API 相关配置请在页面左下角「设置」中完成
+REM ---------- 4. Default config ----------
 if not exist "backend\.env" (
-    echo [3/4] 未找到 backend\.env，已从 .env.example 复制默认配置
+    echo [2/4] Creating backend\.env from .env.example
     copy "backend\.env.example" "backend\.env" >nul
 ) else (
-    echo [3/4] 配置文件 backend\.env 已就绪
+    echo [2/4] backend\.env is ready
 )
 
-REM ---------- 4. 端口占用提示 ----------
-netstat -ano | findstr ":8000" | findstr "LISTENING" >nul 2>&1
-if not errorlevel 1 echo       提示：8000 端口已被占用，后端可能启动失败
-netstat -ano | findstr ":5173" | findstr "LISTENING" >nul 2>&1
-if not errorlevel 1 echo       提示：5173 端口已被占用，前端可能启动失败
+REM ---------- 5. Frontend dependencies ----------
+echo [3/4] Installing frontend dependencies...
+pushd "frontend"
+call npm install --no-audit --no-fund
+if errorlevel 1 (
+    popd
+    goto :npm_failed
+)
+popd
 
-REM ---------- 5. 启动前后端 ----------
-echo [4/4] 正在启动服务（新窗口）...
-powershell -NoProfile -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/k','.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000 --reload' -WorkingDirectory '%CD%\backend'"
+REM ---------- 6. Start services ----------
+echo [4/4] Starting backend and frontend...
+start "Tree Thinking Backend" /D "%~dp0backend" cmd /k ".venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
 
-powershell -NoProfile -Command "Start-Process -FilePath 'npm.cmd' -ArgumentList 'run','dev' -WorkingDirectory '%CD%\frontend'"
+echo Waiting for backend health check...
+powershell -NoProfile -Command "$ok=$false; for($i=0;$i -lt 60;$i++){ try { $r=Invoke-WebRequest -UseBasicParsing 'http://127.0.0.1:8000/health' -TimeoutSec 2; if($r.StatusCode -eq 200){$ok=$true; break} } catch {}; Start-Sleep -Milliseconds 500 }; if(-not $ok){ exit 1 }"
+if errorlevel 1 (
+    echo [WARN] Backend did not become ready. Check the backend window for errors.
+) else (
+    echo Backend is ready.
+)
 
-echo.
-echo 等待服务就绪（约 8 秒）后自动打开浏览器 ...
-ping -n 9 127.0.0.1 >nul
+start "Tree Thinking Frontend" /D "%~dp0frontend" cmd /k "npm run dev"
+ping -n 4 127.0.0.1 >nul
 start "" http://localhost:5173
 
 echo.
-echo 后端： http://127.0.0.1:8000  （健康检查 /health）
-echo 前端： http://localhost:5173
-echo.
-echo 两个新窗口请勿关闭；关闭窗口即可停止对应服务。
-echo 首次使用：在页面左下角「设置」中填写 API Key，保存后立即生效（无需重启）。
+echo Backend:  http://127.0.0.1:8000/health
+echo Frontend: http://localhost:5173
+echo Keep both windows open; closing a window stops that service.
+echo Configure the API key in Settings (bottom-left of the page).
 echo.
 pause
 exit /b 0
 
-REM ---------- 错误分支 ----------
+REM ---------- Error branches ----------
 :no_python
 echo.
-echo [错误] 未找到 python 命令，请先安装 Python 3.10+ 并勾选 "Add to PATH"。
-echo        下载地址：https://www.python.org/downloads/
+echo [ERROR] Python 3.10+ not found.
+echo Install from https://www.python.org/downloads/
+echo During installation enable "Add python.exe to PATH".
+pause
+exit /b 1
+
+:no_node
+echo.
+echo [ERROR] Node.js / npm not found.
+echo Install the LTS version from https://nodejs.org/
+pause
+exit /b 1
+
+:venv_failed
+echo.
+echo [ERROR] Failed to create backend\.venv
 pause
 exit /b 1
 
 :pip_failed
 echo.
-echo [错误] 后端依赖安装失败，请检查网络后重试：
-echo        backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+echo [ERROR] Failed to install backend dependencies. Check network and retry:
+echo   backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
 pause
 exit /b 1
 
 :npm_failed
 echo.
-echo [错误] 前端依赖安装失败，请检查 Node.js 与网络后重试：
-echo        npm install --prefix frontend
-echo        Node.js 下载：https://nodejs.org/
+echo [ERROR] Failed to install frontend dependencies. Check Node.js and network:
+echo   cd frontend
+echo   npm install
 pause
 exit /b 1

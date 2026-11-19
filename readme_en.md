@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.3.6** | [中文说明](readme.md)
+> Current version: **0.3.7** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -39,7 +39,7 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 
 ### One-click start (recommended)
 
-**Windows**: double-click `start.bat` in the repository root.
+**Windows**: double-click `start.bat` in the repository root. On first run it creates `backend/.venv`, installs backend/frontend dependencies, and prepares `backend/.env`; all messages are plain ASCII English so different system code pages cannot garble them.
 
 **macOS**: run this in the repository root:
 
@@ -50,10 +50,10 @@ bash start.sh
 
 Both launchers:
 
-1. Create `backend/.venv` and install backend dependencies if missing;
-2. Run `npm install` if `frontend/node_modules` is missing;
+1. Create or reuse `backend/.venv`, installing and verifying backend dependencies;
+2. Run `npm install` to align frontend dependencies;
 3. Copy `.env.example` to `backend/.env` if the file does not exist;
-4. Start backend and frontend, wait until ready, and open the browser. The macOS launcher writes logs to `.runtime/`, and `Ctrl+C` stops both services.
+4. Start the backend first and wait for `/health`, then start the frontend and open the browser. The macOS launcher writes logs to `.runtime/`, and `Ctrl+C` stops both services.
 
 > API configuration is not part of the startup script. On first use, click the gear at the bottom-left of the page and fill in your API key — saving applies immediately.
 
@@ -196,6 +196,13 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.3.7 — 2026-11-19
+- Rewrote the Windows launcher `start.bat`: all messages are now plain ASCII English, eliminating garbled Chinese output and broken commands caused by different Windows code pages.
+- Stronger one-click setup: the first run creates the backend venv, installs backend/frontend dependencies, and prepares `.env`; every run verifies dependencies.
+- Startup order: the backend starts first and waits for `/health`, then the frontend starts, reducing Vite proxy connection-refused errors.
+- Clear installation hints when Python or Node.js is missing.
+- Bumped the version to 0.3.7.
 
 ### 0.3.6 — 2026-11-18
 - Fixed: holding Space and scrolling inside `.nowheel` areas such as “My prompt” could not zoom the canvas; Space now takes priority for zooming, while normal scrolling keeps the area's native behavior.

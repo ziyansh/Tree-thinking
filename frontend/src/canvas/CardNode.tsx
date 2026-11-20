@@ -27,7 +27,7 @@ import { useEscapeHandler } from '../lib/escapeStack'
 import { useSpacePressed } from '../lib/spaceKey'
 import { bumpUiLayer } from '../lib/uiLayers'
 import { AttachmentBar } from './AttachmentBar'
-import { AttachmentChips, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
+import { AttachmentChips, ArkCapabilityWarning, PdfPageWarning, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
 import { WebSearchToggle } from './WebSearchToggle'
 import { ThinkingToggle } from './ThinkingToggle'
 import { PromptDrawer } from './PromptDrawer'
@@ -186,6 +186,9 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const dragDriftDistance = useGraphStore((state) => state.preferences.dragDriftDistance)
   // 滚轮逻辑：悬停卡片时滚动内容或缩放画布；按住空格时始终让滚轮缩放画布
   const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
+  // 火山方舟能力提示：当前模型与账号可见模型列表
+  const arkModel = useGraphStore((state) => state.arkModel)
+  const arkModels = useGraphStore((state) => state.arkModels)
   const spacePressed = useSpacePressed()
   const wheelScrollClass = wheelMode === 'scroll-card' && !spacePressed ? 'nowheel' : ''
   // 连线拖拽状态：从笔记端出发时回答端连接点可连接
@@ -682,6 +685,12 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                 }}
               />
               <ThinkingToggle />
+              <PdfPageWarning items={attachments.items} />
+              <ArkCapabilityWarning
+                items={attachments.items}
+                model={arkModel}
+                models={arkModels}
+              />
               <WebSearchToggle />
             </div>
             <button

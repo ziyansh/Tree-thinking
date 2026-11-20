@@ -44,6 +44,27 @@ class Suggestion(CamelModel):
     text: str
 
 
+class AttachmentDTO(CamelModel):
+    """附件元数据 DTO：上传接口返回，字段输出为 camelCase。"""
+
+    id: str
+    name: str
+    mime: str = ""
+    size: int = 0
+    # 附件类型：image / text / pdf / video / audio / other
+    kind: str
+    ext: str = ""
+    url: str = ""
+    # PDF 页数：非 PDF 或解析失败为 null
+    page_count: int | None = None
+    # 解析该附件的服务商：ark / deepseek；未解析为 null
+    provider: Literal["ark", "deepseek"] | None = None
+    # 服务商侧的 fileId（解析成功时返回）
+    file_id: str | None = None
+    # 是否已解析出 fileId
+    parsed: bool = False
+
+
 class ProjectOut(CamelModel):
     """画布详情（含创建/更新时间）。"""
 
@@ -140,8 +161,8 @@ class NodeOut(CamelModel):
     def _null_web_tool_used(cls, value: Any) -> Any:
         """旧库补列后历史行 web_tool_used 为 NULL，按 False 处理。"""
         return bool(value) if value is not None else False
-    # 节点附件元数据（上传接口返回的结构）
-    attachments: list[dict] = []
+    # 节点附件元数据（上传接口返回的结构，pageCount / provider 按 camelCase 输出）
+    attachments: list[AttachmentDTO] = []
     suggestions_consumed: bool = False
     # 是否固定（元问题根节点默认固定）
     pinned: bool = False
@@ -347,6 +368,10 @@ class SettingsPatch(CamelModel):
     openai_organization: str | None = None
     openai_project: str | None = None
     openai_temperature_enabled: bool | None = None
+    # 火山方舟独立配置：Key 留空表示保持原值
+    ark_api_key: str | None = None
+    ark_base_url: str | None = None
+    ark_model: str | None = None
     # 以下数值在服务层夹取到合法范围，不返回 422
     openai_temperature: float | None = None
     openai_max_tokens: int | None = None
@@ -408,7 +433,7 @@ class SettingsPatch(CamelModel):
             raise ValueError("连线颜色需为 #rrggbb 形式")
         return text
 
-    @field_validator("base_url", "openai_base_url")
+    @field_validator("base_url", "openai_base_url", "ark_base_url")
     @classmethod
     def _check_base_url(cls, value: str | None) -> str | None:
         """接口地址必须是 http/https，空串表示恢复环境变量默认值。"""
@@ -419,7 +444,7 @@ class SettingsPatch(CamelModel):
             raise ValueError("接口地址需以 http:// 或 https:// 开头")
         return text
 
-    @field_validator("model", "openai_model")
+    @field_validator("model", "openai_model", "ark_model")
     @classmethod
     def _check_model(cls, value: str | None) -> str | None:
         """去掉首尾空白；空串表示恢复环境变量默认值。"""

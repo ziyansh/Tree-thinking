@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import type { Node } from '@xyflow/react'
 import { ApiError, api } from '../api/client'
+import { MOCK_ARK_MODELS } from '../api/mock'
 import { streamAnswer } from '../api/sse'
 import type {
+  ArkModelInfo,
   ExportFile,
   NodeDTO,
   NoteLinkDTO,
@@ -327,6 +329,11 @@ interface GraphState {
   cardSize: { width: number; height: number }
   /** 个人偏好设置（外观、画布交互与保存参数），全局共用 */
   preferences: Preferences
+  /** 当前火山方舟模型名，能力提示据此判断模态支持 */
+  arkModel: string
+  /** 火山方舟账号可见的模型列表；为空时设置页使用内置候选 */
+  arkModels: ArkModelInfo[]
+  arkModelsLoading: boolean
   /** 底部轻提示文案，2 秒后自动清空 */
   toast: string | null
   /** 新建分支卡片后的一次性检测信号：交给画布判断落点是否遮挡其它卡片的提问区 */
@@ -413,6 +420,8 @@ interface GraphState {
   setViewport: (viewport: Viewport) => Promise<void>
   /** 读取个人偏好设置（失败只告警，不阻塞画布），并同步卡片尺寸 */
   loadPreferences: () => Promise<void>
+  /** 拉取火山方舟模型列表；失败时静默回落到内置列表，不弹出错误 */
+  loadArkModels: () => Promise<void>
   /** 乐观更新个人偏好并持久化；失败回滚并抛出，成功返回后端最新设置 */
   updatePreferences: (patch: SettingsPatch) => Promise<SettingsDTO | null>
   /** 仅更新本地尺寸，用于拖拽实时预览 */
@@ -491,6 +500,9 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     ghostDrafts: {},
     cardSize: { ...DEFAULT_CARD_SIZE },
     preferences: { ...DEFAULT_PREFERENCES },
+    arkModel: '',
+    arkModels: [],
+    arkModelsLoading: false,
     toast: null,
     layoutCheckNodeId: null,
 
@@ -1651,10 +1663,29 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       try {
         const settings = await api.getSettings()
         const preferences = pickPreferences(settings)
-        set(syncPreferences(preferences))
+        set({ ...syncPreferences(preferences), arkModel: settings.arkModel })
         applyTheme(preferences)
+        // 使用火山方舟时提前拉取模型列表，失败由 loadArkModels 内部静默兜底
+        if (preferences.provider === 'ark') void get().loadArkModels()
       } catch (err) {
         console.warn('读取个人设置失败', err)
+      }
+    },
+
+    loadArkModels: async () => {
+      const { arkModels, arkModelsLoading } = get()
+      // 已有数据或正在请求时直接返回，避免设置页反复打开触发重复请求
+      if (arkModelsLoading || arkModels.length > 0) return
+      set({ arkModelsLoading: true })
+      try {
+        const models = await api.listArkModels()
+        set({ arkModels: models.length > 0 ? models : MOCK_ARK_MODELS })
+      } catch (err) {
+        // 未配置 Key / 上游失败时回落到内置列表，不阻塞手动输入
+        console.warn('读取火山方舟模型列表失败，使用内置列表', err)
+        set({ arkModels: MOCK_ARK_MODELS })
+      } finally {
+        set({ arkModelsLoading: false })
       }
     },
 
@@ -1681,7 +1712,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       try {
         const settings = await api.updateSettings(effectivePatch)
         const preferences = pickPreferences(settings)
-        set(syncPreferences(preferences))
+        set({ ...syncPreferences(preferences), arkModel: settings.arkModel })
         applyTheme(preferences)
         return settings
       } catch (err) {

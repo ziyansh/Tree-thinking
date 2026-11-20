@@ -1785,8 +1785,11 @@ function CanvasInner() {
     return () => window.cancelAnimationFrame(frame)
   }, [layoutCheckNodeId, handleAutoLayout])
 
-  // 联网搜索仅 DeepSeek 服务商支持；失败时 store 会回滚，这里只告警
-  const webSearchDisabled = preferences.provider !== 'deepseek'
+  // 联网搜索支持 DeepSeek 与火山方舟；OpenAI 兼容服务商禁用
+  const webSearchDisabled =
+    preferences.provider !== 'deepseek' && preferences.provider !== 'ark'
+  // 搜索方式弹窗仅 DeepSeek 展示：火山方舟固定智能搜索，悬停不显示面板
+  const webSearchPanelEnabled = preferences.provider === 'deepseek'
   // 搜索方式弹窗：悬停按钮或弹窗时显示，移出后隐藏
   const [webSearchPanelOpen, setWebSearchPanelOpen] = useState(false)
   const forcedSearch = preferences.webSearchMode === 'forced'
@@ -1808,8 +1811,9 @@ function CanvasInner() {
     }
   }, [preferences.webSearchEnabled, updatePreferences, webSearchDisabled])
 
-  // 思考模式同样仅 DeepSeek 支持，与卡片、设置里的开关共用同一字段
-  const thinkingDisabled = preferences.provider !== 'deepseek'
+  // 思考模式支持 DeepSeek 与火山方舟，与卡片、设置里的开关共用同一字段
+  const thinkingDisabled =
+    preferences.provider !== 'deepseek' && preferences.provider !== 'ark'
   const toggleThinking = useCallback(async () => {
     if (thinkingDisabled) return
     try {
@@ -1991,7 +1995,7 @@ function CanvasInner() {
             </button>
             <button
               type="button"
-              title={thinkingDisabled ? '仅 DeepSeek 服务商支持思考模式' : '深度思考'}
+              title={thinkingDisabled ? '仅 DeepSeek 与火山方舟支持思考模式' : '深度思考'}
               aria-disabled={thinkingDisabled}
               aria-pressed={preferences.thinkingEnabled}
               onClick={() => void toggleThinking()}
@@ -2009,12 +2013,20 @@ function CanvasInner() {
             </button>
             <div
               className="relative"
-              onMouseEnter={() => setWebSearchPanelOpen(true)}
+              onMouseEnter={() => {
+                if (webSearchPanelEnabled) setWebSearchPanelOpen(true)
+              }}
               onMouseLeave={() => setWebSearchPanelOpen(false)}
             >
               <button
                 type="button"
-                title={webSearchDisabled ? '仅 DeepSeek 服务商支持联网搜索' : '联网搜索'}
+                title={
+                  webSearchDisabled
+                    ? 'OpenAI 兼容服务商不支持联网搜索'
+                    : webSearchPanelEnabled
+                      ? '联网搜索'
+                      : '联网搜索（火山方舟固定智能搜索）'
+                }
                 aria-disabled={webSearchDisabled}
                 onClick={() => void toggleWebSearch()}
                 className={[
@@ -2030,8 +2042,8 @@ function CanvasInner() {
                 联网搜索
               </button>
 
-              {/* 悬停弹窗：外层留出 8px 内边距，鼠标从按钮移入弹窗时不闪烁 */}
-              {webSearchPanelOpen && (
+              {/* 悬停弹窗：仅 DeepSeek 展示，外层留出 8px 内边距，鼠标从按钮移入弹窗时不闪烁 */}
+              {webSearchPanelOpen && webSearchPanelEnabled && (
                 <div className="absolute left-0 top-full z-30 pt-2">
                   <div className="glass-surface panel-pop w-[240px] rounded-lg border border-subtle p-3 shadow-lg">
                     <p className="mb-2 text-[12px] font-medium text-ink">搜索方式</p>

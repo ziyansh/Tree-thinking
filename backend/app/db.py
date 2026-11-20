@@ -69,6 +69,10 @@ _EXTRA_COLUMNS = {
         "openai_model": "VARCHAR(120)",
         "openai_organization": "VARCHAR(120)",
         "openai_project": "VARCHAR(120)",
+        # 火山方舟独立配置（旧库补列）
+        "ark_api_key": "TEXT",
+        "ark_base_url": "VARCHAR(500)",
+        "ark_model": "VARCHAR(120)",
         "openai_temperature_enabled": "BOOLEAN",
         "openai_temperature": "FLOAT",
         "openai_max_tokens": "INTEGER",
@@ -111,6 +115,10 @@ _EXTRA_COLUMNS = {
         "search_limit": "INTEGER",
     },
     "user_settings": {
+        # 火山方舟独立配置（旧库补列）
+        "ark_api_key": "TEXT",
+        "ark_base_url": "VARCHAR(500)",
+        "ark_model": "VARCHAR(120)",
         # server 模式每用户设置：联网搜索模式（旧库补列）
         "web_search_mode": "VARCHAR(16)",
         # 指针设备（旧库补列）

@@ -21,8 +21,8 @@ async def upload_attachment(
 ) -> dict:
     """上传单个附件，返回元数据与访问地址。
 
-    文档类附件会按当前运行时设置尝试调用 DeepSeek Files API 解析，
-    解析失败只记日志，不影响附件保存。
+    PDF 会解析页数；ark 服务商上传图片 / 视频 / 音频 / PDF 到 Files API，
+    DeepSeek 则对文档走 OCR 解析；任何解析失败都只记日志，不影响附件保存。
     """
     runtime = runtime_settings.effective(db, user)
     return await attachments.save_upload(file, user, runtime)

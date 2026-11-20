@@ -1,12 +1,16 @@
-"""模型客户端：DeepSeek 与 OpenAI 均按 OpenAI 兼容协议调用。
+"""模型客户端：DeepSeek、火山方舟（ark）与 OpenAI 均按 OpenAI 兼容协议调用。
 
 Key 与模型名只来自后端（数据库「设置」优先，其次 backend/.env），前端不参与。
 请求参数按服务商分流：DeepSeek 使用 thinking 专有参数，OpenAI 使用
 temperature / max_completion_tokens / reasoning_effort / timeout。
+火山方舟的基础对话走 Chat Completions（thinking 扩展字段），
+联网搜索走 Responses API 的 web_search 工具。
 """
 
+import json
 from typing import AsyncIterator
 
+import httpx
 from openai import AsyncOpenAI
 
 from app import config
@@ -63,6 +67,17 @@ def _resolve(runtime: dict | None) -> dict:
             "timeout_seconds": int(values.get("openai_timeout_seconds", 60) or 60),
         }
 
+    if provider == "ark":
+        return {
+            "provider": "ark",
+            "api_key": (values.get("api_key") or config.ARK_API_KEY or "").strip(),
+            "base_url": (values.get("base_url") or config.ARK_BASE_URL).strip(),
+            "model": (values.get("model") or config.ARK_MODEL).strip(),
+            "thinking_enabled": bool(
+                values.get("thinking_enabled", config.THINKING_ENABLED)
+            ),
+        }
+
     return {
         "provider": "deepseek",
         "api_key": (values.get("api_key") or config.DEEPSEEK_API_KEY or "").strip(),
@@ -90,6 +105,17 @@ def _request_params(
         if options["reasoning_effort"] != "default":
             params["reasoning_effort"] = options["reasoning_effort"]
         return params
+
+    if options["provider"] == "ark":
+        # 火山方舟：thinking 是顶层扩展字段，用 extra_body 透传；
+        # 推理强度不传，联网工具由 Responses API 分支单独处理。
+        return {
+            "extra_body": {
+                "thinking": {
+                    "type": "enabled" if options["thinking_enabled"] else "disabled"
+                }
+            }
+        }
 
     # DeepSeek：思考模式默认开启，关闭时必须显式传 disabled，否则模型仍会思考
     params = {}
@@ -160,20 +186,211 @@ def _sources_from_annotations(raw) -> list[dict]:
     return sources
 
 
+def _ark_source(item: dict) -> dict:
+    """火山方舟来源归一化：publish_time 映射为统一的日期字段。"""
+    data = dict(item)
+    if not data.get("published_at") and data.get("publish_time"):
+        data["published_at"] = data["publish_time"]
+    return normalize_tool_source(data)
+
+
+def _ark_content_text(content) -> str:
+    """把消息 content 压平成纯文本；附件内容块由附件扩展另行处理。"""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        ]
+        return "\n".join(parts)
+    return str(content or "")
+
+
+def _ark_user_content(content) -> list[dict]:
+    """把 user 消息内容转成 Responses API 内容块：文本 + 已上传的 PDF / 图片。
+
+    联网路径的附件支持 PDF（input_file）与图片（input_image）；
+    视频 / 音频在 Responses 的字段尚未确认，暂时跳过。
+    """
+    if isinstance(content, str):
+        return [{"type": "input_text", "text": content}]
+    parts: list[dict] = []
+    texts: list[str] = []
+    for part in content if isinstance(content, list) else []:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            texts.append(str(part.get("text") or ""))
+        elif part.get("type") == "file":
+            file = part.get("file") if isinstance(part.get("file"), dict) else {}
+            file_id = file.get("file_id")
+            if file_id:
+                parts.append({"type": "input_file", "file_id": str(file_id)})
+        elif part.get("type") == "image_url":
+            image = part.get("image_url") if isinstance(part.get("image_url"), dict) else {}
+            file_id = image.get("file_id")
+            if file_id:
+                parts.append({"type": "input_image", "file_id": str(file_id)})
+    text = "\n".join(texts)
+    # 没有附件时保留空文本块，保证消息结构完整
+    if text or not parts:
+        parts.append({"type": "input_text", "text": text})
+    return parts
+
+
+def _ark_input(messages: list[dict]) -> tuple[str, list[dict]]:
+    """把 Chat Completions 的 messages 转成 Responses API 的 instructions + input。
+
+    system 消息合并为 instructions，user / assistant 转为 input 项；
+    user 消息中的 PDF 附件转成 input_file，其它附件类型跳过。
+    """
+    instructions: list[str] = []
+    items: list[dict] = []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        role = message.get("role")
+        text = _ark_content_text(message.get("content"))
+        if role == "system":
+            if text:
+                instructions.append(text)
+            continue
+        if role == "assistant":
+            items.append(
+                {"role": "assistant", "content": [{"type": "output_text", "text": text}]}
+            )
+        else:
+            items.append(
+                {"role": "user", "content": _ark_user_content(message.get("content"))}
+            )
+    return "\n\n".join(instructions), items
+
+
+async def _ark_web_search_stream(
+    messages: list[dict], options: dict
+) -> AsyncIterator[tuple[str, object]]:
+    """火山方舟联网搜索：走 Responses API 的 web_search 工具并解析 SSE。
+
+    产出与 stream_chat 一致的事件：delta / reasoning / sources。
+    来源只用于前端「来源」抽屉，不生成正文 [n] 角标。
+    """
+    instructions, input_items = _ark_input(messages)
+    payload: dict = {
+        "model": options["model"],
+        "input": input_items,
+        "stream": True,
+        "tools": [{"type": "web_search", "sources": ["doubao"]}],
+        "thinking": {
+            "type": "enabled" if options["thinking_enabled"] else "disabled"
+        },
+    }
+    if instructions:
+        payload["instructions"] = instructions
+
+    base = (options["base_url"] or "").rstrip("/")
+    url = f"{base}/responses"
+    headers = {
+        "Authorization": f"Bearer {options.get('api_key') or ''}",
+        "Content-Type": "application/json",
+    }
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        async with client.stream(
+            "POST", url, json=payload, headers=headers
+        ) as response:
+            if response.status_code != 200:
+                body = await response.aread()
+                detail = body.decode("utf-8", errors="ignore")[:200]
+                raise LLMError(
+                    f"火山方舟联网搜索请求失败（{response.status_code}）：{detail}"
+                )
+
+            event_name = ""
+            async for line in response.aiter_lines():
+                if line.startswith("event:"):
+                    event_name = line[len("event:"):].strip()
+                    continue
+                if not line.startswith("data:"):
+                    continue
+                raw = line[len("data:"):].strip()
+                if not raw or raw == "[DONE]":
+                    continue
+                try:
+                    event = json.loads(raw)
+                except ValueError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+
+                kind = event.get("type") or event_name
+                if kind == "response.output_text.delta":
+                    text = event.get("delta")
+                    if text:
+                        yield "delta", str(text)
+                elif kind in (
+                    "response.reasoning_text.delta",
+                    "response.reasoning_summary_text.delta",
+                ):
+                    text = event.get("delta")
+                    if text:
+                        yield "reasoning", str(text)
+                elif kind == "response.output_text.annotation.added":
+                    annotation = event.get("annotation")
+                    if isinstance(annotation, dict):
+                        source = _ark_source(annotation)
+                        if source.get("url"):
+                            yield "sources", [source]
+                elif kind == "response.web_search_call.completed":
+                    found = _ark_sources_from_event(event)
+                    if found:
+                        yield "sources", found
+                elif kind == "response.completed":
+                    return
+                elif kind in ("error", "response.failed"):
+                    error = event.get("error")
+                    detail = ""
+                    if isinstance(error, dict):
+                        detail = str(error.get("message") or "")
+                    detail = detail or str(event.get("message") or "")
+                    raise LLMError(f"火山方舟联网搜索失败：{detail or '未知错误'}")
+
+
+def _ark_sources_from_event(event: dict) -> list[dict]:
+    """从 web_search_call.completed 事件里收集来源（兼容 results / sources）。"""
+    raw = event.get("results") or event.get("sources")
+    if not isinstance(raw, list):
+        call = event.get("web_search_call")
+        if isinstance(call, dict):
+            raw = call.get("results") or call.get("sources")
+    if not isinstance(raw, list):
+        return []
+    found = [_ark_source(item) for item in raw if isinstance(item, dict)]
+    return [item for item in found if item.get("url")]
+
+
 async def stream_chat(
     messages: list[dict],
     runtime: dict | None = None,
     enable_title: bool = False,
     tools: list[dict] | None = None,
+    web_search: bool = False,
 ) -> AsyncIterator[tuple[str, object]]:
     """流式请求模型，逐段产出增量。
 
     常规产出 ("reasoning", 文本) 与 ("delta", 文本)；
     DeepSeek 扩展字段另外产出 ("title", 标题)、("sources", 来源列表)、
     ("annotations", 引用列表) 与 ("tool_use", "")（出现过服务端工具调用，用于禁止继续生成）。
+    火山方舟在 web_search=True 时走 Responses API，联网来源以 ("sources", 列表) 产出。
     """
     options = _resolve(runtime)
     try:
+        if options["provider"] == "ark" and web_search:
+            async for item in _ark_web_search_stream(messages, options):
+                yield item
+            return
+
         stream = await _get_client(options).chat.completions.create(
             model=options["model"],
             messages=messages,

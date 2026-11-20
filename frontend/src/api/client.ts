@@ -2,6 +2,8 @@ import { isMock, mockApi } from './mock'
 import { streamContinue } from './sse'
 import type { StreamHandlers } from './sse'
 import type {
+  ArkModelInfo,
+  ArkModelsResponse,
   AttachmentDTO,
   AuthSession,
   AuthUser,
@@ -193,6 +195,8 @@ export interface ApiClient {
   createBranch(nodeId: string): Promise<NodeDTO>
   getSettings(): Promise<SettingsDTO>
   updateSettings(patch: SettingsPatch): Promise<SettingsDTO>
+  /** 火山方舟账号可见的模型列表（需要已保存 API Key） */
+  listArkModels(): Promise<ArkModelInfo[]>
 }
 
 const realApi: ApiClient = {
@@ -323,6 +327,12 @@ const realApi: ApiClient = {
 
   updateSettings: (patch) =>
     request<SettingsDTO>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+
+  // 后端代理上游 Models 接口，未配置 Key 返回 400，上游失败返回 502
+  listArkModels: async () => {
+    const body = await request<ArkModelsResponse>('/ark/models')
+    return body.models
+  },
 }
 
 /** VITE_MOCK=1 时切到本地内存假数据，接口形状与真实后端一致 */

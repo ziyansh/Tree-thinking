@@ -39,7 +39,7 @@ SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 CONTINUE_PROMPT = "请从中断处继续输出，不要重复已有内容，不要重新开头。"
 
 # 未配置 Key 时的提示：带上当前服务商名，同时作为节点错误信息落库
-PROVIDER_LABELS = {"deepseek": "DeepSeek", "openai": "OpenAI"}
+PROVIDER_LABELS = {"deepseek": "DeepSeek", "ark": "火山方舟", "openai": "OpenAI"}
 
 # 新画布的默认名：仍是该名字时才允许会话标题自动改名
 DEFAULT_PROJECT_NAME = "新画布"
@@ -344,15 +344,17 @@ async def continue_answer(
     db.commit()
     db.refresh(node)
 
-    # 上下文快照：路径为「根 → 当前节点」，附件按节点注入
+    runtime = runtime_settings.effective(db, user)
+    # 上下文快照：路径为「根 → 当前节点」，附件按节点与当前服务商注入
     messages = build_messages(
         get_path(db, node),
-        attachments_for=lambda item: attachments.build_message_parts(item),
+        attachments_for=lambda item: attachments.build_message_parts(
+            item, runtime["provider"]
+        ),
     )
     # 已生成的内容作为 assistant 消息回传，再要求从中断处续写
     messages.append({"role": "assistant", "content": existing_answer})
     messages.append({"role": "user", "content": CONTINUE_PROMPT})
-    runtime = runtime_settings.effective(db, user)
     # 生成器内不能复用请求级会话，先把已有思考过程取出来
     existing_reasoning = node.reasoning or ""
 
@@ -413,11 +415,16 @@ async def answer_node(
     if not question:
         raise HTTPException(status_code=400, detail="该节点还没有问题，请先输入问题后再请求回答")
 
+    # 当前生效的模型设置（页面「设置」优先，其次 .env）；保存后立即生效
+    runtime = runtime_settings.effective(db, user)
+
     # 会话标题：仅根卡片首次回答、画布仍是默认名时开启（连带自动命名画布）
+    # 会话标题是 DeepSeek 专有能力，其它服务商不发送
     project = db.get(Project, node.project_id)
     project_id = node.project_id
     enable_title = (
-        node.parent_id is None
+        runtime["provider"] == "deepseek"
+        and node.parent_id is None
         and node.node_type == "chat"
         and not (node.answer or "").strip()
         and project is not None
@@ -437,13 +444,13 @@ async def answer_node(
     db.refresh(node)
 
     # 上下文快照：路径为「根 → 当前节点」，之后生成器内不再使用请求级会话
-    # 附件在构建 messages 时按节点注入（文本追加到问题后，图片转内容块）
+    # 附件在构建 messages 时按节点与当前服务商注入（文本追加，其余转内容块）
     messages = build_messages(
         get_path(db, node),
-        attachments_for=lambda item: attachments.build_message_parts(item),
+        attachments_for=lambda item: attachments.build_message_parts(
+            item, runtime["provider"]
+        ),
     )
-    # 当前生效的模型设置（页面「设置」优先，其次 .env）；保存后立即生效
-    runtime = runtime_settings.effective(db, user)
     # 最后一条用户消息中的链接：智能搜索时按编号交给模型阅读
     urls = extract_urls(question)
 
@@ -468,14 +475,12 @@ async def answer_node(
         error: str | None = None
         suggestion_items: list[dict] = []
         tool_used = False
-        # 联网搜索仅在开启开关、DeepSeek 且已配置 Key 时可用：
-        # forced 走预检索注入，smart 交给模型自主搜索（不预检索、不传 count）
-        search_enabled = (
-            bool(runtime.get("web_search_enabled"))
-            and runtime["provider"] == "deepseek"
-            and bool(runtime["api_key"])
-        )
+        # 联网搜索：DeepSeek 支持 smart/forced；火山方舟统一走 Responses 智能搜索
+        web_on = bool(runtime.get("web_search_enabled")) and bool(runtime["api_key"])
+        search_enabled = web_on and runtime["provider"] == "deepseek"
         smart_search = search_enabled and runtime.get("web_search_mode") == "smart"
+        # ark 下 forced 无预检索能力，与 smart 相同，由 llm 内部声明 web_search 工具
+        ark_search = web_on and runtime["provider"] == "ark"
         try:
             if search_enabled and not smart_search:
                 try:
@@ -503,6 +508,9 @@ async def answer_node(
                     extra["tools"] = READ_URL_TOOL
                 else:
                     extra["tools"] = WEB_SEARCH_TOOL
+            if ark_search:
+                # 火山方舟联网：不声明 DeepSeek 工具，由 llm 内部走 Responses API
+                extra["web_search"] = True
 
             async for kind, payload in llm.stream_chat(messages, runtime, **extra):
                 if kind == "reasoning":

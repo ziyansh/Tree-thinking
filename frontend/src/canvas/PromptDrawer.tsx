@@ -5,7 +5,9 @@ import type { NodeDTO } from '../api/types'
 import { useGraphStore } from '../store/graphStore'
 import { useEscapeHandler } from '../lib/escapeStack'
 import {
+  ArkCapabilityWarning,
   AttachmentChips,
+  PdfPageWarning,
   useAttachmentUploads,
   usePasteAttachments,
 } from './AttachmentComposer'
@@ -30,6 +32,9 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
   const updateNodePrompt = useGraphStore((state) => state.updateNodePrompt)
   const removeDescendants = useGraphStore((state) => state.removeDescendants)
   const runAnswer = useGraphStore((state) => state.runAnswer)
+  // 火山方舟能力提示：当前模型与账号可见模型列表
+  const arkModel = useGraphStore((state) => state.arkModel)
+  const arkModels = useGraphStore((state) => state.arkModels)
 
   const prompt = node.prompt || node.question
   const [editing, setEditing] = useState(initialEditing)
@@ -212,6 +217,12 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
                 }}
               />
               <ThinkingToggle />
+              <PdfPageWarning items={attachments.items} />
+              <ArkCapabilityWarning
+                items={attachments.items}
+                model={arkModel}
+                models={arkModels}
+              />
               <WebSearchToggle />
             </div>
             <button

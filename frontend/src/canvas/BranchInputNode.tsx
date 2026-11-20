@@ -7,7 +7,9 @@ import type { BranchInputFlowNode } from './ghosts'
 import { useSpacePressed } from '../lib/spaceKey'
 import { bumpUiLayer, dropUiLayer, getFocusedInput, setFocusedInput } from '../lib/uiLayers'
 import {
+  ArkCapabilityWarning,
   AttachmentChips,
+  PdfPageWarning,
   useAttachmentUploads,
   useFileDropZone,
   usePasteAttachments,
@@ -32,6 +34,9 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   const setBranchDraft = useGraphStore((state) => state.setBranchDraft)
   // 与全局卡片同宽；卡片缩放后输入条实时跟随
   const cardWidth = useGraphStore((state) => state.cardSize.width)
+  // 火山方舟能力提示：当前模型与账号可见模型列表
+  const arkModel = useGraphStore((state) => state.arkModel)
+  const arkModels = useGraphStore((state) => state.arkModels)
   // 按住空格时滚轮交给画布缩放
   const spacePressed = useSpacePressed()
 
@@ -198,6 +203,12 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
             }}
           />
           <ThinkingToggle />
+          <PdfPageWarning items={attachments.items} />
+          <ArkCapabilityWarning
+            items={attachments.items}
+            model={arkModel}
+            models={arkModels}
+          />
           <WebSearchToggle />
         </div>
         <button

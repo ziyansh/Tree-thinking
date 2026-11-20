@@ -90,9 +90,9 @@ MAX_SEARCH_LIMIT = 50
 DEFAULT_WEB_SEARCH_MODE = "smart"
 WEB_SEARCH_MODES = ("smart", "forced")
 
-# 服务商：DeepSeek（默认）/ OpenAI
+# 服务商：DeepSeek（默认）/ 火山方舟 / OpenAI
 DEFAULT_PROVIDER = "deepseek"
-PROVIDERS = ("deepseek", "openai")
+PROVIDERS = ("deepseek", "ark", "openai")
 # OpenAI 默认地址、模型与可选参数
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
@@ -242,9 +242,18 @@ def effective(db: Session, user: User | None = None) -> dict:
     else:
         temperature_enabled = False
 
+    # 火山方舟：独立保存，数据库为空时回落到 .env / 默认值
+    ark_api_key = (_row_secret(row, "ark_api_key") or config.ARK_API_KEY or "").strip()
+    ark_base_url = _effective_text(
+        row.ark_base_url if row else None, config.ARK_BASE_URL
+    )
+    ark_model = _effective_text(row.ark_model if row else None, config.ARK_MODEL)
+
     # 当前生效的一套 Key / 地址 / 模型：由服务商决定
     if provider == "openai":
         api_key, base_url, model = openai_api_key, openai_base_url, openai_model
+    elif provider == "ark":
+        api_key, base_url, model = ark_api_key, ark_base_url, ark_model
     else:
         api_key, base_url, model = deepseek_api_key, deepseek_base_url, deepseek_model
 
@@ -268,6 +277,9 @@ def effective(db: Session, user: User | None = None) -> dict:
         "openai_model": openai_model,
         "openai_organization": openai_organization,
         "openai_project": openai_project,
+        "ark_api_key": ark_api_key,
+        "ark_base_url": ark_base_url,
+        "ark_model": ark_model,
         "openai_temperature_enabled": temperature_enabled,
         "openai_temperature": _effective_float(
             row.openai_temperature if row else None,
@@ -430,6 +442,11 @@ def dto(db: Session, user: User | None = None) -> dict:
         "openaiModel": values["openai_model"],
         "openaiOrganization": values["openai_organization"],
         "openaiProject": values["openai_project"],
+        # 火山方舟独立配置
+        "arkHasKey": bool(values["ark_api_key"]),
+        "arkApiKeyMasked": _mask(values["ark_api_key"]),
+        "arkBaseUrl": values["ark_base_url"],
+        "arkModel": values["ark_model"],
         "openaiTemperatureEnabled": values["openai_temperature_enabled"],
         "openaiTemperature": values["openai_temperature"],
         "openaiMaxTokens": values["openai_max_tokens"],
@@ -509,6 +526,15 @@ def update(db: Session, patch: dict, user: User | None = None) -> dict:
         row.openai_organization = patch["openai_organization"].strip()
     if patch.get("openai_project") is not None:
         row.openai_project = patch["openai_project"].strip()
+
+    # 火山方舟独立配置：Key 留空保持原值
+    ark_api_key = (patch.get("ark_api_key") or "").strip()
+    if ark_api_key:
+        row.ark_api_key = auth.encrypt_secret(ark_api_key)
+    if patch.get("ark_base_url") is not None:
+        row.ark_base_url = patch["ark_base_url"].strip()
+    if patch.get("ark_model") is not None:
+        row.ark_model = patch["ark_model"].strip()
     if patch.get("openai_temperature_enabled") is not None:
         row.openai_temperature_enabled = bool(patch["openai_temperature_enabled"])
     if patch.get("openai_temperature") is not None:
@@ -674,7 +700,7 @@ def update(db: Session, patch: dict, user: User | None = None) -> dict:
         )
 
     # 旧明文 Key 在下一次保存时自动转成密文
-    for name in ("api_key", "openai_api_key"):
+    for name in ("api_key", "openai_api_key", "ark_api_key"):
         value = getattr(row, name)
         if value and not value.startswith(auth.ENC_PREFIX):
             setattr(row, name, auth.encrypt_secret(value))

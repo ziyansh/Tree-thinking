@@ -206,6 +206,12 @@ Versioning: each conversation iteration bumps one minor version (0.1.x) unless a
 - Stronger one-click setup: the first run creates the backend venv, installs backend/frontend dependencies, and prepares `.env`; every run verifies dependencies.
 - Startup order: the backend starts first and waits for `/health`, then the frontend starts, reducing Vite proxy connection-refused errors.
 - Clear installation hints when Python or Node.js is missing.
+- Added: inline citation badges for smart search. The backend converts `annotations` positions into `[n]` badges, matching forced-search display; the converted text is persisted so badges survive reopening the canvas.
+- Improved: the final answer is delivered in the `done` event, so badges appear as soon as streaming finishes.
+- Docs: added a “search results and citation badges” convention so future providers follow the same scheme.
+- Added: question inputs detect links and show numbered frosted-glass chips below the input; hovering the × highlights it, and clicking removes that link from the prompt.
+- Improved: when the current prompt contains links, smart search declares only `deepseek_read_url` to read them and injects a “link 1 / link 2 …” mapping; input-link numbers and citation badge numbers are independent.
+- Docs: added link detection, numbering, and read-link conventions to the development docs.
 - Bumped the version to 0.3.7.
 
 ### 0.3.6 — 2026-11-18

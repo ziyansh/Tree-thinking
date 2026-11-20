@@ -1,6 +1,18 @@
 import { isMock, mockStreamAnswer } from './mock'
 import type { SourceDTO, SuggestionDTO } from './types'
 
+/**
+ * done 事件载荷：智能搜索流式结束时会带上最终正文（已把引用位置转成 [n] 角标），
+ * 旧格式或未产生引用时 answer 缺省；status 缺省时按 done 处理。
+ */
+export interface DonePayload {
+  status?: string
+  /** 最终完整正文（含 [n] 角标），可选 */
+  answer?: string
+  /** 兼容旧格式可能携带的其它字段（例如 token 统计） */
+  [key: string]: unknown
+}
+
 /** 流式回答的回调集合 */
 export interface StreamHandlers {
   onSources?: (list: SourceDTO[]) => void
@@ -9,7 +21,7 @@ export interface StreamHandlers {
   onReasoning?: (text: string) => void
   onDelta?: (text: string) => void
   onSuggestions?: (list: SuggestionDTO[]) => void
-  onDone?: (usage?: unknown) => void
+  onDone?: (payload?: DonePayload) => void
   onError?: (message: string) => void
 }
 
@@ -105,6 +117,22 @@ function extractErrorMessage(data: string): string {
 }
 
 /**
+ * 解析 done 事件：只取 status 与可选的最终正文。
+ * 旧格式（无 answer 或 data 不是对象）保持兼容，answer 为 undefined。
+ */
+function parseDonePayload(data: string): DonePayload {
+  const parsed = parseJson(data)
+  const record =
+    typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : null
+  const payload: DonePayload = {
+    status: typeof record?.status === 'string' ? record.status : 'done',
+  }
+  // 只有字符串才当作最终正文，缺失时不下发该字段
+  if (typeof record?.answer === 'string') payload.answer = record.answer
+  return payload
+}
+
+/**
  * 解析一个完整 SSE 事件块（以空行分隔）。
  * 返回 true 表示流已结束（收到 done 或 error）。
  */
@@ -155,7 +183,8 @@ function dispatchEvent(rawEvent: string, handlers: StreamHandlers): boolean {
       return false
     }
     case 'done':
-      handlers.onDone?.(parseJson(data))
+      // 解析 status 与可选最终正文，交由上层决定是否替换节点内容
+      handlers.onDone?.(parseDonePayload(data))
       return true
     case 'error':
       handlers.onError?.(extractErrorMessage(data))

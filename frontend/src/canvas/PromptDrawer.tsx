@@ -11,6 +11,8 @@ import {
 } from './AttachmentComposer'
 import { ThinkingToggle } from './ThinkingToggle'
 import { WebSearchToggle } from './WebSearchToggle'
+import { UrlChips } from './UrlChips'
+import { removeUrl } from '../lib/urlChips'
 
 interface PromptDrawerProps {
   node: NodeDTO
@@ -173,6 +175,7 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
             }}
             className="selectable-text min-h-[60px] w-full resize-none rounded-md bg-transparent text-[13px] leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
           />
+          <UrlChips text={draft} onRemove={(url) => setDraft(removeUrl(draft, url))} />
           {attachments.items.length > 0 && (
             <AttachmentChips
               items={attachments.items}

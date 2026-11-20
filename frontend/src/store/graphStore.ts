@@ -1257,9 +1257,17 @@ export const useGraphStore = create<GraphState>()((set, get) => {
               pendingAnswer += delta
               scheduleFlush()
             },
-            onDone: () => {
+            onDone: (payload) => {
               flush()
-              patchNode(nodeId, (current) => ({ ...current, status: 'done' }))
+              patchNode(nodeId, (current) => {
+                // 已停止（paused/input）或节点被删除时保留原内容，不覆盖
+                if (current.status !== 'streaming' && current.status !== 'done') return current
+                // 续写结束若下发最终正文（含 [n] 角标），直接替换当前正文
+                const finalAnswer = payload?.answer
+                return finalAnswer && finalAnswer.trim()
+                  ? { ...current, answer: finalAnswer, status: 'done' }
+                  : { ...current, status: 'done' }
+              })
             },
             onError: (error) => {
               flush()
@@ -1503,9 +1511,17 @@ export const useGraphStore = create<GraphState>()((set, get) => {
               flush()
               patchNode(nodeId, (node) => ({ ...node, suggestions }))
             },
-            onDone: () => {
+            onDone: (payload) => {
               flush()
-              patchNode(nodeId, (node) => ({ ...node, status: 'done' }))
+              patchNode(nodeId, (node) => {
+                // 用户已停止（paused/input）或节点已不存在时不再覆盖；节点被删除时 patchNode 本身也不会命中
+                if (node.status !== 'streaming' && node.status !== 'done') return node
+                // 智能搜索结束时用最终正文（含 [n] 角标）替换流式累积文本，无 answer 时保持原内容
+                const finalAnswer = payload?.answer
+                return finalAnswer && finalAnswer.trim()
+                  ? { ...node, answer: finalAnswer, status: 'done' }
+                  : { ...node, status: 'done' }
+              })
               // 首轮回答完成且画布仍是默认名时，尝试让模型自动命名
               const state = get()
               const projectId = state.currentProjectId

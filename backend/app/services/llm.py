@@ -128,14 +128,23 @@ def _extract_sources(raw) -> list[dict]:
 
 
 def _sources_from_steps(steps) -> list[dict]:
-    """从最后 chunk 的 delta.server_tool_calls（按步分组）里收集来源。"""
+    """从最后 chunk 的 delta.server_tool_calls（按步分组）里收集来源。
+
+    搜索结果在 call.sources 中；打开 / 阅读网页时展示信息在 call.page 中，
+    这里一并归一化为来源，保证引用角标能在 sources 里找到对应条目。
+    去重仍交给调用方的 merge_sources。
+    """
     sources: list[dict] = []
     for step in steps if isinstance(steps, list) else []:
         if not isinstance(step, dict):
             continue
         for call in step.get("calls") or []:
-            if isinstance(call, dict):
-                sources.extend(_extract_sources(call.get("sources")))
+            if not isinstance(call, dict):
+                continue
+            sources.extend(_extract_sources(call.get("sources")))
+            page = call.get("page")
+            if isinstance(page, dict):
+                sources.extend(_extract_sources([page]))
     return sources
 
 
@@ -160,8 +169,8 @@ async def stream_chat(
     """流式请求模型，逐段产出增量。
 
     常规产出 ("reasoning", 文本) 与 ("delta", 文本)；
-    DeepSeek 扩展字段另外产出 ("title", 标题)、("sources", 来源列表)
-    与 ("tool_use", "")（出现过服务端工具调用，用于禁止继续生成）。
+    DeepSeek 扩展字段另外产出 ("title", 标题)、("sources", 来源列表)、
+    ("annotations", 引用列表) 与 ("tool_use", "")（出现过服务端工具调用，用于禁止继续生成）。
     """
     options = _resolve(runtime)
     try:
@@ -205,9 +214,14 @@ async def stream_chat(
                 found = _sources_from_steps(steps)
                 if found:
                     yield "sources", found
-            found = _sources_from_annotations(_extra(delta, "annotations"))
-            if found:
-                yield "sources", found
+            # 引用同时用于提取来源与生成正文角标，原始列表一并传出
+            raw_annotations = _extra(delta, "annotations")
+            if isinstance(raw_annotations, list) and raw_annotations:
+                found = _sources_from_annotations(raw_annotations)
+                if found:
+                    yield "sources", found
+                # 由调用方在落库前转成正文 [n] 角标
+                yield "annotations", list(raw_annotations)
         if used_tool:
             yield "tool_use", ""
     except LLMError:

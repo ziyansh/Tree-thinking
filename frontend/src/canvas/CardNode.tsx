@@ -31,6 +31,8 @@ import { AttachmentChips, useAttachmentUploads, usePasteAttachments, useFileDrop
 import { WebSearchToggle } from './WebSearchToggle'
 import { ThinkingToggle } from './ThinkingToggle'
 import { PromptDrawer } from './PromptDrawer'
+import { UrlChips } from './UrlChips'
+import { removeUrl } from '../lib/urlChips'
 import {
   ANSWER_LINK_DOT,
   startNoteLinkDrag,
@@ -655,6 +657,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             className="selectable-text min-h-0 w-full flex-1 resize-none rounded-lg border border-subtle bg-elevated p-2 leading-[1.65] text-body outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent"
             style={{ fontSize: 'var(--card-font-size)' }}
           />
+          <UrlChips text={draft} onRemove={(url) => setDraft(removeUrl(draft, url))} />
           <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
               <button

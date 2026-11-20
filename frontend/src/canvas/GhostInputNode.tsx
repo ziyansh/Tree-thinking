@@ -11,6 +11,8 @@ import { ThinkingToggle } from './ThinkingToggle'
 import { useSpacePressed } from '../lib/spaceKey'
 import { setActiveGhostInput, useActiveGhostInput } from '../lib/ghostInputFocus'
 import { bumpUiLayer, getFocusedInput, setFocusedInput } from '../lib/uiLayers'
+import { UrlChips } from './UrlChips'
+import { removeUrl } from '../lib/urlChips'
 
 /**
  * 自定义方向输入箭头：收起时为单行输入，聚焦后展开为多行输入 + 附件区，
@@ -181,6 +183,10 @@ function GhostInputNodeInner({
               'nodrag selectable-text min-h-[60px] w-full resize-none bg-transparent text-[13px] leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
               spacePressed ? '' : 'nowheel',
             ].join(' ')}
+          />
+          <UrlChips
+            text={draft}
+            onRemove={(url) => setGhostDraft(data.parentId, removeUrl(draft, url))}
           />
           {attachments.items.length > 0 && (
             <div className="mt-1">

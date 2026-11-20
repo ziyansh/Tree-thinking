@@ -17,6 +17,7 @@ from app.services import attachments, llm, naming, suggestions
 from app.services import search as search_service
 from app.services import settings as runtime_settings
 from app.services.auth import require_user
+from app.services.citations import apply_citations
 from app.services.context import build_messages, get_path
 from app.services.graph import (
     NOTE_MIN_HEIGHT,
@@ -27,6 +28,7 @@ from app.services.graph import (
     node_to_dto,
 )
 from app.services.suggestions import used_suggestion_ids
+from app.services.urls import build_url_prompt, extract_urls
 
 router = APIRouter(prefix="/api/nodes", tags=["nodes"])
 
@@ -44,6 +46,9 @@ DEFAULT_PROJECT_NAME = "新画布"
 
 # 智能搜索：在 Chat Completions 顶层声明服务端联网工具（不能用 tool_choice 强制）
 WEB_SEARCH_TOOL = [{"type": "deepseek_web_search"}]
+
+# 用户消息含链接时只声明读取链接工具：与联网搜索同时声明会走深度思考搜索而不读链接
+READ_URL_TOOL = [{"type": "deepseek_read_url"}]
 
 
 def _no_key_message(provider: str) -> str:
@@ -439,6 +444,8 @@ async def answer_node(
     )
     # 当前生效的模型设置（页面「设置」优先，其次 .env）；保存后立即生效
     runtime = runtime_settings.effective(db, user)
+    # 最后一条用户消息中的链接：智能搜索时按编号交给模型阅读
+    urls = extract_urls(question)
 
     if not runtime["api_key"]:
         # 未配置 Key 也返回 200 + SSE，先告知前端具体原因，并把错误态落库
@@ -455,6 +462,7 @@ async def answer_node(
     async def _stream() -> AsyncIterator[str]:
         """只累积文本的异步生成器；结束时用新会话一次性落库。"""
         sources: list[dict] = []
+        annotations: list = []
         answer = ""
         reasoning = ""
         error: str | None = None
@@ -486,7 +494,15 @@ async def answer_node(
             if enable_title:
                 extra["enable_title"] = True
             if smart_search:
-                extra["tools"] = WEB_SEARCH_TOOL
+                if urls:
+                    # 用户消息含链接：只声明读取链接，确保模型阅读链接而不是另行搜索
+                    messages.insert(
+                        len(messages) - 1,
+                        {"role": "system", "content": build_url_prompt(urls)},
+                    )
+                    extra["tools"] = READ_URL_TOOL
+                else:
+                    extra["tools"] = WEB_SEARCH_TOOL
 
             async for kind, payload in llm.stream_chat(messages, runtime, **extra):
                 if kind == "reasoning":
@@ -504,6 +520,10 @@ async def answer_node(
                     # 智能搜索：来源边生成边推送，发送当前累积全量
                     if search_service.merge_sources(sources, payload):
                         yield _sse("sources", {"sources": sources})
+                elif kind == "annotations":
+                    # 智能搜索：引用位置在最后一个 chunk 一次性给出
+                    if isinstance(payload, list):
+                        annotations.extend(payload)
                 elif kind == "tool_use":
                     tool_used = True
             # 回答结束后生成候选方向；任何未预期异常都只记日志，不影响 done
@@ -522,17 +542,24 @@ async def answer_node(
         except Exception as exc:  # 兜底：未预期异常也转成可读中文提示
             error = f"回答过程中发生错误：{exc}"
         finally:
+            # 智能搜索：把 annotations 的引用位置转成正文 [n]，保证重开画布仍有角标
+            final_answer = answer
+            final_sources = sources
+            if smart_search and annotations:
+                final_answer, final_sources = apply_citations(
+                    answer, annotations, sources
+                )
             # 成功、失败或中断都落库已有内容；中断时保留已收到的部分回答
             _persist_answer(
                 node_id,
-                answer,
+                final_answer,
                 reasoning,
                 "error" if error else "done",
                 error,
                 # 失败时保留旧建议，成功时用本次生成的建议覆盖
                 None if error else suggestion_items,
                 # 失败也保留本次已拿到的来源
-                sources,
+                final_sources,
                 # 智能搜索用过工具后禁止继续生成
                 web_tool_used=tool_used,
             )
@@ -542,7 +569,11 @@ async def answer_node(
         else:
             if suggestion_items:
                 yield _sse("suggestions", {"suggestions": suggestion_items})
-            yield _sse("done", {"status": "done"})
+            # 带引用时用最终正文覆盖流式文本，前端立即显示角标
+            if annotations:
+                yield _sse("done", {"status": "done", "answer": final_answer})
+            else:
+                yield _sse("done", {"status": "done"})
 
     return StreamingResponse(
         _stream(), media_type="text/event-stream", headers=SSE_HEADERS

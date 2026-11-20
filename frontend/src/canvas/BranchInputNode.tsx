@@ -14,6 +14,8 @@ import {
 } from './AttachmentComposer'
 import { ThinkingToggle } from './ThinkingToggle'
 import { WebSearchToggle } from './WebSearchToggle'
+import { UrlChips } from './UrlChips'
+import { removeUrl } from '../lib/urlChips'
 
 /** 失焦收起的动画时长，与 theme.css 的 composer-out 保持一致 */
 const CLOSE_ANIM_MS = 160
@@ -161,6 +163,11 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
           'nodrag selectable-text min-h-[60px] w-full resize-none bg-transparent text-[13px] leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
           spacePressed ? '' : 'nowheel',
         ].join(' ')}
+      />
+
+      <UrlChips
+        text={draft}
+        onRemove={(url) => setBranchDraft(data.parentId, removeUrl(draft, url))}
       />
 
       {attachments.items.length > 0 && (

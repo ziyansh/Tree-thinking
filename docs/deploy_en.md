@@ -88,7 +88,7 @@ Variable reference:
 | Variable | Required | Description |
 | --- | --- | --- |
 | `APP_MODE` | Yes | `local` (default) or `server`; `server` enables multi-user accounts and sign-in |
-| `AUTH_SECRET` | Required in `server` | Signing secret for session credentials; use a strong random string. Startup fails when missing |
+| `AUTH_SECRET` | Required in `server` | Signing secret for sessions and encryption of saved model keys; use a strong random string. Startup fails when missing. Changing it invalidates all sessions and makes stored API keys undecryptable, so they must be re-entered in Settings |
 | `AUTH_COOKIE_SECURE` | Recommended `true` | Sends the session cookie over HTTPS only; set `false` only for plain-HTTP local debugging |
 | `DB_PATH` | No | SQLite file path, default `backend/data/app.db`; relative paths resolve against the repository root |
 | `UPLOAD_DIR` | No | Attachment directory, default `backend/data/uploads` |
@@ -175,6 +175,7 @@ server {
         # Streaming (SSE) answers must not be buffered
         proxy_buffering off;
         proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
     }
 
     # Health check
@@ -219,6 +220,14 @@ sudo certbot renew --dry-run
 - Self-service password recovery is not supported yet; a server administrator must handle it.
 - Each account only sees its own canvases, attachments, and settings; data is isolated per account.
 - Model API keys are encrypted at rest in the backend database. The API only returns a masked value (e.g. `sk-••••7890`) and never ships the key to the browser.
+
+### 7.1 Outbound network and data egress
+
+- The server must be allowed to reach `https://api.deepseek.com` over HTTPS; otherwise answers, document parsing, and web search all fail.
+- Document parsing: uploading PDF, DOC/DOCX, or PPT/PPTX sends the file to the DeepSeek Files API. The returned `fileId` is bound to the current API key / DeepSeek account; after changing the key or migrating accounts, old documents may stop working and must be re-uploaded.
+- Smart search and link reading: the question text, search results, and user-provided link content are processed by DeepSeek. Link reading only recognizes URLs in the last user message.
+- If the environment forbids data egress, disable web search in Settings and avoid uploading documents that need parsing; text/image attachments and local canvas data still work.
+- A parsing failure only keeps that document out of the model context; the attachment is still saved. Check backend logs for the reason.
 
 ## 8. Backup and Restore
 
@@ -286,7 +295,8 @@ sudo systemctl status tree-thinking
 
 - `backend/.env` is not tracked, so `git pull` never overwrites it; add any new variables manually.
 - Nginx reads static files from disk, so a browser refresh picks up the new build without reloading Nginx.
-- Schema changes are applied automatically on backend startup; keeping a database backup before upgrading is recommended.
+- Schema changes are applied automatically on backend startup, including the `note_links` table and related columns added in v0.3.x; always back up the database before upgrading.
+- If you use document parsing, old `fileId` values remain valid only while the API key / DeepSeek account is unchanged; re-upload documents after changing the key.
 
 ## 10. Troubleshooting
 
@@ -327,3 +337,13 @@ sudo systemctl restart tree-thinking
 **Attachment upload returns 413**
 
 Increase `client_max_body_size` in Nginx, then `sudo systemctl reload nginx`.
+
+**PDF / Office content is not read by the model**
+
+- Verify the server can reach `api.deepseek.com`, the provider is DeepSeek, and an API key is configured.
+- When parsing fails the attachment is still saved but stays out of context; check backend logs for the parsing error.
+- After changing the API key or account, re-upload attachments that need parsing.
+
+**After changing AUTH_SECRET, model calls report an invalid key or ask for the key again**
+
+- `AUTH_SECRET` also encrypts saved model API keys. After changing it, old ciphertext cannot be decrypted; re-enter the API key in Settings.

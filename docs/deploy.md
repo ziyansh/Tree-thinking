@@ -88,7 +88,7 @@ SUGGESTION_COUNT=3
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
 | `APP_MODE` | 是 | `local`（默认）或 `server`；`server` 开启多用户与登录 |
-| `AUTH_SECRET` | `server` 必填 | 登录凭证签名密钥，使用强随机串；缺失时服务启动失败 |
+| `AUTH_SECRET` | `server` 必填 | 登录凭证签名与模型 Key 加密密钥，使用强随机串；缺失时服务启动失败。变更后所有会话失效，且已保存的模型 API Key 无法解密，需要在页面「设置」中重新填写 |
 | `AUTH_COOKIE_SECURE` | 建议 `true` | 仅通过 HTTPS 下发登录 Cookie；本地 HTTP 调试时可设为 `false` |
 | `DB_PATH` | 否 | SQLite 文件路径，默认 `backend/data/app.db`；相对路径按仓库根目录解析 |
 | `UPLOAD_DIR` | 否 | 附件目录，默认 `backend/data/uploads` |
@@ -175,6 +175,7 @@ server {
         # SSE 流式回答不应被缓冲
         proxy_buffering off;
         proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
     }
 
     # 健康检查
@@ -219,6 +220,14 @@ sudo certbot renew --dry-run
 - 忘记密码暂不支持自助找回，需要通过服务管理员处理。
 - 每个账号只能看到自己的画布、附件与设置，数据按账号隔离。
 - 模型 API Key 加密存储在后端数据库中，接口只返回脱敏值（如 `sk-••••7890`），不会下发到浏览器。
+
+### 7.1 出站网络与数据外发
+
+- 服务器需要允许访问 `https://api.deepseek.com`（HTTPS 出站），否则回答、文件解析与联网搜索都会失败。
+- 文件解析：上传 PDF、DOC/DOCX、PPT/PPTX 时，后端会把文件上传到 DeepSeek Files API 进行解析。`fileId` 与当前 API Key / DeepSeek 账号绑定，更换 Key 或迁移账号后旧文档可能失效，需要重新上传。
+- 智能搜索与读取链接：问题文本、搜索结果、用户提供的链接内容由 DeepSeek 服务端处理。读取链接只识别最后一条用户消息中的 URL。
+- 如果部署环境不允许数据外发，请在页面设置中关闭联网搜索，并避免上传需要解析的文档；普通文本/图片附件与本地画布数据仍可正常使用。
+- 文件解析失败只会让该文档不进入模型上下文，附件本身仍会保存，可在后端日志中查看原因。
 
 ## 8. 数据备份与恢复
 
@@ -286,7 +295,8 @@ sudo systemctl status tree-thinking
 
 - `backend/.env` 不在版本库中，`git pull` 不会覆盖，新增变量请手动补充。
 - 静态文件由 Nginx 直接读取，重新构建后浏览器刷新即可生效，无需重载 Nginx。
-- 数据结构变更由后端启动时自动处理，建议升级前保留一份数据库备份。
+- 数据结构变更由后端启动时自动处理（含 v0.3.x 新增的 `note_links` 表与相关列），升级前务必备份数据库。
+- 如使用文件解析，旧文档的 `fileId` 仍有效的前提是 API Key / DeepSeek 账号未变；更换 Key 后请重新上传需要解析的文档。
 
 ## 10. 常见问题
 
@@ -327,3 +337,13 @@ sudo systemctl restart tree-thinking
 **上传附件返回 413**
 
 调大 Nginx 的 `client_max_body_size` 后 `sudo systemctl reload nginx`。
+
+**PDF / Office 文档内容没有被模型读取**
+
+- 确认服务器可访问 `api.deepseek.com`，服务商为 DeepSeek，且已配置 Key。
+- 文件解析失败时附件仍会保存，但不会进入上下文；请查看后端日志中的解析错误。
+- 更换 API Key / 账号后，旧附件需要重新上传解析。
+
+**更换 AUTH_SECRET 后模型调用提示 Key 无效或需要重新填写**
+
+- `AUTH_SECRET` 同时用于加密保存的模型 API Key；更换后旧密文无法解密，请在页面「设置」中重新填写 API Key。

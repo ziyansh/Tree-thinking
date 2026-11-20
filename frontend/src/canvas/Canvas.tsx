@@ -352,6 +352,36 @@ function CanvasInner() {
   const linkDragRef = useRef<NoteLinkDragSession | null>(null)
   /** 当前 hover 的笔记连接线 id，供 Delete 删除 */
   const hoveredLinkRef = useRef<string | null>(null)
+  /** 滚轮/触控板手势会话：一次连续手势沿用首次判定，避免指针移到卡片上后改变行为 */
+  const wheelSessionRef = useRef<{
+    kind: 'trackpad' | 'mouse'
+    mode: 'pan' | 'native'
+    lastAt: number
+  } | null>(null)
+  /** 触控板运动状态：待消费位移与缩放目标由统一的动画帧循环插值，保证全向平滑 */
+  const wheelMotionRef = useRef<{
+    frame: number | null
+    panX: number
+    panY: number
+    zoomTarget: number | null
+    zoomAnchorX: number
+    zoomAnchorY: number
+    lastPanAt: number
+    lastFrameAt: number
+    velocityX: number
+    velocityY: number
+  }>({
+    frame: null,
+    panX: 0,
+    panY: 0,
+    zoomTarget: null,
+    zoomAnchorX: 0,
+    zoomAnchorY: 0,
+    lastPanAt: 0,
+    lastFrameAt: 0,
+    velocityX: 0,
+    velocityY: 0,
+  })
   /** 连线拖拽结束时间：抑制随后补发的 click 改变选中态 */
   const lastLinkDragEndRef = useRef(0)
 
@@ -723,71 +753,227 @@ function CanvasInner() {
   )
 
   /**
-   * macOS / Windows 触控板：双指滑动平移画布，捏合（浏览器会带 ctrlKey）交给 React Flow 缩放。
-   * 鼠标滚轮保持「滚轮逻辑」设置中的缩放行为，因此这里只拦截步长细小的触控板事件。
+   * 触控板与鼠标滚轮分流：
+   * - 双指捏合：浏览器会为捏合事件附带 ctrlKey / metaKey，始终缩放画布，并以指针为锚点；
+   * - 双指滑动：平移画布；按住空格时与「空格 + 左键拖动」一致，可滚动区域也一律平移；
+   * - 手势会话：一次连续滑动只判定一次类型与目标，指针中途经过卡片、猜你想问也不会
+   *   突然变成缩放或滚动；首条事件被误判为鼠标滚轮时，用后续高频事件自动纠正；
+   * - 运动插值：平移与缩放都向目标按帧逼近，中途变向下一帧立即跟随；松手后是否滑行
+   *   由「设置 → 显示 → 画布拖动惯性」决定；
+   * - 可滚动区域：手势始于卡片正文等 `.nowheel` 区域时保留纵向原生滚动，横向滑动只吞掉事件，
+   *   避免浏览器把它识别成前进 / 后退手势；
+   * - 鼠标滚轮：未按空格时交给 React Flow / 原生滚动按「滚轮逻辑」处理，按住空格时仍缩放。
    * React 的 wheel 监听是 passive 的无法 preventDefault，改用原生监听 + 捕获阶段。
    */
   useEffect(() => {
     const element = containerRef.current
     if (!element) return
+    /** 运动状态对象：effect 内持有同一引用，清理时不再读取 ref.current */
+    const motion = wheelMotionRef.current
+
+    /** 超过该间隔视为一次新手势 */
+    const SESSION_GAP = 200
+    /** 高频连续事件只可能来自触控板，用于纠正首条事件被误判为鼠标滚轮的情况 */
+    const HIGH_FREQUENCY_GAP = 30
+    /** 平移插值时间常数（毫秒）：越小越跟手，越大越平滑 */
+    const PAN_EASE_MS = 32
+    /** 缩放每帧向目标靠近的比例 */
+    const ZOOM_EASE = 0.35
+    /** 手势结束后的静默时间：超过后才按设置触发惯性滑行 */
+    const RELEASE_IDLE_MS = 90
+
+    /** 鼠标滚轮：行模式，或单轴整刻度（Chrome 通常为 100，部分环境为 120） */
+    const isMouseWheel = (event: WheelEvent) => {
+      if (event.deltaMode !== 0) return true
+      if (Math.abs(event.deltaX) > 0) return false
+      const step = Math.abs(event.deltaY)
+      return step >= 100 && (step % 100 === 0 || step % 120 === 0)
+    }
+
+    function scheduleMotion() {
+      if (motion.frame !== null) return
+      motion.frame = window.requestAnimationFrame(stepMotion)
+    }
+
+    /** 按帧消费待处理位移与缩放目标；剩余部分留到下一帧，保证全向且连续 */
+    function stepMotion(now: number) {
+      motion.frame = null
+      const viewport = getViewport()
+      let x = viewport.x
+      let y = viewport.y
+      let zoom = viewport.zoom
+      let moved = false
+
+      // 平移：按时间常数向目标逼近，方向变化时新位移立即参与下一帧
+      if (motion.panX !== 0 || motion.panY !== 0) {
+        const dt = Math.min(Math.max(now - (motion.lastFrameAt || now), 4), 32)
+        const ease = 1 - Math.exp(-dt / PAN_EASE_MS)
+        let moveX = motion.panX * ease
+        let moveY = motion.panY * ease
+        motion.panX -= moveX
+        motion.panY -= moveY
+        // 尾巴直接吃掉，避免无限逼近
+        if (Math.abs(motion.panX) < 0.25) {
+          moveX += motion.panX
+          motion.panX = 0
+        }
+        if (Math.abs(motion.panY) < 0.25) {
+          moveY += motion.panY
+          motion.panY = 0
+        }
+        x += moveX
+        y += moveY
+        moved = true
+      }
+      motion.lastFrameAt = now
+
+      // 缩放：向目标缩放插值，锚点保持为最近一次捏合位置
+      if (motion.zoomTarget !== null) {
+        const target = motion.zoomTarget
+        const next = zoom + (target - zoom) * ZOOM_EASE
+        const nextZoom = Math.abs(target - next) < 0.0005 ? target : next
+        const ratio = nextZoom / zoom
+        x = motion.zoomAnchorX - (motion.zoomAnchorX - x) * ratio
+        y = motion.zoomAnchorY - (motion.zoomAnchorY - y) * ratio
+        zoom = nextZoom
+        if (nextZoom === target) motion.zoomTarget = null
+        moved = true
+      }
+
+      if (moved) void setViewport({ x, y, zoom }, { duration: 0 })
+
+      // 还有未消费的位移 / 缩放，继续下一帧
+      if (motion.panX !== 0 || motion.panY !== 0 || motion.zoomTarget !== null) {
+        scheduleMotion()
+        return
+      }
+      // 静默窗口内继续等待：避免事件间隙被误判成松手
+      if (motion.lastPanAt > 0 && now - motion.lastPanAt < RELEASE_IDLE_MS) {
+        scheduleMotion()
+        return
+      }
+      // 手势结束：按设置与惯性系数继续滑行（关闭时为空操作）
+      if (motion.lastPanAt > 0) {
+        motion.lastPanAt = 0
+        startInertia(motion.velocityX, motion.velocityY)
+      }
+    }
 
     const handleWheel = (event: WheelEvent) => {
-      // 缩放由 React Flow 在本次事件中完成，下一帧再按当前指针位置重设平移基准，
-      // 保证拖动过程中缩放跟手、不回弹
+      // 缩放由 React Flow 在本次事件中完成，下一帧再按当前指针位置重设平移基准
       const recalibrateLater = () => {
         const pointerX = event.clientX
         const pointerY = event.clientY
         window.requestAnimationFrame(() => recalibratePanBaseline(pointerX, pointerY))
       }
 
-      // 空格按住时滚轮始终缩放画布：先于 .nowheel 放行逻辑处理，
-      // 阻止该区域原生滚动、停止惯性后交给 React Flow 完成缩放
-      if (spacePressed) {
-        event.preventDefault()
-        stopInertia()
-        recalibrateLater()
-        return
-      }
-
-      // 未按空格：可滚动区域（卡片正文、思考过程、参考资料抽屉等）完全交给原生滚动：
-      // 不 preventDefault、不缩放、不平移，滚到边界也不会冒泡成画布缩放
-      const target = event.target as Element | null
-      if (target?.closest('.nowheel')) return
-
-      // 开始滚轮操作即停止正在播放的平移惯性
-      stopInertia()
-
-      // 触控板捏合：ctrlKey 由浏览器自动附带，交给 React Flow 的缩放
+      // 双指捏合：更新缩放目标，由动画帧插值逼近；指针位置作为缩放锚点
       if (event.ctrlKey || event.metaKey) {
+        event.preventDefault()
+        event.stopPropagation()
+        stopInertia()
+        // 捏合结束后重新开始手势会话，避免沿用捏合前的滑动判定
+        wheelSessionRef.current = null
+        // 清掉上一段平移的待处理位移与速度，避免捏合结束后误触发滑行
+        motion.panX = 0
+        motion.panY = 0
+        motion.lastPanAt = 0
+        motion.velocityX = 0
+        motion.velocityY = 0
+        const rect = element.getBoundingClientRect()
+        motion.zoomAnchorX = event.clientX - rect.left
+        motion.zoomAnchorY = event.clientY - rect.top
+        const base = motion.zoomTarget ?? getViewport().zoom
+        // 比 d3-zoom 默认曲线更灵敏，触控板捏合能快速响应
+        const factor = Math.pow(2, -event.deltaY * 0.01)
+        motion.zoomTarget = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, base * factor))
+        scheduleMotion()
+        return
+      }
+
+      const target = event.target as Element | null
+      const overScrollable = !!target?.closest('.nowheel')
+      /** 触控板手势的目标：空格优先平移；否则可滚动区域保留原生滚动 */
+      const trackpadMode = (): 'pan' | 'native' =>
+        spacePressed || !overScrollable ? 'pan' : 'native'
+
+      // 一次连续手势只判定一次：指针中途移到卡片 / 猜你想问上，行为保持不变
+      const now = performance.now()
+      const previous = wheelSessionRef.current
+      const gap = previous ? now - previous.lastAt : Number.POSITIVE_INFINITY
+      let kind: 'trackpad' | 'mouse'
+      let mode: 'pan' | 'native'
+      if (previous && gap < SESSION_GAP) {
+        kind = previous.kind
+        mode = previous.mode
+        // 首条事件被判成鼠标滚轮后紧跟着高频事件，说明是触控板，立即纠正
+        if (kind === 'mouse' && gap < HIGH_FREQUENCY_GAP) {
+          kind = 'trackpad'
+          mode = trackpadMode()
+        }
+      } else {
+        kind = isMouseWheel(event) ? 'mouse' : 'trackpad'
+        mode = trackpadMode()
+      }
+      wheelSessionRef.current = { kind, mode, lastAt: now }
+
+      // 鼠标滚轮：保持原有行为
+      if (kind === 'mouse') {
+        if (spacePressed) {
+          event.preventDefault()
+          stopInertia()
+          recalibrateLater()
+          return
+        }
+        if (overScrollable) return
+        stopInertia()
+        // 鼠标滚轮缩放交给 React Flow
         recalibrateLater()
         return
       }
 
-      // 触控板双指滑动：deltaMode 为像素且步长细小；鼠标滚轮通常是 ±100
-      const isTrackpad =
-        event.deltaMode === 0 && (Math.abs(event.deltaX) > 0 || Math.abs(event.deltaY) < 40)
-      if (!isTrackpad) {
-        // 鼠标滚轮缩放同样交给 React Flow
-        recalibrateLater()
+      // 触控板：空格按下或手势始于画布 → 平移画布（手势期间不再响应缩放）
+      if (spacePressed || mode === 'pan') {
+        event.preventDefault()
+        event.stopPropagation()
+        stopInertia()
+        // 新手势重置速度，避免沿用上一次滑动的惯性
+        if (!previous || gap >= SESSION_GAP) {
+          motion.velocityX = 0
+          motion.velocityY = 0
+        }
+        const dt = motion.lastPanAt ? Math.max(now - motion.lastPanAt, 4) : 16
+        motion.velocityX = motion.velocityX * 0.65 + (-event.deltaX / dt) * 0.35
+        motion.velocityY = motion.velocityY * 0.65 + (-event.deltaY / dt) * 0.35
+        motion.lastPanAt = now
+        motion.panX -= event.deltaX
+        motion.panY -= event.deltaY
+        scheduleMotion()
         return
       }
 
-      event.preventDefault()
-      event.stopPropagation()
-      const viewport = getViewport()
-      void setViewport(
-        {
-          x: viewport.x - event.deltaX,
-          y: viewport.y - event.deltaY,
-          zoom: viewport.zoom,
-        },
-        { duration: 0 },
-      )
+      // 手势始于可滚动区域：纵向保留原生滚动；横向不滚动内容，
+      // 但要吞掉事件，避免浏览器把它识别成前进 / 后退手势
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
     }
 
     element.addEventListener('wheel', handleWheel, { passive: false, capture: true })
-    return () => element.removeEventListener('wheel', handleWheel, { capture: true })
-  }, [getViewport, recalibratePanBaseline, setViewport, spacePressed, stopInertia])
+    return () => {
+      element.removeEventListener('wheel', handleWheel, { capture: true })
+      if (motion.frame !== null) {
+        window.cancelAnimationFrame(motion.frame)
+        motion.frame = null
+      }
+      motion.panX = 0
+      motion.panY = 0
+      motion.zoomTarget = null
+      motion.lastPanAt = 0
+      wheelSessionRef.current = null
+    }
+  }, [getViewport, recalibratePanBaseline, setViewport, spacePressed, startInertia, stopInertia])
 
   // 空白处拖动：按下后经过漂移延迟开始检测，位移超过漂移距离才进入平移
   const startPan = useCallback(

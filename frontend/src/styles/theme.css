@@ -155,6 +155,8 @@ html,
 body,
 #root {
   height: 100%;
+  /* 禁止过度滚动：避免触控板横向滑动被浏览器识别为前进 / 后退手势 */
+  overscroll-behavior: none;
 }
 
 body {

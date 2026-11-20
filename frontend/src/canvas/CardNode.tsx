@@ -812,7 +812,8 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           )}
 
           {node.status === 'streaming' && (
-            <div className="mt-2 flex shrink-0 items-center justify-end">
+            // 右侧留出 10px：与完成态一致，避免「停止生成」贴住笔记连接点
+            <div className="mt-2 flex shrink-0 items-center justify-end pr-2.5">
               <button
                 type="button"
                 onClick={() => void stopGeneration(node.id)}

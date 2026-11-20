@@ -137,7 +137,7 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
     <div
       ref={containerRef}
       data-modal-open="true"
-      className="glass-surface drawer-pull-up nodrag nowheel absolute inset-x-0 bottom-full z-30 mb-2 flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-subtle shadow-[0_12px_32px_rgba(0,0,0,0.24)]"
+      className="glass-surface-airy drawer-pull-up nodrag nowheel absolute inset-x-0 bottom-full z-30 mb-2 flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-subtle shadow-[0_12px_32px_rgba(0,0,0,0.24)]"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onBlur={handleBlur}

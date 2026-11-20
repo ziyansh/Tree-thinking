@@ -1,12 +1,12 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.3.7** | [中文说明](readme.md)
+> Current version: **0.3.8** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
 ## Features
 
-- **Infinite left-to-right canvas** powered by React Flow: pan with Space + left drag, middle drag, or press-and-drag on empty space (drift delay/distance configurable); while Space is held, dragging anywhere — card text, titles, attachments, or an unfocused input — pans the canvas. Wheel behavior is configurable under Settings → Canvas → Pointer → Wheel logic: scroll the hovered card or zoom the canvas; zoom still works while Space is held.
+- **Infinite left-to-right canvas** powered by React Flow: pan with Space + left drag, middle drag, or press-and-drag on empty space (drift delay/distance configurable); while Space is held, dragging anywhere — card text, titles, attachments, or an unfocused input — pans the canvas. Wheel behavior is configurable under Settings → Canvas → Pointer → Wheel logic: scroll the hovered card or zoom the canvas; trackpad two-finger swipes pan the canvas and pinches zoom it, and while Space is held a two-finger swipe also pans (pinch and mouse wheel still zoom).
 - **Card-based Q&A**: one card = one question + one answer; answers render as Markdown and scroll inside the card instead of stretching it.
 - **Selectable card text**: titles, Markdown answers, reasoning, and input boxes can be drag-selected; selecting text never moves the card. While Space is held, panning takes priority and no text is selected. Note titles and bodies become selectable after double-clicking into edit mode. The highlight uses a soft accent tone.
 - **Card sizes and notes**: chat cards share one global size, adjustable from all four edges and corners (minimum 280×240); note cards keep their own size. Double-click empty canvas to create a note; double-click its title or body to edit (single click is reserved for dragging and selection), and press Tab in the body editor to insert four spaces.
@@ -200,6 +200,17 @@ Tree_thinking/
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.3.8 — 2026-11-20
+- Rewrote trackpad gestures: a two-finger swipe pans the canvas and a pinch zooms it; pinch also works over scrollable card content and zooms around the pointer; while Space is held, a two-finger swipe pans the canvas (matching Space + left drag), and pinch and mouse wheel still zoom.
+- Fixed fast vertical trackpad swipes being mistaken for mouse-wheel input and triggering zoom: mouse wheels are now detected by full-notch steps, and high-frequency follow-up events correct a misclassified first event.
+- Improved: wheel handling now uses a continuous gesture session, so moving the pointer over cards or suggestions mid-swipe no longer switches to zoom or scrolling.
+- Improved: trackpad pan and pinch now interpolate toward the target every frame, so short swipes stay smooth and direction changes follow on the next frame; whether the canvas glides after release follows Settings → Display → Canvas drag inertia.
+- Improved: pinch zoom is more responsive (zoom curve factor raised from 0.002 to 0.01).
+- Improved: the "My question" drawer now uses a frosted-glass background.
+- Improved: the "Stop generating" button now keeps the same clearance from the note-link dot as the done-state toolbar.
+- Docs: added trackpad gesture notes to the development guide.
+- Bumped the version to 0.3.8.
 
 ### 0.3.7 — 2026-11-19
 - Rewrote the Windows launcher `start.bat`: all messages are now plain ASCII English, eliminating garbled Chinese output and broken commands caused by different Windows code pages.

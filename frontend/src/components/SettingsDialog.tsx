@@ -971,7 +971,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     <Section title="显示">
                       <Row
                         label="画布拖动惯性"
-                        hint="拖动画布松手后按指针速度继续滑行；默认关闭"
+                        hint="拖动画布或触控板滑动松手后按速度继续滑行；默认关闭"
                       >
                         <Toggle
                           label="启用画布惯性"

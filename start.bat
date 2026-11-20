@@ -1,5 +1,5 @@
 @echo off
-chcp 437 >nul
+@chcp 437 >nul
 setlocal EnableExtensions
 cd /d "%~dp0"
 
@@ -7,6 +7,8 @@ echo ==========================================
 echo   Tree Thinking - One-click launcher
 echo ==========================================
 echo.
+
+title "Tree Thinking startup"
 
 REM ---------- 1. Check Python ----------
 set "PY="

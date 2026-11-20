@@ -83,6 +83,7 @@ _EXTRA_COLUMNS = {
         "drag_drift_delay_ms": "INTEGER",
         "drag_drift_distance": "INTEGER",
         "wheel_mode": "VARCHAR(16)",
+        "pointer_mode": "VARCHAR(16)",
         "long_press_ms": "INTEGER",
         "card_font_size": "INTEGER",
         "autosave_minutes": "INTEGER",
@@ -112,6 +113,8 @@ _EXTRA_COLUMNS = {
     "user_settings": {
         # server 模式每用户设置：联网搜索模式（旧库补列）
         "web_search_mode": "VARCHAR(16)",
+        # 指针设备（旧库补列）
+        "pointer_mode": "VARCHAR(16)",
         # 笔记连接线样式、粗细、颜色与释放动作（旧库补列）
         "note_link_style": "VARCHAR(16)",
         "note_link_width": "FLOAT",

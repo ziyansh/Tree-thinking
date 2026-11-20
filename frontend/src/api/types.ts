@@ -133,6 +133,9 @@ export type TimeFormat = '24h' | '12h'
 /** 滚轮逻辑：悬停卡片时滚动内容 / 始终缩放画布 */
 export type WheelMode = 'scroll-card' | 'zoom-canvas'
 
+/** 指针设备：鼠标（标准滚轮）/ 触摸板（实验性双指手势） */
+export type PointerMode = 'mouse' | 'trackpad'
+
 /** 画布背景样式：无 / 点状 */
 export type CanvasStyle = 'none' | 'dots'
 
@@ -191,6 +194,8 @@ export interface SettingsDTO {
   dragDriftDistance: number
   /** 滚轮逻辑（默认 zoom-canvas） */
   wheelMode: WheelMode
+  /** 指针设备（默认 mouse；trackpad 为实验性双指手势） */
+  pointerMode: PointerMode
   /** 卡片正文字号（默认 14，范围 12–24） */
   cardFontSize: number
   /** 自动保存间隔分钟数（默认 5，0 表示关闭） */
@@ -289,6 +294,8 @@ export interface SettingsPatch {
   dragDriftDelayMs?: number
   dragDriftDistance?: number
   wheelMode?: WheelMode
+  /** 指针设备：mouse（标准滚轮）/ trackpad（实验性双指手势） */
+  pointerMode?: PointerMode
   cardFontSize?: number
   autosaveMinutes?: number
   undoSteps?: number

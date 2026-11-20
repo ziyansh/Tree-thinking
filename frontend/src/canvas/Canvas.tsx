@@ -300,6 +300,8 @@ function CanvasInner() {
   const viewportTimerRef = useRef<number | null>(null)
   /** 空格是否按下：由全局 spaceKey 提供，卡片滚轮逻辑也共用同一状态 */
   const spacePressed = useSpacePressed()
+  /** 是否启用实验性触控板手势（设置 → 画布 → 指针 → 触摸板逻辑） */
+  const trackpadEnabled = preferences.pointerMode === 'trackpad'
   /** 是否正在自定义平移：用于切换抓取光标 */
   const [isPanning, setIsPanning] = useState(false)
   /** 拖入画布文件时的强调色提示 */
@@ -867,6 +869,23 @@ function CanvasInner() {
         window.requestAnimationFrame(() => recalibratePanBaseline(pointerX, pointerY))
       }
 
+      // 鼠标模式（默认）：保持标准滚轮逻辑，不启用触控板手势分流
+      if (!trackpadEnabled) {
+        // 空格按住时滚轮缩放画布，并阻止可滚动区域的原生滚动
+        if (spacePressed) {
+          event.preventDefault()
+          stopInertia()
+          recalibrateLater()
+          return
+        }
+        const target = event.target as Element | null
+        if (target?.closest('.nowheel')) return
+        stopInertia()
+        // 鼠标滚轮与捏合缩放都交给 React Flow
+        recalibrateLater()
+        return
+      }
+
       // 双指捏合：更新缩放目标，由动画帧插值逼近；指针位置作为缩放锚点
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault()
@@ -973,7 +992,7 @@ function CanvasInner() {
       motion.lastPanAt = 0
       wheelSessionRef.current = null
     }
-  }, [getViewport, recalibratePanBaseline, setViewport, spacePressed, startInertia, stopInertia])
+  }, [getViewport, recalibratePanBaseline, setViewport, spacePressed, startInertia, stopInertia, trackpadEnabled])
 
   // 空白处拖动：按下后经过漂移延迟开始检测，位移超过漂移距离才进入平移
   const startPan = useCallback(

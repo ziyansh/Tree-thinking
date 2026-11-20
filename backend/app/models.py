@@ -157,6 +157,8 @@ class _SettingsFields:
     drag_drift_distance: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 滚轮逻辑：scroll-card（悬停卡片时滚动内容）/ zoom-canvas（始终缩放画布）
     wheel_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # 指针设备：mouse（标准滚轮）/ trackpad（实验性双指手势）
+    pointer_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 旧版长按设置列保留但不再使用（避免旧库删除列）
     long_press_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # 卡片正文字号（px）；为空表示 14

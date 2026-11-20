@@ -71,6 +71,7 @@ export type Preferences = Pick<
   | 'dragDriftDelayMs'
   | 'dragDriftDistance'
   | 'wheelMode'
+  | 'pointerMode'
   | 'cardFontSize'
   | 'autosaveMinutes'
   | 'undoSteps'
@@ -104,6 +105,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   dragDriftDelayMs: 0,
   dragDriftDistance: 10,
   wheelMode: 'zoom-canvas',
+  pointerMode: 'mouse',
   cardFontSize: 14,
   autosaveMinutes: 5,
   undoSteps: 10,
@@ -138,6 +140,7 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     dragDriftDelayMs: settings.dragDriftDelayMs,
     dragDriftDistance: settings.dragDriftDistance,
     wheelMode: settings.wheelMode ?? 'zoom-canvas',
+    pointerMode: settings.pointerMode ?? 'mouse',
     cardFontSize: settings.cardFontSize,
     autosaveMinutes: settings.autosaveMinutes,
     undoSteps: settings.undoSteps,
@@ -173,6 +176,7 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     dragDriftDelayMs: patch.dragDriftDelayMs ?? base.dragDriftDelayMs,
     dragDriftDistance: patch.dragDriftDistance ?? base.dragDriftDistance,
     wheelMode: patch.wheelMode ?? base.wheelMode,
+    pointerMode: patch.pointerMode ?? base.pointerMode,
     cardFontSize: patch.cardFontSize ?? base.cardFontSize,
     autosaveMinutes: patch.autosaveMinutes ?? base.autosaveMinutes,
     undoSteps: patch.undoSteps ?? base.undoSteps,

@@ -8,6 +8,7 @@ import type {
   ModelProvider,
   NoteLinkReleaseAction,
   NoteLinkStyle,
+  PointerMode,
   ReasoningEffort,
   SettingsDTO,
   SettingsPatch,
@@ -58,6 +59,7 @@ interface SettingsForm {
   dragDriftDelayMs: number
   dragDriftDistance: number
   wheelMode: WheelMode
+  pointerMode: PointerMode
   cardFontSize: number
   autosaveMinutes: number
   undoSteps: number
@@ -102,6 +104,7 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     dragDriftDelayMs: data.dragDriftDelayMs,
     dragDriftDistance: data.dragDriftDistance,
     wheelMode: data.wheelMode,
+    pointerMode: data.pointerMode ?? 'mouse',
     cardFontSize: data.cardFontSize,
     autosaveMinutes: data.autosaveMinutes,
     undoSteps: data.undoSteps,
@@ -507,6 +510,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     dragDriftDelayMs: 0,
     dragDriftDistance: 10,
     wheelMode: 'zoom-canvas',
+    pointerMode: 'mouse',
     cardFontSize: 14,
     autosaveMinutes: 5,
     undoSteps: 10,
@@ -594,6 +598,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         dragDriftDelayMs: form.dragDriftDelayMs,
         dragDriftDistance: form.dragDriftDistance,
         wheelMode: form.wheelMode,
+        pointerMode: form.pointerMode,
         cardFontSize: form.cardFontSize,
         autosaveMinutes: form.autosaveMinutes,
         undoSteps: form.undoSteps,
@@ -1021,6 +1026,20 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                             { value: 'zoom-canvas', label: '悬停时缩放画布' },
                           ]}
                           onChange={(wheelMode) => setForm({ ...form, wheelMode })}
+                        />
+                      </Row>
+
+                      <Row
+                        label="触摸板逻辑"
+                        hint="鼠标：标准滚轮行为；触摸板（实验性）：双指滑动平移、捏合缩放，带插值与惯性；默认鼠标"
+                      >
+                        <ChoiceGroup
+                          value={form.pointerMode}
+                          options={[
+                            { value: 'mouse', label: '鼠标' },
+                            { value: 'trackpad', label: '触摸板（实验性）' },
+                          ]}
+                          onChange={(pointerMode) => setForm({ ...form, pointerMode })}
                         />
                       </Row>
 

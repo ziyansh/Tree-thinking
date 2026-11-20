@@ -3,14 +3,14 @@ import { useGraphStore } from '../store/graphStore'
 
 /**
  * 深度思考快捷开关：与顶部工具栏、设置里的「思考模式」共用同一字段，
- * 任一入口切换后其余入口自动同步；仅 DeepSeek 服务商支持。
+ * 任一入口切换后其余入口自动同步；DeepSeek 与火山方舟支持。
  */
 export function ThinkingToggle() {
   const provider = useGraphStore((state) => state.preferences.provider)
   const enabled = useGraphStore((state) => state.preferences.thinkingEnabled)
   const updatePreferences = useGraphStore((state) => state.updatePreferences)
 
-  const disabled = provider !== 'deepseek'
+  const disabled = provider !== 'deepseek' && provider !== 'ark'
 
   const toggle = async () => {
     if (disabled) return
@@ -25,7 +25,7 @@ export function ThinkingToggle() {
   return (
     <button
       type="button"
-      title={disabled ? '仅支持 DeepSeek API' : '深度思考'}
+      title={disabled ? '仅 DeepSeek 与火山方舟支持' : '深度思考'}
       aria-label="深度思考"
       aria-pressed={enabled}
       aria-disabled={disabled}

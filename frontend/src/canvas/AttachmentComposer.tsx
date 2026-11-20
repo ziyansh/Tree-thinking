@@ -1,8 +1,9 @@
 import { useCallback, useRef, useState } from 'react'
 import type { ClipboardEvent as ReactClipboardEvent, DragEvent as ReactDragEvent } from 'react'
-import { FileText, X } from 'lucide-react'
+import { AlertTriangle, FileText, Film, Music, X } from 'lucide-react'
 import { api } from '../api/client'
-import type { AttachmentDTO } from '../api/types'
+import type { ArkModelInfo, AttachmentDTO } from '../api/types'
+import { useGraphStore } from '../store/graphStore'
 
 /** 单文件上限与单节点附件数量上限，与后端保持一致 */
 const MAX_FILE_BYTES = 20 * 1024 * 1024
@@ -84,6 +85,79 @@ export function useAttachmentUploads(initialItems: AttachmentDTO[] = []): Attach
   return { items, uploading, addFiles, remove, clear }
 }
 
+/** 按附件类型选择图标：视频 / 音频使用媒体图标，其余（含 PDF）使用文件图标 */
+function AttachmentKindIcon({ kind, size }: { kind: AttachmentDTO['kind']; size: number }) {
+  if (kind === 'video') return <Film size={size} className="shrink-0 text-muted" />
+  if (kind === 'audio') return <Music size={size} className="shrink-0 text-muted" />
+  return <FileText size={size} className="shrink-0 text-muted" />
+}
+
+/**
+ * PDF 页数提示：任一 PDF 超过 30 页或合计超过 30 页时提示费用风险，
+ * 只读取附件列表，不额外请求后端。
+ */
+export function PdfPageWarning({ items }: { items: AttachmentDTO[] }) {
+  const pages = items
+    .filter((item) => item.kind === 'pdf' && typeof item.pageCount === 'number')
+    .map((item) => item.pageCount as number)
+  if (pages.length === 0) return null
+
+  const total = pages.reduce((sum, value) => sum + value, 0)
+  if (!pages.some((value) => value > 30) && total <= 30) return null
+
+  return (
+    <span className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-danger">
+      <AlertTriangle size={12} className="shrink-0" />
+      pdf页数过多，费用可能失控
+    </span>
+  )
+}
+
+/** 附件类型 → 需要的输入模态与提示文案；PDF 依靠视觉理解，共用 image 能力 */
+const ARK_CAPABILITY_CHECKS: {
+  kind: AttachmentDTO['kind']
+  modality: string
+  label: string
+}[] = [
+  { kind: 'image', modality: 'image', label: '不支持图片理解' },
+  { kind: 'video', modality: 'video', label: '不支持视频理解' },
+  { kind: 'audio', modality: 'audio', label: '不支持音频理解' },
+  { kind: 'pdf', modality: 'image', label: '可能不支持 PDF 文档理解' },
+]
+
+/**
+ * 火山方舟能力提示：当前模型缺少附件所需的输入模态时，
+ * 在输入框底部工具栏提示「该模型不支持…理解」；找不到模型信息时不提示。
+ */
+export function ArkCapabilityWarning({
+  items,
+  model,
+  models,
+}: {
+  items: AttachmentDTO[]
+  model: string
+  models: ArkModelInfo[]
+}) {
+  const provider = useGraphStore((state) => state.preferences.provider)
+  if (provider !== 'ark' || items.length === 0) return null
+  const info = models.find((item) => item.id === model)
+  if (!info) return null
+
+  const modalities = new Set(info.inputModalities)
+  // 同一类型只保留一条，多种类型合并成一句提示
+  const missing = ARK_CAPABILITY_CHECKS.filter(
+    (check) => !modalities.has(check.modality) && items.some((item) => item.kind === check.kind),
+  ).map((check) => check.label)
+  if (missing.length === 0) return null
+
+  return (
+    <span className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-danger">
+      <AlertTriangle size={12} className="shrink-0" />
+      该模型{missing.join(' / ')}
+    </span>
+  )
+}
+
 interface AttachmentChipsProps {
   items: AttachmentDTO[]
   onRemove?: (id: string) => void
@@ -112,10 +186,20 @@ export function AttachmentChips({ items, onRemove, compact, onOpen }: Attachment
           ].join(' ')}
           onClick={() => onOpen?.(attachment)}
         >
-          <FileText size={compact ? 12 : 14} className="shrink-0 text-muted" />
+          <AttachmentKindIcon kind={attachment.kind} size={compact ? 12 : 14} />
           <span className="truncate text-[11px] text-body" style={{ maxWidth: '120px' }}>
             {attachment.name}
           </span>
+          {attachment.parsed === false &&
+            ['image', 'pdf', 'video', 'audio'].includes(attachment.kind) && (
+              <span
+                title="附件未解析，模型可能看不到内容"
+                aria-label="附件未解析"
+                className="shrink-0 text-danger"
+              >
+                <AlertTriangle size={11} />
+              </span>
+            )}
           {onRemove && (
             <button
               type="button"

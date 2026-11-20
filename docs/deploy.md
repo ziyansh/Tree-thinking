@@ -79,6 +79,10 @@ ALLOWED_ORIGINS=https://tree.example.com
 DEEPSEEK_API_KEY=sk-你的Key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-flash
+# 火山方舟（可留空，页面「设置」优先；Key 加密存储）
+ARK_API_KEY=
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+ARK_MODEL=doubao-seed-2-1-pro-260915
 THINKING_ENABLED=true
 SUGGESTION_COUNT=3
 ```
@@ -95,6 +99,8 @@ SUGGESTION_COUNT=3
 | `ALLOWED_ORIGINS` | 否 | 额外允许的跨域来源，多个用逗号分隔 |
 | `DEEPSEEK_API_KEY` | 否 | DeepSeek Key，也可在页面「设置」中填写；留空则回答报错 |
 | `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | 否 | 接口地址与模型名 |
+| `ARK_API_KEY` | 否 | 火山方舟 Key，可留空；页面「设置」优先且加密存储 |
+| `ARK_BASE_URL` / `ARK_MODEL` | 否 | 火山方舟接口地址与模型名，默认 `https://ark.cn-beijing.volces.com/api/v3` / `doubao-seed-2-1-pro-260915` |
 | `THINKING_ENABLED` / `SUGGESTION_COUNT` | 否 | 思考模式与候选方向数量默认值 |
 
 ```bash
@@ -223,8 +229,10 @@ sudo certbot renew --dry-run
 
 ### 7.1 出站网络与数据外发
 
-- 服务器需要允许访问 `https://api.deepseek.com`（HTTPS 出站），否则回答、文件解析与联网搜索都会失败。
+- 服务器需要允许访问 `https://api.deepseek.com` 与 `https://ark.cn-beijing.volces.com`（HTTPS 出站），否则对应服务商的回答、文件解析与联网搜索都会失败。
 - 文件解析：上传 PDF、DOC/DOCX、PPT/PPTX 时，后端会把文件上传到 DeepSeek Files API 进行解析。`fileId` 与当前 API Key / DeepSeek 账号绑定，更换 Key 或迁移账号后旧文档可能失效，需要重新上传。
+- 火山方舟文件：使用方舟时，图片 / 视频 / 音频 / PDF 会上传到方舟 Files API（`purpose=user_data`），文件默认在方舟侧存储 7 天（1–30 天可配）；`fileId` 与 API Key / 账号绑定，更换 Key 或迁移账号后旧文件可能失效，需要重新上传。
+- 成本提示：视频、音频与 PDF 会按附件内容计入模型 token，页数或时长越大成本越高；PDF 超过 30 页时界面会提示「pdf页数过多，费用可能失控」。
 - 智能搜索与读取链接：问题文本、搜索结果、用户提供的链接内容由 DeepSeek 服务端处理。读取链接只识别最后一条用户消息中的 URL。
 - 如果部署环境不允许数据外发，请在页面设置中关闭联网搜索，并避免上传需要解析的文档；普通文本/图片附件与本地画布数据仍可正常使用。
 - 文件解析失败只会让该文档不进入模型上下文，附件本身仍会保存，可在后端日志中查看原因。
@@ -295,7 +303,7 @@ sudo systemctl status tree-thinking
 
 - `backend/.env` 不在版本库中，`git pull` 不会覆盖，新增变量请手动补充。
 - 静态文件由 Nginx 直接读取，重新构建后浏览器刷新即可生效，无需重载 Nginx。
-- 数据结构变更由后端启动时自动处理（含 v0.3.x 新增的 `note_links` 表与相关列），升级前务必备份数据库。
+- 数据结构变更由后端启动时自动处理（含 v0.3.x 新增的 `note_links` 表与相关列、v0.3.8 新增的 `ark_api_key` / `ark_base_url` / `ark_model` 设置列），升级前务必备份数据库。
 - 如使用文件解析，旧文档的 `fileId` 仍有效的前提是 API Key / DeepSeek 账号未变；更换 Key 后请重新上传需要解析的文档。
 
 ## 10. 常见问题
@@ -340,9 +348,9 @@ sudo systemctl restart tree-thinking
 
 **PDF / Office 文档内容没有被模型读取**
 
-- 确认服务器可访问 `api.deepseek.com`，服务商为 DeepSeek，且已配置 Key。
+- 确认服务器可访问 `api.deepseek.com` 与 `ark.cn-beijing.volces.com`，且所选服务商（DeepSeek 或火山方舟）已配置 Key。
 - 文件解析失败时附件仍会保存，但不会进入上下文；请查看后端日志中的解析错误。
-- 更换 API Key / 账号后，旧附件需要重新上传解析。
+- 更换 API Key / 账号后，旧附件需要重新上传解析（火山方舟文件默认保留 7 天）。
 
 **更换 AUTH_SECRET 后模型调用提示 Key 无效或需要重新填写**
 

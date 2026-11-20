@@ -27,8 +27,8 @@ export interface SourceDTO {
   date: string | null
 }
 
-/** 附件类型：图片 / 纯文本 / 其它 */
-export type AttachmentKind = 'image' | 'text' | 'other'
+/** 附件类型：图片 / 纯文本 / PDF / 视频 / 音频 / 其它 */
+export type AttachmentKind = 'image' | 'text' | 'pdf' | 'video' | 'audio' | 'other'
 
 /** 附件元信息，url 可直接用于 img src 或新窗口打开 */
 export interface AttachmentDTO {
@@ -39,6 +39,10 @@ export interface AttachmentDTO {
   kind: AttachmentKind
   ext: string
   url: string
+  /** PDF 页数：仅 PDF 附件返回，未解析时为 null */
+  pageCount?: number | null
+  /** 解析该附件的服务商：ark / deepseek，未知时为 null */
+  provider?: 'ark' | 'deepseek' | null
   /** 后端解析后的文件 id（部分实现返回，可选） */
   fileId?: string
   /** 纯文本类附件是否已解析完成（部分实现返回，可选） */
@@ -145,8 +149,8 @@ export type NoteLinkStyle = 'curved' | 'orthogonal'
 /** 从回答卡片连接点拖出连线后的释放动作 */
 export type NoteLinkReleaseAction = 'none' | 'shift-note' | 'note'
 
-/** 模型服务商：DeepSeek / OpenAI */
-export type ModelProvider = 'deepseek' | 'openai'
+/** 模型服务商：DeepSeek / 火山方舟 / OpenAI 兼容 */
+export type ModelProvider = 'deepseek' | 'ark' | 'openai'
 
 /** OpenAI 推理强度：default 表示不发送该参数 */
 export type ReasoningEffort = 'default' | 'low' | 'medium' | 'high'
@@ -177,6 +181,11 @@ export interface SettingsDTO {
   openaiMaxTokens: number
   openaiReasoningEffort: ReasoningEffort
   openaiTimeoutSeconds: number
+  /** 火山方舟配置：是否已配置 Key 与脱敏值 */
+  arkHasKey: boolean
+  arkApiKeyMasked: string
+  arkBaseUrl: string
+  arkModel: string
   suggestionCount: number
   /** 全局卡片宽度（默认 400，仅限制最小值） */
   cardWidth: number
@@ -220,7 +229,7 @@ export interface SettingsDTO {
   themeMode: ThemeMode
   /** 时间制式（默认 24 小时制） */
   timeFormat: TimeFormat
-  /** 是否开启联网搜索（默认关闭，仅 DeepSeek 服务商可用） */
+  /** 是否开启联网搜索（默认关闭，DeepSeek 与火山方舟可用） */
   webSearchEnabled: boolean
   /** 联网搜索方式（默认智能搜索） */
   webSearchMode: WebSearchMode
@@ -234,6 +243,25 @@ export interface SettingsDTO {
   canvasStyle: CanvasStyle
   /** 强制搜索上限：注入模型的资料条数，1–50（仅强制搜索生效） */
   searchLimit: number
+}
+
+/** 火山方舟模型能力信息：GET /api/ark/models 返回的单条模型 */
+export interface ArkModelInfo {
+  /** 模型 id（推理时填写到模型名） */
+  id: string
+  /** 模型展示名，后端未返回时省略 */
+  name?: string
+  /** 输入模态：text / image / video / audio */
+  inputModalities: string[]
+  /** 输出模态：text / image / video / audio 等 */
+  outputModalities: string[]
+  /** 官方能力表：工具、缓存、结构化输出等，前端仅透传 */
+  features?: Record<string, unknown>
+}
+
+/** 火山方舟模型列表响应 */
+export interface ArkModelsResponse {
+  models: ArkModelInfo[]
 }
 
 /** 服务端模式下的登录用户 */
@@ -285,6 +313,10 @@ export interface SettingsPatch {
   openaiMaxTokens?: number
   openaiReasoningEffort?: ReasoningEffort
   openaiTimeoutSeconds?: number
+  /** 火山方舟 API Key；留空表示保持原 Key */
+  arkApiKey?: string
+  arkBaseUrl?: string
+  arkModel?: string
   suggestionCount?: number
   cardWidth?: number
   cardHeight?: number

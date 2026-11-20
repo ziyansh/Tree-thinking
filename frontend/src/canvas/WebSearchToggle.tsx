@@ -3,14 +3,14 @@ import { useGraphStore } from '../store/graphStore'
 
 /**
  * 联网搜索快捷开关：读取并写入全局偏好，与顶部工具栏按钮共用同一字段，
- * 两处状态自动同步；仅 DeepSeek 服务商支持。
+ * 两处状态自动同步；DeepSeek 与火山方舟支持。
  */
 export function WebSearchToggle() {
   const provider = useGraphStore((state) => state.preferences.provider)
   const enabled = useGraphStore((state) => state.preferences.webSearchEnabled)
   const updatePreferences = useGraphStore((state) => state.updatePreferences)
 
-  const disabled = provider !== 'deepseek'
+  const disabled = provider !== 'deepseek' && provider !== 'ark'
 
   const toggle = async () => {
     if (disabled) return
@@ -25,7 +25,7 @@ export function WebSearchToggle() {
   return (
     <button
       type="button"
-      title={disabled ? '仅支持 DeepSeek API' : '联网搜索'}
+      title={disabled ? 'OpenAI 兼容服务商不支持联网搜索' : '联网搜索'}
       aria-label="联网搜索"
       aria-pressed={enabled}
       aria-disabled={disabled}

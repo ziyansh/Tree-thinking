@@ -43,6 +43,11 @@ OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL: str = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
+# 火山方舟（ark）相关配置：作为数据库设置的兜底，未配置时回落空 Key
+ARK_API_KEY: str = os.getenv("ARK_API_KEY", "")
+ARK_BASE_URL: str = os.getenv("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+ARK_MODEL: str = os.getenv("ARK_MODEL", "doubao-seed-2-1-pro-260915")
+
 # 是否开启思考模式；关闭时不向模型发送 thinking 参数
 THINKING_ENABLED: bool = _read_bool("THINKING_ENABLED", True)
 # 每个节点生成的候选方向数量

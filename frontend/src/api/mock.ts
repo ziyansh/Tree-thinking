@@ -1,6 +1,7 @@
 import type { ApiClient } from './client'
 import type { StreamHandlers } from './sse'
 import type {
+  ArkModelInfo,
   AttachmentDTO,
   AuthSession,
   ExportFile,
@@ -155,6 +156,10 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   openaiMaxTokens: 0,
   openaiReasoningEffort: 'default',
   openaiTimeoutSeconds: 60,
+  arkHasKey: false,
+  arkApiKeyMasked: '',
+  arkBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+  arkModel: 'doubao-seed-2-1-pro-260915',
   suggestionCount: 3,
   cardWidth: 400,
   cardHeight: 560,
@@ -185,6 +190,45 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   canvasStyle: 'none',
   searchLimit: 50,
 }
+
+/** 构造 mock 模型项：输出统一为文本，输入模态按官方模型表近似给出 */
+function arkModel(id: string, inputModalities: string[]): ArkModelInfo {
+  return {
+    id,
+    // 去掉末尾的版本号（如 -260915），得到基础模型名
+    name: id.replace(/-\d{6}$/, ''),
+    inputModalities,
+    outputModalities: ['text'],
+  }
+}
+
+/**
+ * Mock 模式 / 接口失败兜底的内置模型列表：21 个 LLM 模型（不含 seed-character）。
+ * 模态为按官方模型表给出的近似值，仅用于本地下拉与能力提示。
+ */
+export const MOCK_ARK_MODELS: ArkModelInfo[] = [
+  arkModel('doubao-seed-evolving', ['text', 'image', 'video']),
+  arkModel('doubao-seed-2-1-pro-260915', ['text', 'image', 'video']),
+  arkModel('doubao-seed-2-1-lite-260915', ['text', 'image', 'video', 'audio']),
+  arkModel('doubao-seed-2-1-turbo-260628', ['text', 'image', 'video']),
+  arkModel('doubao-seed-2-1-pro-260628', ['text', 'image', 'video']),
+  arkModel('doubao-seed-2-0-lite-260428', ['text', 'image', 'video', 'audio']),
+  arkModel('doubao-seed-2-0-mini-260428', ['text', 'image', 'video', 'audio']),
+  arkModel('doubao-seed-2-0-pro-260215', ['text', 'image', 'video']),
+  arkModel('doubao-seed-2-0-lite-260215', ['text', 'image', 'video']),
+  arkModel('doubao-seed-2-0-mini-260215', ['text', 'image', 'video']),
+  arkModel('doubao-seed-2-0-code-preview-260215', ['text', 'image', 'video']),
+  arkModel('doubao-seed-translation-250915', ['text']),
+  arkModel('glm-5-3-flash-260828', ['text', 'image']),
+  arkModel('glm-5-2-260617', ['text']),
+  arkModel('kimi-k3-1-pro-261024', ['text', 'image']),
+  arkModel('deepseek-v4-1-flash-261017', ['text', 'image']),
+  arkModel('deepseek-v4-1-flash-260910', ['text', 'image']),
+  arkModel('deepseek-v4-1-flash-economy-261017', ['text', 'image']),
+  arkModel('deepseek-v4-pro-ga-260813', ['text']),
+  arkModel('deepseek-v4-flash-ga-260731', ['text']),
+  arkModel('deepseek-v4-pro-260425', ['text']),
+]
 
 /** 全局卡片尺寸的最小值（与后端一致，无上限） */
 const MIN_CARD_WIDTH = 280
@@ -311,11 +355,14 @@ const TEXT_EXTENSIONS = new Set([
   '.h', '.go', '.rs', '.sh', '.bat', '.ps1',
 ])
 
-/** 按 MIME 与扩展名判定附件类型：image / text / other */
+/** 按 MIME 与扩展名判定附件类型：image / text / pdf / video / audio / other */
 function kindOfAttachment(name: string, mime: string): AttachmentDTO['kind'] {
   if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(mime)) return 'image'
   const dot = name.lastIndexOf('.')
   const ext = dot === -1 ? '' : name.slice(dot).toLowerCase()
+  if (mime === 'application/pdf' || ext === '.pdf') return 'pdf'
+  if (mime.startsWith('video/')) return 'video'
+  if (mime.startsWith('audio/')) return 'audio'
   if (mime.startsWith('text/') || TEXT_EXTENSIONS.has(ext)) return 'text'
   return 'other'
 }
@@ -333,6 +380,8 @@ function resolveAttachments(ids?: string[]): AttachmentDTO[] {
         kind: 'other',
         ext: '',
         url: `/api/attachments/${id}`,
+        pageCount: null,
+        provider: null,
         fileId: id,
         parsed: false,
       },
@@ -537,6 +586,9 @@ export const mockApi: ApiClient = {
       kind: kindOfAttachment(file.name, file.type),
       ext,
       url,
+      // Mock 模式不解析 PDF 页数，保持 null
+      pageCount: null,
+      provider: null,
       fileId: id,
       parsed: true,
     }
@@ -905,6 +957,17 @@ export const mockApi: ApiClient = {
         Math.max(10, Math.round(patch.openaiTimeoutSeconds)),
       )
     }
+    // 火山方舟：Key 只保存脱敏值，留空表示保持原 Key
+    if (patch.arkApiKey && patch.arkApiKey.trim()) {
+      settings.arkHasKey = true
+      settings.arkApiKeyMasked = maskKey(patch.arkApiKey.trim())
+    }
+    if (patch.arkBaseUrl !== undefined) {
+      settings.arkBaseUrl = patch.arkBaseUrl.trim() || DEFAULT_SETTINGS.arkBaseUrl
+    }
+    if (patch.arkModel !== undefined) {
+      settings.arkModel = patch.arkModel.trim() || DEFAULT_SETTINGS.arkModel
+    }
     if (patch.baseUrl !== undefined) {
       settings.baseUrl = patch.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl
     }
@@ -988,6 +1051,8 @@ export const mockApi: ApiClient = {
     if (patch.webSearchMode === 'smart' || patch.webSearchMode === 'forced') {
       settings.webSearchMode = patch.webSearchMode
     }
+    // 火山方舟固定使用智能搜索
+    if (settings.provider === 'ark') settings.webSearchMode = 'smart'
     // 参考资料抽屉比例：与后端一致夹到 0.15–0.7
     if (patch.sourcesPanelRatio !== undefined) {
       settings.sourcesPanelRatio = Math.min(0.7, Math.max(0.15, patch.sourcesPanelRatio))
@@ -1002,6 +1067,12 @@ export const mockApi: ApiClient = {
     }
     saveSettingsState(settings)
     return { ...settings }
+  },
+
+  // Mock 模式不校验 Key，始终返回内置模型列表
+  async listArkModels() {
+    await delay(60)
+    return MOCK_ARK_MODELS.map((item) => ({ ...item }))
   },
 }
 

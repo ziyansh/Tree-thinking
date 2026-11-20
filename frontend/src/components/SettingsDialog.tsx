@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { RotateCcw, X } from 'lucide-react'
+import { ChevronDown, RotateCcw, X } from 'lucide-react'
 import { api } from '../api/client'
 import type {
   CanvasStyle,
@@ -34,6 +34,31 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id']
 
+/** 火山方舟模型候选兜底：模型列表接口不可用时仍可手动选择或输入 */
+const ARK_MODEL_FALLBACK = [
+  'doubao-seed-evolving',
+  'doubao-seed-2-1-pro-260915',
+  'doubao-seed-2-1-lite-260915',
+  'doubao-seed-2-1-turbo-260628',
+  'doubao-seed-2-1-pro-260628',
+  'doubao-seed-2-0-lite-260428',
+  'doubao-seed-2-0-mini-260428',
+  'doubao-seed-2-0-pro-260215',
+  'doubao-seed-2-0-lite-260215',
+  'doubao-seed-2-0-mini-260215',
+  'doubao-seed-2-0-code-preview-260215',
+  'doubao-seed-translation-250915',
+  'glm-5-3-flash-260828',
+  'glm-5-2-260617',
+  'kimi-k3-1-pro-261024',
+  'deepseek-v4-1-flash-261017',
+  'deepseek-v4-1-flash-260910',
+  'deepseek-v4-1-flash-economy-261017',
+  'deepseek-v4-pro-ga-260813',
+  'deepseek-v4-flash-ga-260731',
+  'deepseek-v4-pro-260425',
+]
+
 /** 表单草稿：apiKey 留空表示保持原值 */
 interface SettingsForm {
   provider: ModelProvider
@@ -52,6 +77,9 @@ interface SettingsForm {
   openaiMaxTokens: number
   openaiReasoningEffort: ReasoningEffort
   openaiTimeoutSeconds: number
+  arkApiKey: string
+  arkBaseUrl: string
+  arkModel: string
   suggestionCount: number
   cardGap: number
   connectionStyle: ConnectionStyle
@@ -97,6 +125,9 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     openaiMaxTokens: data.openaiMaxTokens,
     openaiReasoningEffort: data.openaiReasoningEffort,
     openaiTimeoutSeconds: data.openaiTimeoutSeconds,
+    arkApiKey: '',
+    arkBaseUrl: data.arkBaseUrl ?? '',
+    arkModel: data.arkModel ?? '',
     suggestionCount: data.suggestionCount,
     cardGap: data.cardGap,
     connectionStyle: data.connectionStyle,
@@ -298,31 +329,78 @@ function ColorField({
   )
 }
 
-/** 下拉框：原生 select，宽度 200px，不占整行 */
+/** 下拉框：毛玻璃浮层，显示项数可配置（默认 9 项）；不再使用原生 select */
 function SelectRow<T extends string>({
   value,
   options,
   onChange,
   ariaLabel,
+  visibleCount = 9,
 }: {
   value: T
   options: { value: T; label: string }[]
   onChange: (value: T) => void
   ariaLabel: string
+  /** 浮层一次最多显示的选项数，默认 9 */
+  visibleCount?: number
 }) {
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const { open, setOpen, menu, show, listRef } = useFloatingMenu()
+  const selected = options.find((option) => option.value === value)
+
   return (
-    <select
-      aria-label={ariaLabel}
-      value={value}
-      onChange={(event) => onChange(event.target.value as T)}
-      className={`${INPUT_CLASS} w-[200px] cursor-pointer`}
-    >
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>
-          {option.label}
-        </option>
-      ))}
-    </select>
+    <div ref={triggerRef} className="relative w-[200px]">
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => {
+          if (open) setOpen(false)
+          else show(triggerRef.current, visibleCount)
+        }}
+        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        className={`${INPUT_CLASS} flex w-full cursor-pointer items-center justify-between gap-2 text-left`}
+      >
+        <span className="truncate">{selected?.label ?? ''}</span>
+        <ChevronDown size={14} className="shrink-0 text-muted" />
+      </button>
+      {open && menu && (
+        <div
+          ref={listRef}
+          role="listbox"
+          aria-label={ariaLabel}
+          className="glass-surface fixed z-50 overflow-y-auto rounded-lg border border-subtle py-1 shadow-xl"
+          style={{
+            left: menu.left,
+            width: menu.width,
+            maxHeight: menu.maxHeight,
+            top: menu.top,
+            bottom: menu.bottom,
+          }}
+        >
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="option"
+              aria-selected={option.value === value}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange(option.value)
+                setOpen(false)
+              }}
+              className={[
+                'block w-full px-3 py-1.5 text-left text-[13px] text-body transition-colors duration-100 hover:bg-accent-dim hover:text-ink',
+                option.value === value ? 'bg-accent-dim text-accent' : '',
+              ].join(' ')}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -474,6 +552,227 @@ function Row({
   )
 }
 
+/** 去掉模型 id 末尾的 6 位版本号，便于展示简短名称 */
+function stripModelVersion(value: string): string {
+  return value.replace(/-\d{6}$/, '')
+}
+
+/** 把模型 id / name 格式化成易读名称，例如 Doubao-Seed-2.1-lite */
+function formatArkModelLabel(item: { id: string; name?: string }): string {
+  const raw = stripModelVersion(item.name || item.id)
+  const normalized = raw.replace(/-(\d)-(\d)-/g, '-$1.$2-')
+  return normalized
+    .split('-')
+    .map((part, index) => {
+      const lower = part.toLowerCase()
+      if (lower === 'glm') return 'GLM'
+      if (lower === 'kimi') return 'Kimi'
+      if (lower === 'deepseek') return 'DeepSeek'
+      if (lower === 'seed') return 'Seed'
+      if (/^v\d+$/.test(lower)) return lower.toUpperCase()
+      if (index === 0) return part.charAt(0).toUpperCase() + part.slice(1)
+      return part
+    })
+    .join('-')
+}
+
+/** 浮层单条候选的高度估算，与 py-1.5 + 13px 字号的按钮一致 */
+const MENU_ITEM_HEIGHT = 32
+/** 浮层上下内边距合计 */
+const MENU_PADDING = 8
+
+interface FloatingMenuRect {
+  left: number
+  width: number
+  maxHeight: number
+  top?: number
+  bottom?: number
+}
+
+/**
+ * 下拉浮层的通用定位与收起逻辑。
+ * fixed 坐标避免被设置弹窗的滚动容器裁剪；下方空间不足时向上展开；
+ * 高度按显示项数（visibleCount）与可用空间收缩。
+ */
+function useFloatingMenu() {
+  const [open, setOpen] = useState(false)
+  const [menu, setMenu] = useState<FloatingMenuRect | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  // 页面或弹窗内容滚动后 fixed 浮层会与触发按钮错位，直接收起；浮层内部滚动不收起
+  useEffect(() => {
+    if (!open) return
+    const handleScroll = (event: Event) => {
+      if (event.target instanceof Node && listRef.current?.contains(event.target)) return
+      setOpen(false)
+    }
+    document.addEventListener('scroll', handleScroll, true)
+    window.addEventListener('resize', handleScroll)
+    return () => {
+      document.removeEventListener('scroll', handleScroll, true)
+      window.removeEventListener('resize', handleScroll)
+    }
+  }, [open])
+
+  const show = (anchor: HTMLElement | null, visibleCount: number) => {
+    if (!anchor) return
+    const rect = anchor.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom - 12
+    const spaceAbove = rect.top - 12
+    const openUp = spaceBelow < 220 && spaceAbove > spaceBelow
+    const preferred = visibleCount * MENU_ITEM_HEIGHT + MENU_PADDING
+    setMenu({
+      left: rect.left,
+      width: rect.width,
+      maxHeight: Math.min(preferred, Math.max(140, (openUp ? spaceAbove : spaceBelow) - 6)),
+      ...(openUp
+        ? { bottom: window.innerHeight - rect.top + 6 }
+        : { top: rect.bottom + 6 }),
+    })
+    setOpen(true)
+  }
+
+  return { open, setOpen, menu, show, listRef }
+}
+
+/** 模型候选：id 是提交给后端的值，label 是界面上显示的名称 */
+interface ModelOption {
+  id: string
+  label: string
+}
+
+/**
+ * 模型选择框：文本输入 + 可滚动候选浮层，所有服务商统一使用。
+ * 聚焦时清空输入框展示全部候选；未输入/未选择就失焦恢复原值；手动输入的模型 id 保留。
+ * 浮层使用 fixed 定位，避免被设置弹窗的滚动容器裁剪。
+ */
+function ModelPicker({
+  options,
+  value,
+  onChange,
+  placeholder = '默认模型',
+  visibleCount = 9,
+  footer,
+}: {
+  options: ModelOption[]
+  value: string
+  onChange: (id: string) => void
+  placeholder?: string
+  /** 浮层一次最多显示的候选项数，默认 9 */
+  visibleCount?: number
+  footer?: ReactNode
+}) {
+  const [text, setText] = useState('')
+  const { open, setOpen, menu, show, listRef } = useFloatingMenu()
+  const focusedRef = useRef(false)
+  const fieldRef = useRef<HTMLDivElement>(null)
+
+  const currentLabel = options.find((item) => item.id === value)?.label ?? value
+
+  // 未聚焦时跟随外部值；保存或切换模型后立即显示新的模型名
+  useEffect(() => {
+    if (!focusedRef.current) setText(currentLabel)
+  }, [currentLabel])
+
+  // 当前显示的是已有模型名时仍列出全部候选；正在输入关键词时才过滤
+  const query = text.trim()
+  const filtering = query !== '' && query !== currentLabel
+  const visible = filtering
+    ? options.filter((item) =>
+        `${item.label} ${item.id}`.toLowerCase().includes(query.toLowerCase()),
+      )
+    : options
+
+  // 失焦提交：优先匹配候选，其次保留手动输入，空值恢复原模型
+  const commit = () => {
+    const next = text.trim()
+    const match = options.find((item) => item.label === next || item.id === next)
+    if (match) {
+      onChange(match.id)
+      setText(match.label)
+    } else if (next) {
+      onChange(next)
+    } else {
+      setText(currentLabel)
+    }
+  }
+
+  return (
+    <div ref={fieldRef} className="relative w-full">
+      <input
+        type="text"
+        value={text}
+        placeholder={placeholder}
+        onFocus={() => {
+          focusedRef.current = true
+          setText('')
+          show(fieldRef.current, visibleCount)
+        }}
+        onClick={() => {
+          if (!open) show(fieldRef.current, visibleCount)
+        }}
+        onChange={(event) => {
+          const next = event.target.value
+          setText(next)
+          if (!open) show(fieldRef.current, visibleCount)
+          const match = options.find((item) => item.label === next || item.id === next)
+          if (match) onChange(match.id)
+        }}
+        onBlur={() => {
+          focusedRef.current = false
+          window.setTimeout(() => {
+            setOpen(false)
+            commit()
+          }, 120)
+        }}
+        className={`${INPUT_CLASS} w-full`}
+      />
+      {open && menu && (
+        <div
+          ref={listRef}
+          className="glass-surface fixed z-50 overflow-y-auto rounded-lg border border-subtle py-1 shadow-xl"
+          style={{
+            left: menu.left,
+            width: menu.width,
+            maxHeight: menu.maxHeight,
+            top: menu.top,
+            bottom: menu.bottom,
+          }}
+        >
+          {visible.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange(item.id)
+                setText(item.label)
+                setOpen(false)
+              }}
+              className={[
+                'block w-full px-3 py-1.5 text-left text-[13px] text-body transition-colors duration-100 hover:bg-accent-dim hover:text-ink',
+                value === item.id ? 'bg-accent-dim text-accent' : '',
+              ].join(' ')}
+            >
+              {item.label}
+            </button>
+          ))}
+          {visible.length === 0 && (
+            <p className="px-3 py-2 text-[12px] text-muted">没有匹配的模型</p>
+          )}
+        </div>
+      )}
+      {footer}
+    </div>
+  )
+}
+
+/** DeepSeek 模型候选：官方没有列表接口，内置常用模型，仍支持手动填写 */
+const DEEPSEEK_MODEL_OPTIONS: ModelOption[] = [
+  { id: 'deepseek-flash', label: 'DeepSeek-Flash' },
+  { id: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro' },
+]
+
 /** 设置悬浮窗：左侧选项卡栏 + 右侧内容区，保存后立即生效 */
 export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<TabId>('model')
@@ -485,6 +784,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   // 关闭时保留 180ms 播放退场动画，结束再卸载
   const [mounted, setMounted] = useState(open)
   const updatePreferences = useGraphStore((state) => state.updatePreferences)
+  const arkModels = useGraphStore((state) => state.arkModels)
+  const arkModelsLoading = useGraphStore((state) => state.arkModelsLoading)
+  const loadArkModels = useGraphStore((state) => state.loadArkModels)
 
   const [form, setForm] = useState<SettingsForm>({
     provider: 'deepseek',
@@ -503,6 +805,9 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     openaiMaxTokens: 0,
     openaiReasoningEffort: 'default',
     openaiTimeoutSeconds: 60,
+    arkApiKey: '',
+    arkBaseUrl: '',
+    arkModel: '',
     suggestionCount: 3,
     cardGap: 80,
     connectionStyle: 'direct',
@@ -528,6 +833,41 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     panInertiaCoefficient: 0.5,
     searchLimit: 50,
   })
+
+  // 火山方舟模型候选：接口返回全部模型，过滤后格式化为易读名称
+  const arkModelOptions = (() => {
+    const source =
+      arkModels.length > 0
+        ? arkModels
+        : ARK_MODEL_FALLBACK.map((id) => ({
+            id,
+            name: id,
+            outputModalities: ['text'],
+          }))
+    // 只保留能输出文本的 LLM，排除图片 / 视频 / 3D 等生成模型；seed-character 不在支持范围
+    const items = source.filter(
+      (item) =>
+        item.outputModalities.includes('text') && !item.id.includes('seed-character'),
+    )
+    const counts = new Map<string, number>()
+    for (const item of items) {
+      const label = formatArkModelLabel(item)
+      counts.set(label, (counts.get(label) ?? 0) + 1)
+    }
+    return items
+      .map((item) => {
+        const base = formatArkModelLabel(item)
+        const version = item.id.match(/-(\d{6})$/)?.[1]
+        return {
+          id: item.id,
+          label:
+            (counts.get(base) ?? 0) > 1 && version
+              ? `${base}（${version}）`
+              : base,
+        }
+      })
+      .sort((left, right) => left.label.localeCompare(right.label, 'en'))
+  })()
 
   // Esc 关闭统一走 Escape 栈：多浮层叠加时只关闭最上层
   useEscapeHandler(open, onClose)
@@ -570,6 +910,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     }
   }, [open])
 
+  // 打开设置或切换到火山方舟时拉取账号可见的模型列表（store 已有数据会直接返回）
+  useEffect(() => {
+    if (!open || form.provider !== 'ark') return
+    void loadArkModels()
+  }, [open, form.provider, loadArkModels])
+
   const save = async () => {
     setSaving(true)
     setError('')
@@ -581,7 +927,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         baseUrl: form.baseUrl,
         model: form.model,
         thinkingEnabled: form.thinkingEnabled,
-        webSearchMode: form.webSearchMode,
+        // 火山方舟固定使用智能搜索
+        webSearchMode: form.provider === 'ark' ? 'smart' : form.webSearchMode,
         openaiBaseUrl: form.openaiBaseUrl,
         openaiModel: form.openaiModel,
         openaiOrganization: form.openaiOrganization,
@@ -591,6 +938,8 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         openaiMaxTokens: form.openaiMaxTokens,
         openaiReasoningEffort: form.openaiReasoningEffort,
         openaiTimeoutSeconds: form.openaiTimeoutSeconds,
+        arkBaseUrl: form.arkBaseUrl,
+        arkModel: form.arkModel,
         suggestionCount: form.suggestionCount,
         cardGap: form.cardGap,
         connectionStyle: form.connectionStyle,
@@ -618,6 +967,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       }
       if (form.apiKey.trim()) patch.apiKey = form.apiKey.trim()
       if (form.openaiApiKey.trim()) patch.openaiApiKey = form.openaiApiKey.trim()
+      if (form.arkApiKey.trim()) patch.arkApiKey = form.arkApiKey.trim()
 
       // updatePreferences 内部完成提交、持久化，并立即应用主题与外观
       const data = await updatePreferences(patch)
@@ -711,9 +1061,17 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           value={form.provider}
                           options={[
                             { value: 'deepseek', label: 'DeepSeek' },
+                            { value: 'ark', label: '火山方舟' },
                             { value: 'openai', label: 'OpenAI 兼容' },
                           ]}
-                          onChange={(provider) => setForm({ ...form, provider })}
+                          onChange={(provider) =>
+                            setForm({
+                              ...form,
+                              provider,
+                              // 火山方舟固定使用智能搜索，切换时同步表单
+                              webSearchMode: provider === 'ark' ? 'smart' : form.webSearchMode,
+                            })
+                          }
                         />
                       </Row>
                     </Section>
@@ -747,19 +1105,18 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           />
                         </Row>
 
-                        <Row label="模型" hint="留空会恢复为 .env 中的默认模型">
-                          <input
-                            type="text"
-                            list="settings-model-options"
+                        <Row
+                          label="模型"
+                          hint="聚焦后展开候选；未选择就失焦会恢复原值，也可手动填写"
+                        >
+                          <ModelPicker
+                            options={DEEPSEEK_MODEL_OPTIONS}
                             value={form.model}
-                            onChange={(event) => setForm({ ...form, model: event.target.value })}
-                            className={`${INPUT_CLASS} w-full`}
+                            onChange={(model) =>
+                              setForm((previous) => ({ ...previous, model }))
+                            }
                           />
                         </Row>
-                        <datalist id="settings-model-options">
-                          <option value="deepseek-flash" />
-                          <option value="deepseek-v4-pro" />
-                        </datalist>
 
                         <Row label="思考模式" hint="关闭后不再返回思考过程，回答更快、更省 Token">
                           <Toggle
@@ -794,6 +1151,69 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                             max={50}
                             step={1}
                           />
+                        </Row>
+                      </Section>
+                    )}
+
+                    {form.provider === 'ark' && (
+                      <Section title="火山方舟参数">
+                        <Row
+                          label="火山方舟 API Key"
+                          hint={
+                            settings?.arkHasKey
+                              ? `当前：${settings.arkApiKeyMasked}；留空保持不变`
+                              : '尚未配置，填写后才能获得回答；Key 只保存在本地后端'
+                          }
+                        >
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            value={form.arkApiKey}
+                            onChange={(event) => setForm({ ...form, arkApiKey: event.target.value })}
+                            placeholder={settings?.arkHasKey ? '留空保持不变' : '填写火山方舟 API Key'}
+                            className={`${INPUT_CLASS} w-full`}
+                          />
+                        </Row>
+
+                        <Row
+                          label="接口地址"
+                          hint="火山方舟默认接口 https://ark.cn-beijing.volces.com/api/v3"
+                        >
+                          <input
+                            type="text"
+                            value={form.arkBaseUrl}
+                            onChange={(event) => setForm({ ...form, arkBaseUrl: event.target.value })}
+                            className={`${INPUT_CLASS} w-full`}
+                          />
+                        </Row>
+
+                        <Row
+                          label="模型名"
+                          hint="聚焦后展开全部模型；未选择就失焦会恢复原值"
+                        >
+                          <ModelPicker
+                            options={arkModelOptions}
+                            value={form.arkModel}
+                            onChange={(arkModel) =>
+                              setForm((previous) => ({ ...previous, arkModel }))
+                            }
+                            footer={
+                              arkModelsLoading ? (
+                                <p className="mt-1 text-[11px] text-muted">
+                                  正在加载模型列表…
+                                </p>
+                              ) : null
+                            }
+                          />
+                        </Row>
+
+                        <Row
+                          label="搜索方式"
+                          hint="火山方舟固定使用智能搜索（模型自主判断是否联网）"
+                        >
+                          <span className="rounded-lg border border-accent bg-accent-dim px-3 py-1.5 text-[13px] text-accent">
+                            智能搜索
+                          </span>
                         </Row>
                       </Section>
                     )}
@@ -833,22 +1253,20 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           />
                         </Row>
 
-                        <Row label="模型" hint="可手填任意模型名；留空恢复默认 gpt-4o-mini">
+                        <Row
+                          label="模型"
+                          hint="填写服务商提供的模型名；OpenAI 兼容接口不预置候选"
+                        >
                           <input
                             type="text"
-                            list="settings-openai-model-options"
                             value={form.openaiModel}
                             onChange={(event) =>
                               setForm({ ...form, openaiModel: event.target.value })
                             }
+                            placeholder="填写模型名"
                             className={`${INPUT_CLASS} w-full`}
                           />
                         </Row>
-                        <datalist id="settings-openai-model-options">
-                          <option value="gpt-4o-mini" />
-                          <option value="gpt-4o" />
-                          <option value="gpt-4.1-mini" />
-                        </datalist>
 
                         <Row label="Organization ID（可选）" hint="仅 OpenAI 官方组织需要填写，留空表示不发送该请求头">
                           <input
@@ -928,6 +1346,12 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                             min={10}
                             max={300}
                           />
+                        </Row>
+
+                        <Row label="联网搜索" hint="OpenAI 兼容服务商暂不支持联网搜索">
+                          <span className="rounded-lg border border-subtle bg-elevated px-3 py-1.5 text-[13px] text-muted opacity-50">
+                            不可用
+                          </span>
                         </Row>
                       </Section>
                     )}

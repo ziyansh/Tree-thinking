@@ -5,7 +5,7 @@ import { Handle, Position } from '@xyflow/react'
 import { Paperclip, Send } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import type { InputGhostNode } from './ghosts'
-import { AttachmentChips, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
+import { AttachmentChips, ArkCapabilityWarning, PdfPageWarning, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
 import { WebSearchToggle } from './WebSearchToggle'
 import { ThinkingToggle } from './ThinkingToggle'
 import { useSpacePressed } from '../lib/spaceKey'
@@ -33,6 +33,9 @@ function GhostInputNodeInner({
   // 草稿按父卡片保存在 store 中：不同卡片的内容各自独立、收起后仍然保留
   const draft = useGraphStore((state) => state.ghostDrafts[data.parentId] ?? '')
   const setGhostDraft = useGraphStore((state) => state.setGhostDraft)
+  // 火山方舟能力提示：当前模型与账号可见模型列表
+  const arkModel = useGraphStore((state) => state.arkModel)
+  const arkModels = useGraphStore((state) => state.arkModels)
   const [pending, setPending] = useState(false)
   const attachments = useAttachmentUploads()
   const pasteAttachments = usePasteAttachments(attachments)
@@ -221,6 +224,12 @@ function GhostInputNodeInner({
                 }}
               />
               <ThinkingToggle />
+              <PdfPageWarning items={attachments.items} />
+              <ArkCapabilityWarning
+                items={attachments.items}
+                model={arkModel}
+                models={arkModels}
+              />
               <WebSearchToggle />
             </div>
             <button

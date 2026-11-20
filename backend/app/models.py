@@ -131,6 +131,10 @@ class _SettingsFields:
     openai_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     openai_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     openai_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    # 火山方舟独立保存的一套配置；Key 为空表示沿用环境变量
+    ark_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ark_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ark_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     # 组织与项目 ID 可选；为空表示不发送
     openai_organization: Mapped[str | None] = mapped_column(String(120), nullable=True)
     openai_project: Mapped[str | None] = mapped_column(String(120), nullable=True)

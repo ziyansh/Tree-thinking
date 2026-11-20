@@ -79,6 +79,10 @@ ALLOWED_ORIGINS=https://tree.example.com
 DEEPSEEK_API_KEY=sk-your-key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-flash
+# Volcengine Ark (optional; in-app Settings take precedence; key encrypted at rest)
+ARK_API_KEY=
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+ARK_MODEL=doubao-seed-2-1-pro-260915
 THINKING_ENABLED=true
 SUGGESTION_COUNT=3
 ```
@@ -95,6 +99,8 @@ Variable reference:
 | `ALLOWED_ORIGINS` | No | Additional allowed origins, comma-separated |
 | `DEEPSEEK_API_KEY` | No | DeepSeek key; can also be set in the in-app Settings. Empty means answers fail |
 | `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | No | API base URL and model name |
+| `ARK_API_KEY` | No | Volcengine Ark key, optional; in-app Settings take precedence and it is stored encrypted |
+| `ARK_BASE_URL` / `ARK_MODEL` | No | Ark base URL and model name, defaulting to `https://ark.cn-beijing.volces.com/api/v3` / `doubao-seed-2-1-pro-260915` |
 | `THINKING_ENABLED` / `SUGGESTION_COUNT` | No | Default thinking mode and suggestion count |
 
 ```bash
@@ -223,8 +229,10 @@ sudo certbot renew --dry-run
 
 ### 7.1 Outbound network and data egress
 
-- The server must be allowed to reach `https://api.deepseek.com` over HTTPS; otherwise answers, document parsing, and web search all fail.
+- The server must be allowed to reach `https://api.deepseek.com` and `https://ark.cn-beijing.volces.com` over HTTPS; otherwise answers, document parsing, and web search fail for that provider.
 - Document parsing: uploading PDF, DOC/DOCX, or PPT/PPTX sends the file to the DeepSeek Files API. The returned `fileId` is bound to the current API key / DeepSeek account; after changing the key or migrating accounts, old documents may stop working and must be re-uploaded.
+- Volcengine Ark files: with Ark, images / video / audio / PDF are uploaded to the Ark Files API (`purpose=user_data`). Files are kept on the Ark side for 7 days by default (configurable 1–30 days). `fileId` values are bound to the API key / account; after changing the key or migrating accounts, old files may stop working and must be re-uploaded.
+- Cost note: video, audio, and PDF content counts toward model tokens, so larger page counts or longer media cost more; a PDF beyond 30 pages triggers the in-app warning “pdf页数过多，费用可能失控”.
 - Smart search and link reading: the question text, search results, and user-provided link content are processed by DeepSeek. Link reading only recognizes URLs in the last user message.
 - If the environment forbids data egress, disable web search in Settings and avoid uploading documents that need parsing; text/image attachments and local canvas data still work.
 - A parsing failure only keeps that document out of the model context; the attachment is still saved. Check backend logs for the reason.
@@ -295,7 +303,7 @@ sudo systemctl status tree-thinking
 
 - `backend/.env` is not tracked, so `git pull` never overwrites it; add any new variables manually.
 - Nginx reads static files from disk, so a browser refresh picks up the new build without reloading Nginx.
-- Schema changes are applied automatically on backend startup, including the `note_links` table and related columns added in v0.3.x; always back up the database before upgrading.
+- Schema changes are applied automatically on backend startup, including the `note_links` table and related columns added in v0.3.x and the `ark_api_key` / `ark_base_url` / `ark_model` settings columns added in v0.3.8; always back up the database before upgrading.
 - If you use document parsing, old `fileId` values remain valid only while the API key / DeepSeek account is unchanged; re-upload documents after changing the key.
 
 ## 10. Troubleshooting
@@ -340,9 +348,9 @@ Increase `client_max_body_size` in Nginx, then `sudo systemctl reload nginx`.
 
 **PDF / Office content is not read by the model**
 
-- Verify the server can reach `api.deepseek.com`, the provider is DeepSeek, and an API key is configured.
+- Verify that the server can reach `api.deepseek.com` and `ark.cn-beijing.volces.com`, and that the active provider (DeepSeek or Volcengine Ark) has a configured API key.
 - When parsing fails the attachment is still saved but stays out of context; check backend logs for the parsing error.
-- After changing the API key or account, re-upload attachments that need parsing.
+- After changing the API key or account, re-upload attachments that need parsing (Ark files are kept for 7 days by default).
 
 **After changing AUTH_SECRET, model calls report an invalid key or ask for the key again**
 

@@ -160,14 +160,57 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 | `Ctrl/Cmd + Z` | 撤销当前画布的上一步操作（含卡片尺寸修改） |
 | `Ctrl/Cmd + S` | 保存当前画布 |
 
+## 火山方舟适配
+
+- **provider 字段**：`deepseek` / `ark` / `openai`，默认 `deepseek`（`backend/app/services/settings.py` 的 `PROVIDERS`，前端类型 `ModelProvider`）。设置页下拉顺序固定为 DeepSeek → 火山方舟 → OpenAI 兼容，「OpenAI 兼容」固定最底。
+- **配置字段**：页面设置为 `arkApiKey` / `arkBaseUrl` / `arkModel`，数据库列为 `ark_api_key` / `ark_base_url` / `ark_model`；Key 加密存储，读取接口只返回 `arkApiKeyMasked`。环境变量兜底为 `ARK_API_KEY` / `ARK_BASE_URL` / `ARK_MODEL`，接口地址与模型留空时回落环境变量默认值（`https://ark.cn-beijing.volces.com/api/v3`、`doubao-seed-2-1-pro-260915`）。
+- **协议选择**：
+  - 基础对话使用 Chat Completions（OpenAI SDK，`{base_url}/chat/completions`）；`thinking` 是顶层扩展字段，通过 `extra_body` 发送 `{"thinking": {"type": "enabled" | "disabled"}}`（默认开启）；不发送 DeepSeek 专有的 `reasoning_effort`、`title` 与 `tools`。
+  - 开启联网搜索时使用 Responses API（`POST {base_url}/responses`，`stream: true`），声明 `tools: [{"type": "web_search", "sources": ["doubao"]}]`，系统消息合并为 `instructions`，PDF 附件转为 `input_file`。解析事件：`response.output_text.delta`、`response.reasoning_text.delta` / `response.reasoning_summary_text.delta`、`response.output_text.annotation.added`、`response.web_search_call.completed`、`response.completed`、`response.failed`。
+- **强制搜索回落**：强制搜索仅有 DeepSeek 的预检索实现；`provider=ark` 时即使配置为 `forced` 也按智能搜索处理（不预检索、不声明 DeepSeek 工具、悬停面板不显示强制搜索开关），前端保存设置时把 `webSearchMode` 归为 `smart`。
+- **会话标题**：仅 DeepSeek 在根卡片首次回答时通过 `enable_title` 请求标题；火山方舟不发送该参数、不生成画布标题。
+- **来源展示**：火山方舟只产出 `sources` 列表，不在正文插入 `[n]` 角标（详见「搜索结果与引用角标展示约定」）。
+
+## 文件输入
+
+- **kind 分类**：`backend/app/services/attachments.py::_kind_of` 按 MIME 与扩展名判定 `image` / `text` / `pdf` / `video` / `audio` / `other`；图片使用 MIME 白名单，视频 / 音频 / 文本使用扩展名白名单。
+- **provider 匹配注入**：附件元数据 `provider` 记录解析方（`ark` / `deepseek`，未解析为 `null`）；`build_message_parts(node, provider)` 遇到 `meta.provider` 与当前服务商不一致时跳过该附件（附件本身仍保留），避免把无效 `fileId` 传给模型。文本附件不区分服务商，始终按文本注入（单文件 20000 字符、合计 60000 字符上限）。
+- **ark 注入**：图片 / 视频 / 音频 / PDF 上传到 Files API（`POST {base_url}/files`，Bearer Key，`purpose=user_data`），轮询 `GET {base_url}/files/{id}` 直到 `status=active` 才保存 `fileId`（最长约 60 秒，失败只记日志并保留附件）。注入内容块为 `image_url` / `video_url` / `input_audio` / `file`，均只带 `file_id`；联网的 Responses 路径只有 PDF 转 `input_file`，其它附件类型跳过。
+- **DeepSeek 与 OpenAI 兼容**：DeepSeek 继续用 Files API（`purpose=text_recognition`）解析 PDF / Office；OpenAI 兼容保持图片 / 文本注入。
+- **PDF 页数提示**：上传接口的 `AttachmentDTO` 返回 `pageCount`（非 PDF 为 `null`）；前端 `PdfPageWarning`（`canvas/AttachmentComposer.tsx`）在任一 PDF `> 30` 页或合计 `> 30` 页时，于四个输入位置（元问题卡片、提问抽屉、自定义方向、分支输入条）底部工具栏的联网按钮左侧显示感叹号与「pdf页数过多，费用可能失控」，不区分服务商与模型。
+- **Files API 过期**：方舟文件默认保存 7 天（1–30 天可在方舟控制台配置）；`fileId` 与 API Key / 账号绑定，更换 Key 或账号后旧 `fileId` 可能失效，需要重新上传附件。
+
 ## 搜索结果与引用角标展示约定
 
-- **所有服务商统一**：后端始终向前端提供 `sources` 数组，正文引用一律使用 `[n]` 角标；前端不区分服务商，序号即 `sources` 下标 + 1（从 1 开始）。前端只识别 `[n]` / `【n】`，不解析服务商原始引用结构。
+- **统一的 `sources` 结构**：所有服务商都向前端提供 `sources` 数组，前端序号按 `sources` 下标 + 1（从 1 开始），只识别 `[n]` / `【n】`，不解析服务商私有引用字段。
+- **正文角标按服务商区分**：DeepSeek（智能搜索与强制搜索）按引用位置在正文插入可点击的 `[n]` 角标；火山方舟只产出 `sources` 列表、**不插 `[n]` 角标**，前端照常展示「参考 N 篇资料」抽屉。
 - **智能搜索遇到用户链接**：最后一条用户消息含 URL 时，后端只声明 `deepseek_read_url`，**不声明** `deepseek_web_search`（二者同时声明且开启思考时，本轮会走深度思考搜索而不阅读用户链接）；并在最后一条消息之前注入链接编号映射 system 消息，原用户消息保持不变。无 URL 时仍声明 `deepseek_web_search`；强制搜索模式不受影响，不声明 `deepseek_read_url`。
 - **输入链接编号规则**：按用户文本中的出现顺序提取，重复 URL 只算第一次，最多前 10 个（与服务商限制一致）；前端胶囊编号必须与此顺序一致。正文引用不使用该编号。
 - **两套编号不得混用**：输入链接编号（「链接1 / 链接2…」）与来源角标 `[n]`（对应 `sources` 下标 + 1）是两套独立编号；提示词须明确告知模型二者不可互换。
-- **智能搜索必须在落库前转换**：智能搜索（模型自主联网）的 `message.annotations` 中，`type=url_citation` 的条目按 `content` 的 Unicode 码点计数，须在落库前用 `apply_citations` 按 `end_index` 插入 `[n]`；URL 不在 `sources` 中时补一条来源，保证序号连续。未转换会导致重新打开画布后角标丢失。
-- **done 事件携带最终正文**：带引用的回答在 `done` 事件中额外返回 `answer`（最终正文），前端用其覆盖流式累积文本，保证流式结束后立即显示角标；无 `annotations` 或失败时保持原有 `{"status": "done"}` 结构。
+- **DeepSeek 智能搜索必须在落库前转换**：DeepSeek 智能搜索（模型自主联网）的 `message.annotations` 中，`type=url_citation` 的条目按 `content` 的 Unicode 码点计数，须在落库前用 `apply_citations` 按 `end_index` 插入 `[n]`；URL 不在 `sources` 中时补一条来源，保证序号连续。未转换会导致重新打开画布后角标丢失。
+- **done 事件携带最终正文**：DeepSeek 带引用的回答在 `done` 事件中额外返回 `answer`（最终正文），前端用其覆盖流式累积文本，保证流式结束后立即显示角标；无 `annotations` 或失败时保持原有 `{"status": "done"}` 结构；火山方舟只推送 `sources`，`done` 仍为 `{"status": "done"}`。
 - **来源页也要进入 sources**：服务端工具调用里的 `sources` 与 `page`（`{url,title,published_at}`）都归一化为来源，去重后按首次出现顺序编号，保证打开 / 阅读网页产生的引用也能找到对应条目。
-- **新增服务商同样适用**：未来接入新服务商时，必须完成同样的标准化——产出 `sources`，并把引用位置转换成正文 `[n]`；不得依赖前端适配服务商私有字段。若新服务商支持读取用户链接，也必须遵循上述约定：按出现顺序去重取前 10 个编号、注入链接映射、与 `[n]` 角标编号严格区分。
+- **新增服务商同样适用**：未来接入新服务商时必须产出 `sources`；能给出精确引用位置的（如 DeepSeek）按 `end_index` 在落库前转换正文 `[n]`，无法给出位置的（如火山方舟）只产出 `sources`、不得伪造角标。若新服务商支持读取用户链接，也必须遵循上述约定：按出现顺序去重取前 10 个编号、注入链接映射、与角标编号严格区分。
 - **不改变前端渲染协议**：后端只负责数据标准化，前端仍按既有规则渲染 `sources` 与 `[n]` 角标，不新增事件类型或字段含义。
+
+## 模型选择输入框约定
+
+- **统一形态**：所有服务商的模型名输入都使用「文本输入框 + 自定义候选浮层」（`SettingsDialog.tsx` 的 `ModelPicker`）；不使用原生 `<select>`，也不使用 `datalist`（高度不可控，一次可见候选项过少）。DeepSeek 与火山方舟已使用该组件；OpenAI 兼容不预置候选，使用纯文本输入（模型名由服务商决定）。
+- **聚焦清空**：输入框获得焦点时清空显示值，浮层直接列出全部候选；不能因为已有值而只过滤出少数候选。点击已聚焦的输入框且浮层已关闭时，重新展开候选。
+- **失焦恢复**：聚焦后没有输入、也没有选择就失焦时，恢复原来的模型；选择候选或手动输入有效模型后失焦则保留新值。手动填写的接入点 / 模型 id 允许保留。
+- **显示名称**：候选项只显示易读名称（如 `Doubao-Seed-2.1-lite`），不显示冗长的完整 id；去掉末尾 6 位版本号，把 `2-1` 形式转成 `2.1`；仅当多个版本同名时才附加版本号。
+- **只列 LLM**：候选只保留 `output_modalities` 包含 `text` 的模型，排除图片、视频、3D、向量化等生成模型；无法获取能力时使用内置 LLM 候选。
+- **字母排序**：候选项按显示名称的字母顺序排序（`localeCompare`），不按接口返回顺序。
+- **一次多显示**：浮层高度由 `visibleCount` 控制（默认 9 项，约 296px），内部独立滚动，减少滚轮操作；候选很多时不要把列表截断成固定几项。
+- **不被裁剪**：浮层使用 `fixed` 定位，坐标按输入框的 `getBoundingClientRect()` 计算，避免被设置弹窗的滚动容器裁剪；下方空间不足 220px 时向上展开，高度按可用空间收缩。选项卡滚动或窗口缩放时收起浮层。
+- **宽度**：设置行右侧控件列统一为 `380px`、最大 `46%`；不要为了展示更多候选去加宽输入框，展示数量由浮层高度解决。
+- **新增服务商**：接入新服务商时，模型选择框必须复用上述交互（输入框 + 可滚动浮层、聚焦清空、失焦恢复、名称显示、字母排序、只列 LLM）。
+
+## 下拉框统一约定
+
+- **统一形态**：所有下拉框（服务商、释放连线动作等）都使用毛玻璃浮层，不再使用原生 `<select>`；列表容器样式与模型候选浮层一致（`glass-surface` + `rounded-lg` + `border-subtle` + `shadow-xl`）。
+- **复用实现**：使用 `SettingsDialog.tsx` 的 `SelectRow`（只读下拉）与 `ModelPicker`（可输入模型选择），二者共用 `useFloatingMenu` 处理定位与收起，不要各自重写。
+- **定位与收起**：浮层使用 `fixed` 定位并按触发元素 `getBoundingClientRect()` 计算坐标，避免被设置弹窗的滚动容器裁剪；下方空间不足时向上展开。页面滚动、窗口缩放、点击外部或失焦时收起，浮层内部滚动不触发收起。
+- **显示项数可调**：`SelectRow` 与 `ModelPicker` 均提供 `visibleCount` 参数（默认 9 项），高度按 `visibleCount * 32 + 8` 估算并与可用空间取小；选项较多时由浮层内部滚动。
+- **交互**：点击选项选中并关闭；当前值用强调色高亮；选项按钮 `onMouseDown` 阻止默认行为，避免浮层先因失焦关闭。
+- **新增下拉框**：复用上述组件，不要新增原生 `<select>`。

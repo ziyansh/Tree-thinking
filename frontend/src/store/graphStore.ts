@@ -128,7 +128,7 @@ const DEFAULT_PREFERENCES: Preferences = {
   panInertiaEnabled: false,
   panInertiaCoefficient: 0.5,
   canvasStyle: 'none',
-  searchLimit: 0,
+  searchLimit: 50,
 }
 
 /** 从设置 DTO 中摘出偏好字段，保证 store 与后端返回值同形 */

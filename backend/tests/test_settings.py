@@ -46,14 +46,14 @@ def test_settings_defaults(client):
     assert data["panInertiaEnabled"] is False
     assert data["panInertiaCoefficient"] == 0.5
     assert data["canvasStyle"] == "none"
-    # 模型搜索上限默认 0（不设限）
-    assert data["searchLimit"] == 0
+    # 模型搜索上限默认 50
+    assert data["searchLimit"] == 50
 
 
 def test_settings_search_limit_clamp(client):
-    """模型搜索上限允许 0（不设限），负数归 0，超出 50 夹到上限。"""
-    assert client.put("/api/settings", json={"searchLimit": 0}).json()["searchLimit"] == 0
-    assert client.put("/api/settings", json={"searchLimit": -3}).json()["searchLimit"] == 0
+    """模型搜索上限默认 50，旧客户端的 0 按 50 处理，负数归 1，超出 50 夹到上限。"""
+    assert client.put("/api/settings", json={"searchLimit": 0}).json()["searchLimit"] == 50
+    assert client.put("/api/settings", json={"searchLimit": -3}).json()["searchLimit"] == 1
     assert client.put("/api/settings", json={"searchLimit": 8}).json()["searchLimit"] == 8
     assert client.put("/api/settings", json={"searchLimit": 999}).json()["searchLimit"] == 50
     assert client.get("/api/settings").json()["searchLimit"] == 50
@@ -320,3 +320,16 @@ def test_deepseek_thinking_disabled_is_sent_explicitly():
     assert llm._request_params(options) == {
         "extra_body": {"thinking": {"type": "disabled"}},
     }
+
+
+def test_resolve_respects_empty_runtime_key(monkeypatch):
+    """runtime 显式给出空 api_key 时不得回落到 .env（服务器模式安全边界）。"""
+    from app import config
+
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "sk-env-deepseek")
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-env-openai")
+    monkeypatch.setattr(config, "ARK_API_KEY", "sk-env-ark")
+
+    for provider in ("deepseek", "openai", "ark"):
+        options = llm._resolve({"provider": provider, "api_key": ""})
+        assert options["api_key"] == "", provider

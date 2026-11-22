@@ -6,6 +6,7 @@ import { AuthPage } from './components/AuthPage'
 import { Sidebar } from './components/Sidebar'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Toast } from './components/Toast'
+import { WipNotice } from './components/WipNotice'
 import { useGraphStore } from './store/graphStore'
 
 /** 启动阶段：读取会话 → 登录页 / 画布 */
@@ -28,6 +29,8 @@ function App() {
   // 当前会话与启动阶段：server 模式未登录时只渲染登录页
   const [session, setSession] = useState<AuthSession | null>(null)
   const [phase, setPhase] = useState<Phase>('loading')
+  // 服务器模式首次登录的开发中提示；按账号记录，同一浏览器只弹一次
+  const [wipOpen, setWipOpen] = useState(false)
 
   /** 初始化画布：打开最近更新的画布，一个都没有时新建第一个 */
   const initCanvas = useCallback(async () => {
@@ -169,6 +172,33 @@ function App() {
     return () => window.clearInterval(timer)
   }, [currentProjectId, autosaveMinutes])
 
+  // 服务器模式登录后（含刷新恢复会话）检查该账号是否已看过开发中提示
+  useEffect(() => {
+    if (session?.mode !== 'server' || !session.user) {
+      setWipOpen(false)
+      return
+    }
+    const key = `tree-thinking:wip-notice:${session.user.id}`
+    try {
+      setWipOpen(window.localStorage.getItem(key) !== '1')
+    } catch {
+      // 隐私模式等禁用 localStorage 时仍提示一次，不影响主流程
+      setWipOpen(true)
+    }
+  }, [session])
+
+  /** 关闭开发中提示，并记录该账号已确认 */
+  const closeWipNotice = useCallback(() => {
+    if (session?.user) {
+      try {
+        window.localStorage.setItem(`tree-thinking:wip-notice:${session.user.id}`, '1')
+      } catch {
+        // 无法持久化时只关闭当前弹窗
+      }
+    }
+    setWipOpen(false)
+  }, [session])
+
   // 读取会话期间只显示居中加载态，避免闪现登录页
   if (phase === 'loading') {
     return (
@@ -194,6 +224,7 @@ function App() {
         <Canvas />
       </div>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <WipNotice open={wipOpen} onClose={closeWipNotice} />
       <Toast message={toast} />
     </div>
   )

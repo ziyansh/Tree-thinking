@@ -10,14 +10,14 @@
 | 服务器模式 | `APP_MODE=server` | 部署在服务器上，多人同时在线使用 | 需要注册 / 登录，数据按账号隔离 |
 
 - 本地模式默认只监听 `127.0.0.1`，不应对公网开放。
-- 服务器模式必须配合 HTTPS（见第 7 节），否则登录 Cookie 无法安全下发。
+- 服务器模式必须配合 HTTPS（见第 6 节），否则登录 Cookie 无法安全下发。
 - 两种模式共用同一套数据库结构；切换模式不迁移数据，本地数据仍属于原来的匿名空间。
 
 ## 2. 服务器要求
 
 - 操作系统：Ubuntu 22.04+ 或 Debian 12+
-- Python 3.11+
-- Node.js 20+（仅构建前端时需要，构建完成后服务器可不保留 Node）
+- Python 3.10+
+- Node.js 20.19+（仅构建前端时需要，构建完成后服务器可不保留 Node）
 - Nginx 1.18+
 - 建议 2 vCPU / 2 GB 内存以上；附件与数据库占用的磁盘按实际使用量预留
 
@@ -75,16 +75,9 @@ UPLOAD_DIR=/var/lib/tree-thinking/uploads
 # 允许直接跨域访问后端的来源；同域经 Nginx 反代时可不配置
 ALLOWED_ORIGINS=https://tree.example.com
 
-# 模型服务
-DEEPSEEK_API_KEY=sk-你的Key
-DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-flash
-# 火山方舟（可留空，页面「设置」优先；Key 加密存储）
-ARK_API_KEY=
-ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-ARK_MODEL=doubao-seed-2-1-pro-260915
-THINKING_ENABLED=true
-SUGGESTION_COUNT=3
+# 模型服务 Key 不在此配置：服务器模式下每个账号在页面「设置」中填写自己的 Key
+# backend/.env 中的 DEEPSEEK_API_KEY / OPENAI_API_KEY / ARK_API_KEY
+# 以及 THINKING_ENABLED / SUGGESTION_COUNT 只在 local 模式生效
 ```
 
 变量说明：
@@ -93,15 +86,11 @@ SUGGESTION_COUNT=3
 | --- | --- | --- |
 | `APP_MODE` | 是 | `local`（默认）或 `server`；`server` 开启多用户与登录 |
 | `AUTH_SECRET` | `server` 必填 | 登录凭证签名与模型 Key 加密密钥，使用强随机串；缺失时服务启动失败。变更后所有会话失效，且已保存的模型 API Key 无法解密，需要在页面「设置」中重新填写 |
-| `AUTH_COOKIE_SECURE` | 建议 `true` | 仅通过 HTTPS 下发登录 Cookie；本地 HTTP 调试时可设为 `false` |
+| `AUTH_COOKIE_SECURE` | 默认 `true` | 仅通过 HTTPS 下发登录 Cookie；本地 HTTP 调试时可设为 `false` |
 | `DB_PATH` | 否 | SQLite 文件路径，默认 `backend/data/app.db`；相对路径按仓库根目录解析 |
 | `UPLOAD_DIR` | 否 | 附件目录，默认 `backend/data/uploads` |
 | `ALLOWED_ORIGINS` | 否 | 额外允许的跨域来源，多个用逗号分隔 |
-| `DEEPSEEK_API_KEY` | 否 | DeepSeek Key，也可在页面「设置」中填写；留空则回答报错 |
-| `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | 否 | 接口地址与模型名 |
-| `ARK_API_KEY` | 否 | 火山方舟 Key，可留空；页面「设置」优先且加密存储 |
-| `ARK_BASE_URL` / `ARK_MODEL` | 否 | 火山方舟接口地址与模型名，默认 `https://ark.cn-beijing.volces.com/api/v3` / `doubao-seed-2-1-pro-260915` |
-| `THINKING_ENABLED` / `SUGGESTION_COUNT` | 否 | 思考模式与候选方向数量默认值 |
+| `DEEPSEEK_*` / `OPENAI_*` / `ARK_*` / `THINKING_ENABLED` / `SUGGESTION_COUNT` | 否 | **仅 local 模式生效**；服务器模式忽略这些值，模型 Key 与参数由每个账号在页面「设置」中独立配置 |
 
 ```bash
 sudo chown tree:tree /opt/tree-thinking/backend/.env
@@ -222,24 +211,29 @@ sudo certbot renew --dry-run
 ## 7. 多用户说明
 
 - 服务器模式下首次访问需要注册账号，之后登录使用；本地模式没有账号概念。
-- 用户名长度 3–32 个字符，密码长度 8–72 个字符。
+- 用户名需为 3–32 位字母、数字或下划线且不可重复；密码长度 4–12 位。注册页在输入框失焦后即时校验，并在输入框下方提示原因；提交时服务端仍会最终校验。
 - 忘记密码暂不支持自助找回，需要通过服务管理员处理。
 - 每个账号只能看到自己的画布、附件与设置，数据按账号隔离。
-- 模型 API Key 加密存储在后端数据库中，接口只返回脱敏值（如 `sk-••••7890`），不会下发到浏览器。
+- 每个新账号的设置独立初始化：全部为默认值且**不包含任何 API Key**；服务器模式不会继承 `backend/.env` 中的模型 Key。
+- 模型 API Key 加密存储在后端数据库中，接口只返回脱敏值（如 `sk-••••7890`），不会下发到浏览器，也不会写入浏览器缓存。
+- 登录 Cookie 名为 `tt_session_server`（HttpOnly、SameSite=Lax）；本地模式不读取该 Cookie，同一台机器同时运行本地与在线实例时不会串用登录态。
+- 设置弹窗左下角「恢复默认设置」可恢复全部设置并保留已保存的 Key，只影响当前账号。
 
 ### 7.1 出站网络与数据外发
 
 - 服务器需要允许访问 `https://api.deepseek.com` 与 `https://ark.cn-beijing.volces.com`（HTTPS 出站），否则对应服务商的回答、文件解析与联网搜索都会失败。
-- 文件解析：上传 PDF、DOC/DOCX、PPT/PPTX 时，后端会把文件上传到 DeepSeek Files API 进行解析。`fileId` 与当前 API Key / DeepSeek 账号绑定，更换 Key 或迁移账号后旧文档可能失效，需要重新上传。
+- 使用 OpenAI 兼容服务时，还需允许访问页面「设置」中填写的接口地址（如 `https://api.openai.com`）。
+- 文件解析（DeepSeek）：使用 DeepSeek 时，上传 PDF、DOC/DOCX、PPT/PPTX 会把文件上传到 DeepSeek Files API 进行解析。`fileId` 与当前 API Key / DeepSeek 账号绑定，更换 Key 或迁移账号后旧文档可能失效，需要重新上传。
 - 火山方舟文件：使用方舟时，图片 / 视频 / 音频 / PDF 会上传到方舟 Files API（`purpose=user_data`），文件默认在方舟侧存储 7 天（1–30 天可配）；`fileId` 与 API Key / 账号绑定，更换 Key 或迁移账号后旧文件可能失效，需要重新上传。
 - 成本提示：视频、音频与 PDF 会按附件内容计入模型 token，页数或时长越大成本越高；PDF 超过 30 页时界面会提示「pdf页数过多，费用可能失控」。
-- 智能搜索与读取链接：问题文本、搜索结果、用户提供的链接内容由 DeepSeek 服务端处理。读取链接只识别最后一条用户消息中的 URL。
+- 智能搜索与读取链接：问题文本与搜索结果由所选服务商处理（DeepSeek / 火山方舟）；DeepSeek 读取链接时只识别最后一条用户消息中的 URL。
+- 不会外发：其他账号的画布、附件、设置与 API Key；未选中服务商的 Key 与配置（例如用 DeepSeek 回答时不会发送 OpenAI / 方舟 Key）；浏览器缓存不保存明文 Key 或设置。
 - 如果部署环境不允许数据外发，请在页面设置中关闭联网搜索，并避免上传需要解析的文档；普通文本/图片附件与本地画布数据仍可正常使用。
 - 文件解析失败只会让该文档不进入模型上下文，附件本身仍会保存，可在后端日志中查看原因。
 
 ## 8. 数据备份与恢复
 
-需要备份的内容只有两处：SQLite 数据库文件与 `uploads` 上传目录。
+需要备份的内容：SQLite 数据库文件、`uploads` 上传目录，以及 `backend/.env`（至少保管其中的 `AUTH_SECRET`；丢失或更换后，已保存的模型 API Key 将无法解密）。
 
 ### 8.1 手动备份
 
@@ -249,6 +243,8 @@ sudo mkdir -p /var/backups/tree-thinking
 sudo sqlite3 /var/lib/tree-thinking/app.db ".backup '/var/backups/tree-thinking/app.db'"
 # 打包上传目录
 sudo tar czf /var/backups/tree-thinking/uploads-$(date +%F).tar.gz -C /var/lib/tree-thinking uploads
+# 备份环境变量（含 AUTH_SECRET，重装服务器时用于解密已保存的 Key）
+sudo cp /opt/tree-thinking/backend/.env /var/backups/tree-thinking/env-$(date +%F).bak
 ```
 
 ### 8.2 定时备份
@@ -263,6 +259,7 @@ DEST=/var/backups/tree-thinking
 mkdir -p "$DEST"
 sqlite3 /var/lib/tree-thinking/app.db ".backup '$DEST/app-$STAMP.db'"
 tar czf "$DEST/uploads-$STAMP.tar.gz" -C /var/lib/tree-thinking uploads
+cp /opt/tree-thinking/backend/.env "$DEST/env-$STAMP.bak"
 # 只保留最近 14 天
 find "$DEST" -type f -mtime +14 -delete
 ```
@@ -277,6 +274,10 @@ echo '30 3 * * * root /usr/local/bin/tree-thinking-backup.sh >> /var/log/tree-th
 
 ```bash
 sudo systemctl stop tree-thinking
+# 重装服务器时先恢复 .env（AUTH_SECRET 必须与备份时一致，否则旧 API Key 无法解密）
+sudo cp /var/backups/tree-thinking/env-2026-11-15.bak /opt/tree-thinking/backend/.env
+sudo chown tree:tree /opt/tree-thinking/backend/.env
+sudo chmod 600 /opt/tree-thinking/backend/.env
 sudo cp /var/backups/tree-thinking/app-2026-11-15.db /var/lib/tree-thinking/app.db
 sudo tar xzf /var/backups/tree-thinking/uploads-2026-11-15.tar.gz -C /var/lib/tree-thinking
 sudo chown -R tree:tree /var/lib/tree-thinking
@@ -303,6 +304,7 @@ sudo systemctl status tree-thinking
 
 - `backend/.env` 不在版本库中，`git pull` 不会覆盖，新增变量请手动补充。
 - 静态文件由 Nginx 直接读取，重新构建后浏览器刷新即可生效，无需重载 Nginx。
+- 从 0.3.11 及更早版本升级到 0.3.12+：会话 Cookie 已更名为 `tt_session_server`，旧登录态失效，所有用户需要重新登录一次。
 - 数据结构变更由后端启动时自动处理（含 v0.3.x 新增的 `note_links` 表与相关列、v0.3.8 新增的 `ark_api_key` / `ark_base_url` / `ark_model` 设置列），升级前务必备份数据库。
 - 如使用文件解析，旧文档的 `fileId` 仍有效的前提是 API Key / DeepSeek 账号未变；更换 Key 后请重新上传需要解析的文档。
 
@@ -312,6 +314,7 @@ sudo systemctl status tree-thinking
 
 - 未登录或登录已过期：重新登录。
 - 修改过 `AUTH_SECRET`：旧登录凭证一律失效，需要重新登录。
+- 从 0.3.11 及更早版本升级：会话 Cookie 已更名为 `tt_session_server`，旧 Cookie 不再识别，重新登录即可。
 - 浏览器未携带 Cookie：检查是否通过 HTTPS 访问、域名是否与 `server_name` 一致。
 
 **登录成功但刷新后又变成未登录（Cookie 不生效）**

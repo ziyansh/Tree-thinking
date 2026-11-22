@@ -406,6 +406,11 @@ export const mockApi: ApiClient = {
     // 本地模式没有会话，直接视为成功
   },
 
+  async checkUsername() {
+    // Mock 模式没有账号体系，统一返回不可用
+    return { available: false, reason: 'Mock 模式为本地模式，无需注册' }
+  },
+
   async exportProject(id) {
     await delay(80)
     const db = getDb()
@@ -1067,6 +1072,23 @@ export const mockApi: ApiClient = {
     }
     saveSettingsState(settings)
     return { ...settings }
+  },
+
+  async resetSettings() {
+    await delay(60)
+    // 恢复默认：保留已配置的 Key 与其脱敏值，其余字段回到默认
+    const current = getSettingsState()
+    const reset: SettingsDTO = {
+      ...DEFAULT_SETTINGS,
+      hasKey: current.hasKey,
+      apiKeyMasked: current.apiKeyMasked,
+      openaiHasKey: current.openaiHasKey,
+      openaiApiKeyMasked: current.openaiApiKeyMasked,
+      arkHasKey: current.arkHasKey,
+      arkApiKeyMasked: current.arkApiKeyMasked,
+    }
+    saveSettingsState(reset)
+    return { ...reset }
   },
 
   // Mock 模式不校验 Key，始终返回内置模型列表

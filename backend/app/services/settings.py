@@ -83,8 +83,9 @@ MAX_PAN_INERTIA_COEFFICIENT = 1.0
 # 画布背景样式：none（无）/ dots（点状）
 DEFAULT_CANVAS_STYLE = "none"
 CANVAS_STYLES = ("none", "dots")
-# 模型搜索上限：注入模型的资料条数，0 表示不设限
-DEFAULT_SEARCH_LIMIT = 0
+# 模型搜索上限：注入模型的资料条数，默认 50，范围 1–50
+DEFAULT_SEARCH_LIMIT = 50
+MIN_SEARCH_LIMIT = 1
 MAX_SEARCH_LIMIT = 50
 # 联网搜索模式：smart（模型自主搜索）/ forced（预检索注入）
 DEFAULT_WEB_SEARCH_MODE = "smart"
@@ -93,6 +94,14 @@ WEB_SEARCH_MODES = ("smart", "forced")
 # 服务商：DeepSeek（默认）/ 火山方舟 / OpenAI
 DEFAULT_PROVIDER = "deepseek"
 PROVIDERS = ("deepseek", "ark", "openai")
+# 服务商默认地址与模型：服务器模式的新用户一律从这些硬编码默认值开始
+DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+DEFAULT_DEEPSEEK_MODEL = "deepseek-flash"
+DEFAULT_ARK_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+DEFAULT_ARK_MODEL = "doubao-seed-2-1-pro-260915"
+DEFAULT_THINKING_ENABLED = True
+DEFAULT_WEB_SEARCH_ENABLED = False
+DEFAULT_SUGGESTION_COUNT = 3
 # OpenAI 默认地址、模型与可选参数
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_OPENAI_MODEL = "gpt-4o-mini"
@@ -170,8 +179,9 @@ def _settings_row(
     db: Session, user: User | None
 ) -> AppSetting | UserSetting | None:
     """取当前生效的设置行：local 用 app_settings，server 用该用户的 user_settings。"""
-    if auth.is_server_mode() and user is not None:
-        return db.get(UserSetting, user.id)
+    if auth.is_server_mode():
+        # 服务器模式没有「全局设置」：未登录或后台任务不读取任何人的配置
+        return db.get(UserSetting, user.id) if user is not None else None
     return db.get(AppSetting, SETTINGS_ID)
 
 
@@ -196,42 +206,60 @@ def _row_secret(row: AppSetting | UserSetting | None, name: str) -> str:
 def effective(db: Session, user: User | None = None) -> dict:
     """取得当前生效的设置，供模型调用链路使用（包含明文 Key，禁止返回前端）。"""
     row = _settings_row(db, user)
+    # 服务器模式只使用该用户自己保存的值 + 硬编码默认值，绝不继承服务端 .env 密钥
+    server = auth.is_server_mode()
 
     provider = _effective_choice(
         row.provider if row else None, PROVIDERS, DEFAULT_PROVIDER
     )
 
-    # DeepSeek：数据库值优先，其次 .env
+    # DeepSeek：本地模式数据库优先、其次 .env；服务器模式不读取 .env
     deepseek_api_key = (
-        _row_secret(row, "api_key") or config.DEEPSEEK_API_KEY or ""
+        _row_secret(row, "api_key")
+        if server
+        else (_row_secret(row, "api_key") or config.DEEPSEEK_API_KEY or "")
     ).strip()
     deepseek_base_url = _effective_text(
-        row.base_url if row else None, config.DEEPSEEK_BASE_URL
+        row.base_url if row else None,
+        DEFAULT_DEEPSEEK_BASE_URL if server else config.DEEPSEEK_BASE_URL,
     )
-    deepseek_model = _effective_text(row.model if row else None, config.DEEPSEEK_MODEL)
+    deepseek_model = _effective_text(
+        row.model if row else None,
+        DEFAULT_DEEPSEEK_MODEL if server else config.DEEPSEEK_MODEL,
+    )
 
     if row and row.thinking_enabled is not None:
         thinking_enabled = bool(row.thinking_enabled)
     else:
-        thinking_enabled = bool(config.THINKING_ENABLED)
+        thinking_enabled = (
+            DEFAULT_THINKING_ENABLED if server else bool(config.THINKING_ENABLED)
+        )
 
-    # 联网搜索：数据库开关优先，否则回落到环境变量默认值
+    # 联网搜索：数据库开关优先；本地模式回落到环境变量，服务器模式默认关闭
     if row and row.web_search_enabled is not None:
         web_search_enabled = bool(row.web_search_enabled)
     else:
-        web_search_enabled = bool(config.WEB_SEARCH_ENABLED)
+        web_search_enabled = (
+            DEFAULT_WEB_SEARCH_ENABLED if server else bool(config.WEB_SEARCH_ENABLED)
+        )
 
-    # OpenAI：独立保存，数据库为空时回落到 .env / 默认值
+    # OpenAI：服务器模式只使用用户自己的 Key，地址与模型从硬编码默认值开始
     openai_api_key = (
-        _row_secret(row, "openai_api_key") or config.OPENAI_API_KEY or ""
+        _row_secret(row, "openai_api_key")
+        if server
+        else (_row_secret(row, "openai_api_key") or config.OPENAI_API_KEY or "")
     ).strip()
     openai_base_url = _effective_text(
         row.openai_base_url if row else None,
-        config.OPENAI_BASE_URL or DEFAULT_OPENAI_BASE_URL,
+        DEFAULT_OPENAI_BASE_URL
+        if server
+        else (config.OPENAI_BASE_URL or DEFAULT_OPENAI_BASE_URL),
     )
     openai_model = _effective_text(
         row.openai_model if row else None,
-        config.OPENAI_MODEL or DEFAULT_OPENAI_MODEL,
+        DEFAULT_OPENAI_MODEL
+        if server
+        else (config.OPENAI_MODEL or DEFAULT_OPENAI_MODEL),
     )
     openai_organization = (
         (row.openai_organization or "").strip() if row else ""
@@ -242,12 +270,20 @@ def effective(db: Session, user: User | None = None) -> dict:
     else:
         temperature_enabled = False
 
-    # 火山方舟：独立保存，数据库为空时回落到 .env / 默认值
-    ark_api_key = (_row_secret(row, "ark_api_key") or config.ARK_API_KEY or "").strip()
+    # 火山方舟：服务器模式同样只使用用户自己的 Key
+    ark_api_key = (
+        _row_secret(row, "ark_api_key")
+        if server
+        else (_row_secret(row, "ark_api_key") or config.ARK_API_KEY or "")
+    ).strip()
     ark_base_url = _effective_text(
-        row.ark_base_url if row else None, config.ARK_BASE_URL
+        row.ark_base_url if row else None,
+        DEFAULT_ARK_BASE_URL if server else config.ARK_BASE_URL,
     )
-    ark_model = _effective_text(row.ark_model if row else None, config.ARK_MODEL)
+    ark_model = _effective_text(
+        row.ark_model if row else None,
+        DEFAULT_ARK_MODEL if server else config.ARK_MODEL,
+    )
 
     # 当前生效的一套 Key / 地址 / 模型：由服务商决定
     if provider == "openai":
@@ -260,8 +296,13 @@ def effective(db: Session, user: User | None = None) -> dict:
     if row and row.suggestion_count is not None:
         count = int(row.suggestion_count)
     else:
-        count = int(config.SUGGESTION_COUNT)
+        count = DEFAULT_SUGGESTION_COUNT if server else int(config.SUGGESTION_COUNT)
     count = max(MIN_SUGGESTION_COUNT, min(MAX_SUGGESTION_COUNT, count))
+
+    # 旧配置的 0 表示「不设限」，新版本统一按默认 50 处理
+    search_limit_db = row.search_limit if row else None
+    if search_limit_db == 0:
+        search_limit_db = DEFAULT_SEARCH_LIMIT
 
     return {
         "provider": provider,
@@ -416,9 +457,9 @@ def effective(db: Session, user: User | None = None) -> dict:
             row.canvas_style if row else None, CANVAS_STYLES, DEFAULT_CANVAS_STYLE
         ),
         "search_limit": _effective_int(
-            row.search_limit if row else None,
+            search_limit_db,
             DEFAULT_SEARCH_LIMIT,
-            DEFAULT_SEARCH_LIMIT,
+            MIN_SEARCH_LIMIT,
             MAX_SEARCH_LIMIT,
         ),
     }
@@ -485,7 +526,7 @@ def dto(db: Session, user: User | None = None) -> dict:
         "panInertiaEnabled": values["pan_inertia_enabled"],
         "panInertiaCoefficient": values["pan_inertia_coefficient"],
         "canvasStyle": values["canvas_style"],
-        # 模型搜索上限（0 = 不设限）
+        # 模型搜索上限（1–50，旧配置的 0 按 50 处理）
         "searchLimit": values["search_limit"],
     }
 
@@ -692,10 +733,12 @@ def update(db: Session, patch: dict, user: User | None = None) -> dict:
             patch["canvas_style"], CANVAS_STYLES, DEFAULT_CANVAS_STYLE
         )
     if patch.get("search_limit") is not None:
+        # 旧客户端仍可能提交 0：按默认 50 处理；合法范围 1–50
+        limit_value = DEFAULT_SEARCH_LIMIT if int(patch["search_limit"]) == 0 else patch["search_limit"]
         row.search_limit = _effective_int(
-            patch["search_limit"],
+            limit_value,
             DEFAULT_SEARCH_LIMIT,
-            DEFAULT_SEARCH_LIMIT,
+            MIN_SEARCH_LIMIT,
             MAX_SEARCH_LIMIT,
         )
 
@@ -705,5 +748,22 @@ def update(db: Session, patch: dict, user: User | None = None) -> dict:
         if value and not value.startswith(auth.ENC_PREFIX):
             setattr(row, name, auth.encrypt_secret(value))
 
+    db.commit()
+    return dto(db, user)
+
+
+# 恢复默认时保留的敏感字段：只重置其它设置，密钥继续沿用
+_SECRET_FIELDS = {"api_key", "openai_api_key", "ark_api_key"}
+
+
+def reset(db: Session, user: User | None = None) -> dict:
+    """恢复全部设置为默认值，保留已保存的 API Key。"""
+    row = _writable_row(db, user)
+    for column in row.__table__.columns:
+        name = column.name
+        # 主键、归属与时间戳不动；三个 Key 也不动
+        if name in {"id", "user_id", "updated_at"} or name in _SECRET_FIELDS:
+            continue
+        setattr(row, name, None)
     db.commit()
     return dto(db, user)

@@ -174,7 +174,7 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 ## 火山方舟适配
 
 - **provider 字段**：`deepseek` / `ark` / `openai`，默认 `deepseek`（`backend/app/services/settings.py` 的 `PROVIDERS`，前端类型 `ModelProvider`）。设置页下拉顺序固定为 DeepSeek → 火山方舟 → OpenAI 兼容，「OpenAI 兼容」固定最底。
-- **配置字段**：页面设置为 `arkApiKey` / `arkBaseUrl` / `arkModel`，数据库列为 `ark_api_key` / `ark_base_url` / `ark_model`；Key 加密存储，读取接口只返回 `arkApiKeyMasked`。环境变量兜底为 `ARK_API_KEY` / `ARK_BASE_URL` / `ARK_MODEL`，接口地址与模型留空时回落环境变量默认值（`https://ark.cn-beijing.volces.com/api/v3`、`doubao-seed-2-1-pro-260915`）。
+- **配置字段**：页面设置为 `arkApiKey` / `arkBaseUrl` / `arkModel`，数据库列为 `ark_api_key` / `ark_base_url` / `ark_model`；Key 加密存储，读取接口只返回 `arkApiKeyMasked`。`ARK_API_KEY` / `ARK_BASE_URL` / `ARK_MODEL` 仅在 local 模式作为兜底；服务器模式不读取这些环境变量，Key 只来自当前用户设置，地址与模型使用硬编码默认值（`https://ark.cn-beijing.volces.com/api/v3`、`doubao-seed-2-1-pro-260915`）。
 - **协议选择**：
   - 基础对话使用 Chat Completions（OpenAI SDK，`{base_url}/chat/completions`）；`thinking` 是顶层扩展字段，通过 `extra_body` 发送 `{"thinking": {"type": "enabled" | "disabled"}}`（默认开启）；不发送 DeepSeek 专有的 `reasoning_effort`、`title` 与 `tools`。
   - 开启联网搜索时使用 Responses API（`POST {base_url}/responses`，`stream: true`），声明 `tools: [{"type": "web_search", "sources": ["doubao"]}]`，系统消息合并为 `instructions`，PDF 附件转为 `input_file`。解析事件：`response.output_text.delta`、`response.reasoning_text.delta` / `response.reasoning_summary_text.delta`、`response.output_text.annotation.added`、`response.web_search_call.completed`、`response.completed`、`response.failed`。
@@ -226,6 +226,15 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 - **显示项数可调**：`SelectRow` 与 `ModelPicker` 均提供 `visibleCount` 参数（默认 9 项），高度按 `visibleCount * 32 + 8` 估算并与可用空间取小；选项较多时由浮层内部滚动。
 - **交互**：点击选项选中并关闭；当前值用强调色高亮；选项按钮 `onMouseDown` 阻止默认行为，避免浮层先因失焦关闭。
 - **新增下拉框**：复用上述组件，不要新增原生 `<select>`。
+
+## 服务器设置与数据边界
+
+- **设置归属**：local 模式使用 `app_settings`（固定 `id=1`）；server 模式使用 `user_settings`（每个用户一行，`user_id` 为主键）。server 模式下 `settings._settings_row()` 在用户为空时返回 `None`，不得回落到 `app_settings`。
+- **密钥隔离**：server 模式的三个 Key（`api_key` / `openai_api_key` / `ark_api_key`）只读取当前用户设置行；地址、模型与开关使用硬编码默认值，禁止回落到 `backend/.env`。`.env` 只在 local 模式作为兜底。
+- **新用户初始化**：注册时先 `db.flush()` 取得用户主键，再写入空的 `UserSetting` 行，避免在未 flush 时使用 `user.id`（此时仍为 `None`）。
+- **恢复默认**：`settings.reset()` 遍历设置列，跳过 `id` / `user_id` / `updated_at` 与三个 Key 字段，其余置 `None`；新增设置列会自动纳入重置，不需要改代码。
+- **浏览器缓存**：前端不得把 Key 或敏感设置写入 `localStorage` / `sessionStorage`；目前仅「已看过开发中提示」标记使用 `localStorage`，Mock 模式在 `sessionStorage` 中只保存脱敏 Key。
+- **数据外发**：仅在回答、联网搜索、文档解析时向当前服务商发送「根 → 当前节点」上下文与所选附件；不得发送其他账号数据、未选中服务商的 Key 与配置。新增任何外部请求都必须按此边界审查。
 
 ## 更新日志写作约定
 

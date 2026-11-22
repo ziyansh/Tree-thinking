@@ -31,6 +31,12 @@ export interface StopNodePayload {
 /** 所有请求走同源 /api，开发环境由 vite 代理到后端 8000 端口 */
 const API_BASE = '/api'
 
+/** 用户名检查结果：reason 为不可用原因，可用时为 null */
+export interface UsernameCheck {
+  available: boolean
+  reason: string | null
+}
+
 /** 后端返回的非 2xx 响应统一抛此错误，message 为后端 detail 的中文文案 */
 export class ApiError extends Error {
   status: number
@@ -130,6 +136,8 @@ export interface ApiClient {
   register(username: string, password: string): Promise<AuthUser>
   login(username: string, password: string): Promise<AuthUser>
   logout(): Promise<void>
+  /** 注册前检查用户名格式与是否已被占用 */
+  checkUsername(username: string): Promise<UsernameCheck>
   /** 导出画布为 JSON 文件（Blob），供浏览器下载 */
   exportProject(id: string): Promise<Blob>
   /** 导入画布文件，返回新建画布与根节点 id */
@@ -195,6 +203,8 @@ export interface ApiClient {
   createBranch(nodeId: string): Promise<NodeDTO>
   getSettings(): Promise<SettingsDTO>
   updateSettings(patch: SettingsPatch): Promise<SettingsDTO>
+  /** 恢复默认设置（保留已保存的 API Key） */
+  resetSettings(): Promise<SettingsDTO>
   /** 火山方舟账号可见的模型列表（需要已保存 API Key） */
   listArkModels(): Promise<ArkModelInfo[]>
 }
@@ -222,6 +232,10 @@ const realApi: ApiClient = {
   logout: async () => {
     await request<{ ok: boolean }>('/auth/logout', { method: 'POST' })
   },
+
+  // 公开只读接口：失焦时检查用户名，最终仍由注册接口兜底校验
+  checkUsername: (username) =>
+    request<UsernameCheck>(`/auth/check-username?username=${encodeURIComponent(username)}`),
 
   exportProject: downloadProjectFile,
 
@@ -327,6 +341,9 @@ const realApi: ApiClient = {
 
   updateSettings: (patch) =>
     request<SettingsDTO>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+
+  // 恢复默认：后端只重置非密钥字段，返回最新设置视图
+  resetSettings: () => request<SettingsDTO>('/settings/reset', { method: 'POST' }),
 
   // 后端代理上游 Models 接口，未配置 Key 返回 400，上游失败返回 502
   listArkModels: async () => {

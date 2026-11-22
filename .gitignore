@@ -57,3 +57,6 @@ Reference_Doc/
 .pytest_cache/
 .githooks/
 .vscode/
+
+#temp_migrate.db
+temp_migrate.db

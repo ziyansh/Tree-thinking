@@ -44,7 +44,7 @@ sudo chown -R tree:tree /var/lib/tree-thinking
 ```bash
 sudo mkdir -p /opt/tree-thinking
 sudo chown tree:tree /opt/tree-thinking
-sudo -u tree git clone <repository-url> /opt/tree-thinking
+sudo -u tree git clone https://github.com/ziyansh/Tree-thinking.git /opt/tree-thinking
 
 sudo -u tree python3 -m venv /opt/tree-thinking/backend/.venv
 sudo -u tree /opt/tree-thinking/backend/.venv/bin/pip install --upgrade pip

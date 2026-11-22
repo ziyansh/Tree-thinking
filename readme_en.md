@@ -3,97 +3,102 @@
 > Current version: **0.3.13** | [中文说明](readme.md)
 >
 > **WIP**: this project is still under active development; features and UI may change at any time and do not represent final quality.
-> **Platforms**: Windows 10/11 is the primary target; macOS is experimental; Linux has been verified for server deployment.
+>
+> **Platforms**: Windows 10/11 is the primary target; macOS is supported in theory; Linux has only been verified for server deployment.
 
-Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
+Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-ups on its right, and picking one continues along that path. Branches keep independent context, so you can compare ideas without scrolling back through a long chat log.
 
 ## Features
 
-- **Infinite left-to-right canvas** powered by React Flow: pan with Space + left drag, middle drag, or press-and-drag on empty space (drift delay/distance configurable); while Space is held, dragging anywhere — card text, titles, attachments, or an unfocused input — pans the canvas. Scrollable regions inside cards (answer body, Thinking block, note body) scroll their content with the wheel; while Space is held the wheel zooms the canvas instead. A new Pointer device switch (default "Mouse", standard wheel behavior) adds "Trackpad (experimental)": two-finger swipes pan the canvas and pinches zoom it, and while Space is held a two-finger swipe also pans (pinch and mouse wheel still zoom).
-- **Card-based Q&A**: one card = one question + one answer; answers render as Markdown and scroll inside the card instead of stretching it.
-- **Selectable card text**: titles, Markdown answers, reasoning, and input boxes can be drag-selected; selecting text never moves the card. While Space is held, panning takes priority and no text is selected. Note titles and bodies become selectable after double-clicking into edit mode. The highlight uses a soft accent tone.
-- **Card sizes and notes**: chat cards share one global size, adjustable from all four edges and corners (minimum 280×240); note cards keep their own size. Double-click empty canvas to create a note; double-click its title or body to edit (single click is reserved for dragging and selection), and press Tab in the body editor to insert four spaces.
-- **Compact, single-choice suggestions**: after an answer completes, N suggestion cards (default 3, configurable 2–6) plus 1 custom-input card appear as a compact vertical stack on the right. Only one can be picked per round; picking one hides the whole group, and “换一个方向” (another direction) starts a new round. Suggestion cards and the branch input bar render on separate layers and never overlap.
-- **Branch input and isolated context**: branches are created from an input bar as wide as the card; long text wraps and grows the bar automatically. Press Enter to create the card. A request only contains the root-to-current path, so sibling branches never see each other.
-- **Branch edges**: the main chain stays left-to-right; direct branches connect from the parent's top/bottom center to the child, and all non-main branches of one parent share a single bus. Edges route around cards.
-- **Auto layout**: the root card keeps its current position and the main chain always stays on one horizontal line. In direct mode branch heads sit directly below their parent in the same column; in bus mode they sit in the next column to the right and share one bus. Row/column spacing is controlled by Settings → Canvas → Card spacing.
-- **Drag, pin, and multi-select**: any blank area of a card can be dragged while text and buttons never trigger a drag; a grab cursor is shown. Pinning locks a card in place (the root card is pinned by default); dragging moves the whole subtree. Ctrl-click toggles multi-select and batch delete, while Shift snaps to a 20px grid and nearby cards.
-- **Dynamic layering and focus-on-top**: clicking, dragging, or focusing a card counts as a state update, so that card is raised above note cards; cards that are streaming are raised too, and with a multi-selection the most recently clicked card sits on top. When nothing is focused, note cards sit above the suggestion ghosts and idle chat cards stay at the bottom.
-- **Title editing**: double-click a card title to edit it (the interval is configurable); Enter or blur commits, Esc cancels.
-- **Undo and save**: each canvas keeps its own multi-step undo stack (Ctrl+Z, depth configurable, including card-size changes); Ctrl+S saves manually and autosave is configurable. Saving does not clear undo history. Select one or more cards and press `Delete` to remove them quickly.
-- **Multiple canvases**: a collapsible left sidebar (240px / 48px) to create, switch, rename, and delete canvases. Each canvas has exactly one root question. With DeepSeek, the root card's first answer generates a canvas title; a manual rename is never overwritten.
-- **Local / server mode**: the default `APP_MODE=local` is single-user with no login. With `APP_MODE=server`, first visit requires registration, later visits require login, canvases and settings are isolated per account, and the sidebar footer offers logout. Registration usernames are 3–32 letters, digits, or underscores and must be unique; passwords are 4–12 characters. Username, password, and confirm-password fields validate on blur and show the reason directly below the field.
-- **In-app settings**: the gear at the bottom-left opens a floating dialog with three tabs — Model service / Canvas / Appearance (save options live in Canvas). Each section has a heading, with a description on the left and the control on the right; bounded values use a slider plus a number input, and changes take effect immediately — no restart. The “Restore defaults” button at the bottom-left resets every setting while keeping saved API keys.
-- **Multiple providers**: the provider is a dropdown (DeepSeek → Volcengine Ark → OpenAI-compatible), with “OpenAI-compatible” always last. DeepSeek supports `deepseek-flash` / `deepseek-v4-pro`; Volcengine Ark takes an API key (encrypted at rest), a base URL (default `https://ark.cn-beijing.volces.com/api/v3`), and a model name (default `doubao-seed-2-1-pro-260915`), with streaming answers, deep thinking, and smart web search; the OpenAI-compatible option works with any service that implements the OpenAI protocol and adds organization/project IDs, temperature, max output tokens, reasoning effort, and request timeout, and can point at a proxy.
-- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek and Volcengine Ark), and a synced shortcut sits beside the attachment button in card inputs. When enabled, the app calls the provider's search capability before answering and injects a summary; for DeepSeek the forced-search source count can be set under Settings → Model service → DeepSeek → “Forced search limit” (1–50, default 50; legacy 0 is displayed and saved as 50). Cards show “参考 N 篇资料” at the bottom-left; clicking it slides up a draggable frosted-glass drawer inside the card (25% of the card height by default; the height is remembered and applied to every card). The drawer lists numbered page titles linked to the originals; DeepSeek answers render `[n]` markers as clickable citation badges, while Volcengine Ark only shows the source list and never inserts `[n]` badges; the drawer closes only via its arrow or Esc. Forced search is DeepSeek-only; Ark always uses smart search (the hover panel does not show the forced-search switch), and session titles are generated by DeepSeek only.
-- **Link detection in inputs**: pasting or typing a URL in the root question, custom direction, branch input, or prompt drawer extracts it from the text into a numbered frosted-glass chip below the input, leaving only the body text in the box; on submit the links are appended to the end of the question in chip order (up to 10, matching the “link 1 / link 2 …” numbering). Clicking a chip opens the link in a new tab, double-clicking edits it inline (Enter saves, Esc cancels), and the × on a chip drops that link.
-- **Attachments**: the root question, custom direction, branch input, and prompt drawer all accept click-to-upload or drag-and-drop files — images, text, PDF, video, audio, and other files. Cards show every attachment as a file icon plus filename (more than three collapse into “附件 N”; clicking an item opens the original file, with PDFs and images previewed inline in the browser). For Volcengine Ark, images / video / audio / PDF are uploaded to the Ark Files API (`purpose=user_data`) and injected by `fileId`; DeepSeek keeps parsing PDF / Office documents; OpenAI-compatible providers keep images / text. PDF attachments report their page count; when any PDF exceeds 30 pages or the total exceeds 30, the submit button's left side shows a warning icon and “pdf页数过多，费用可能失控” regardless of provider or model. Text attachments are injected along the root-to-current path, so sibling branches never see them.
-- **Persistence**: canvases, cards, positions, and viewport are stored in local SQLite and restored after refresh.
-- **Appearance**: follow system / light / dark, plus accent hue, edge width and color; 12/24-hour time formats. Card body font size is adjustable (12–24px, default 14) and cards grow automatically when the font size increases.
-- **Modified time**: chat and note cards show the last modified time at the bottom-right outside the card (`yyyy-mm-dd hh:mm`, with AM/PM in 12-hour mode), updated as edits happen.
+- **A conversation that becomes a map**: each card holds exactly one question and one answer, then offers several next directions. Pick one to continue in the current context, or start a branch of your own. Branches never overwrite each other, so comparing ideas stays easy.
+- **Notes live on the canvas**: double-click empty space to create a note, drag it anywhere, and attach it to an answer card with a light link. Notes are not part of the conversation and never enter the model context.
+- **Ask with your material**: drop images, PDFs, text, video, or audio into the input. Attachments collapse when there are several, and each one opens in its original form; long PDFs warn about cost and context risk before you submit.
+- **Thinking and web search stay inside the card**: reasoning is folded into the card and expands when needed; with web search on, answers list their sources at the bottom-left and open a source drawer from the card.
+- **Local or online, one codebase**: local mode is single-user with no login by default; server mode adds multi-account registration and keeps canvases, attachments, settings, and keys isolated per account.
+- **Daily work stays on the canvas**: drag, zoom, pin, multi-select, undo, autosave, and export/import all happen in place, and card layering follows the focus automatically.
+
+See [docs/features_en.md](docs/features_en.md) for the complete feature and behavior reference.
 
 ## Quick Start
 
-> Deploying to a server for multiple users? See the [server deployment guide](docs/deploy_en.md).
+### Install the prerequisites
 
-### Requirements
+Three tools are required:
 
-- Python 3.10+
-- Node.js 20.19+ (or 22.12+; required by Vite 8, developed and verified on Node 25)
-- Windows 10/11 or macOS 12+ (Intel / Apple Silicon)
-- Linux has been verified for server deployment (`start.sh` also works); desktop development is on Windows, and macOS has not been tested on real hardware yet
+| Tool | Version | Purpose | Download |
+| --- | --- | --- | --- |
+| Git | Any recent version | Fetch the source | <https://git-scm.com/downloads> |
+| Python | 3.10 or newer | Run the backend | <https://www.python.org/downloads/> |
+| Node.js | 20.19 or newer (includes npm) | Run and build the frontend | <https://nodejs.org/> |
 
-### One-click start (recommended)
+Notes for Windows:
 
-**Windows**: double-click `start.bat` in the repository root. On first run it creates `backend/.venv`, installs backend/frontend dependencies, and prepares `backend/.env`; all messages are plain ASCII English so different system code pages cannot garble them.
+- **Python**: on the first page of the installer, tick “Add python.exe to PATH”; otherwise `python` will not be found in the terminal.
+- **Node.js**: the LTS installer is fine and includes `npm`.
+- **Git**: the default options are fine; Git Bash is available from the Start menu afterwards.
 
-**macOS**: run this in the repository root:
-
-```bash
-bash start.sh
-# or run chmod +x start.sh once, then ./start.sh
-```
-
-Both launchers:
-
-1. Create or reuse `backend/.venv`, installing and verifying backend dependencies;
-2. Run `npm install` to align frontend dependencies;
-3. Copy `.env.example` to `backend/.env` if the file does not exist;
-4. Start the backend first and wait for `/health`, then start the frontend and open the browser. The macOS launcher writes logs to `.runtime/`, and `Ctrl+C` stops both services.
-
-> API configuration is not part of the startup script. On first use, click the gear at the bottom-left of the page and fill in your API key — saving applies immediately.
-
-> In server mode (`APP_MODE=server`), the first visit requires registration and later visits require login; the default local mode has no accounts.
-
-> When moving between Windows and macOS, delete `backend/.venv` and `frontend/node_modules` first, then run the launcher again so dependencies are reinstalled for the current platform.
-
-### Manual start
-
-**Windows (PowerShell)**
+After installing, open a new terminal window and check the versions:
 
 ```powershell
-# Terminal 1: backend
+git --version
+python --version
+node --version
+npm --version
+```
+
+On macOS you can use Homebrew (`brew install git python node`; install Homebrew from <https://brew.sh> first). On Linux, install Git, Python 3, and `python3-venv` with your package manager, and install Node.js 20.19+ through NodeSource or nvm.
+
+### Get the source
+
+Clone the repository and enter the project directory:
+
+```bash
+git clone https://github.com/ziyansh/Tree-thinking.git
+cd Tree-thinking
+```
+
+All following commands run inside this `Tree-thinking` directory. If you downloaded a zip archive, extract it and enter the extracted folder instead.
+
+### Server deployment
+
+Hosting it for several people? Clone the code as above, then read the [server deployment guide](docs/deploy_en.md). It covers server dependencies, environment variables, systemd, Nginx, HTTPS, backups, and upgrades.
+
+### Windows
+
+Windows 10/11 is the primary supported platform.
+
+#### One-click start
+
+Open the cloned `Tree-thinking` folder in File Explorer and double-click `start.bat`. The script will:
+
+1. check Python and Node.js;
+2. create `backend/.venv` and install backend dependencies;
+3. copy `.env.example` to `backend/.env` when it is missing;
+4. install frontend dependencies;
+5. start the backend and frontend, then open `http://localhost:5173` in the browser.
+
+Two console windows stay open; closing a window stops that service. The first run downloads dependencies and may take a while depending on your network.
+
+#### Manual start
+
+Open two PowerShell windows and enter the project directory in both:
+
+```powershell
+cd Tree-thinking
+```
+
+**Window 1: backend**
+
+```powershell
 cd backend
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000 --reload
-
-# Terminal 2: frontend
-cd frontend
-npm install
-npm run dev
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-**macOS / Linux (zsh / bash)**
+**Window 2: frontend**
 
-```bash
-# Terminal 1: backend
-cd backend
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m uvicorn app.main:app --port 8000 --reload
-
-# Terminal 2: frontend
+```powershell
 cd frontend
 npm install
 npm run dev
@@ -101,102 +106,111 @@ npm run dev
 
 Open `http://localhost:5173`. Vite proxies `/api` to `http://127.0.0.1:8000`.
 
-Paths: the database and upload directories default to repo-relative `backend/data/...` on both Windows and macOS; `DB_PATH` / `UPLOAD_DIR` also accept `~` (e.g. `~/tree-thinking/app.db`), so no platform-specific separators are needed.
+### macOS and Linux
 
-## Configuration
+macOS is supported in theory: the code and dependencies are cross-platform, but it has not been fully tested. Linux has only been verified for server deployment; local desktop use has not been tested.
 
-Precedence: **in-app settings > `backend/.env`**. Settings are stored in `backend/data/app.db` (local mode uses `app_settings`; server mode stores per-account rows in `user_settings`) and never leak into frontend bundles.
+Install Git, Python 3.10+, and Node.js 20.19+ as described in “Install the prerequisites”, then clone the code and open two terminals:
 
-| `backend/.env` key | Description | Default |
-| --- | --- | --- |
-| `DEEPSEEK_API_KEY` | DeepSeek API key; answers fail when empty | empty |
-| `DEEPSEEK_BASE_URL` | OpenAI-compatible base URL | `https://api.deepseek.com` |
-| `DEEPSEEK_MODEL` | Model name | `deepseek-flash` |
-| `ARK_API_KEY` | Volcengine Ark API key; Ark answers fail when empty. In-app Settings take precedence and store it encrypted | empty |
-| `ARK_BASE_URL` | Volcengine Ark base URL | `https://ark.cn-beijing.volces.com/api/v3` |
-| `ARK_MODEL` | Volcengine Ark model name | `doubao-seed-2-1-pro-260915` |
-| `THINKING_ENABLED` | Enable thinking mode | `true` |
-| `SUGGESTION_COUNT` | Number of suggestion arrows (2–6) | `3` |
-| `DB_PATH` | SQLite file path | `backend/data/app.db` |
-| `UPLOAD_DIR` | Attachment storage directory; accepts `~` | `backend/data/uploads` |
-| `APP_MODE` | Runtime mode: `local` (single user, no login) / `server` (multi-user, login required) | `local` |
-| `AUTH_SECRET` | Required in `server` mode; signs sessions and encrypts model keys | empty |
-| `OPENAI_API_KEY` | OpenAI-compatible API key | empty |
-| `OPENAI_BASE_URL` | OpenAI-compatible base URL | `https://api.openai.com/v1` |
-| `OPENAI_MODEL` | OpenAI-compatible model name | `gpt-4o-mini` |
+**Terminal 1: backend**
 
-Notes:
+```bash
+cd Tree-thinking/backend
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+```
 
-- The in-app settings cover the DeepSeek and Ark keys, base URLs, and models, plus thinking mode and suggestion count. Leaving a base URL empty restores the `.env` default.
-- Model keys in `.env` are a local-mode fallback only. In server mode each account uses only its own saved settings; a new account starts from hard-coded defaults with no key and never inherits `.env` secrets.
-- Model names use one shared interaction: a text input with a scrollable candidate popup — focusing clears the field to show every candidate, and blur restores or keeps the choice. DeepSeek and Volcengine Ark provide candidates; the OpenAI-compatible provider has none and takes whatever model name the service requires.
-- All dropdowns use the same frosted-glass popup as the model candidates; a component argument controls the number of visible items (9 by default), the popup opens upward when space is tight, and native `<select>` is no longer used.
-- API keys are stored only in the backend database (encrypted at rest in server mode). The settings API only returns masked values (e.g. `sk-••••7890`) and never writes them to browser storage.
-- Get keys at DeepSeek <https://platform.deepseek.com/api_keys> and Volcengine Ark <https://console.volcengine.com/ark>.
+**Terminal 2: frontend**
 
-## Security & Secret Protection
+```bash
+cd Tree-thinking/frontend
+npm install
+npm run dev
+```
 
-- `.gitignore` already excludes `.env*` (keeping `.env.example`), database files such as `*.db` / `*.sqlite*`, virtualenvs, dependencies, and build output.
-- This repository does not ship a `.githooks/pre-commit` hook (`.githooks/` itself is ignored); before committing, check that `backend/.env`, real API keys, and database files are not staged.
+Open `http://localhost:5173`. For server deployment, follow [docs/deploy_en.md](docs/deploy_en.md).
 
-### Key and settings boundaries
+### Deploy from source
 
-- **Local mode**: settings live in `app_settings`; keys may come from the in-app settings or fall back to `backend/.env`, with the in-app value taking precedence.
-- **Server mode**: every account owns a separate `user_settings` row. A new account starts with all defaults and no key, never inherits model keys from `backend/.env`, and no account can read or reuse another account's key, base URL, or model.
-- Server-mode API keys are encrypted with Fernet before being written to the database. Reading settings returns only masked values (e.g. `sk-••••7890`); plaintext keys never reach the frontend or browser storage.
-- The session cookie is named `tt_session_server` (HttpOnly, SameSite=Lax). Local mode never reads it, so running a local instance and an online instance on the same host with different ports cannot share a login session.
-- “Restore defaults” clears only non-secret fields and keeps saved keys; it affects the current account only.
+Development mode (`npm run dev`) is not meant to serve public traffic. After cloning the code and installing dependencies:
 
-### What is uploaded and what is not
+1. run the backend with `uvicorn app.main:app` from the virtualenv, without `--reload`, under a process manager such as systemd;
+2. run `npm run build` in the frontend and serve the generated `frontend/dist` with Nginx or another static server;
+3. reverse-proxy `/api` to the backend port and enable HTTPS.
 
-- **Uploaded to the local backend**: files you explicitly attach (stored under `UPLOAD_DIR`) and business data such as canvases, cards, and settings (SQLite).
-- **Sent to the model provider** (only when the related feature runs, using the currently configured provider):
-  - the Q&A text on the root-to-current path and the attachments you selected;
-  - question text, search keywords, and search results returned by the provider when web search is enabled;
-  - document parsing: DeepSeek PDF / Office files and Ark images / video / audio / PDF are uploaded to the corresponding provider's Files API first.
-- **Never uploaded**:
-  - other accounts' canvases, attachments, settings, or API keys;
-  - keys and configuration of providers that are not selected (for example, a DeepSeek answer never sends the OpenAI or Ark key);
-  - browser storage (only the “development notice seen” flag is stored; Mock mode keeps masked keys only in `sessionStorage`).
+See the [server deployment guide](docs/deploy_en.md) for environment variables, Nginx configuration, backups, and upgrades.
 
 ## Usage
 
-1. **Ask the root question**: a canvas is created automatically; the root card is in input mode.
-2. **Watch the stream**: the answer arrives token by token; expand “Thinking” to read the reasoning when enabled.
+1. **Ask the root question**: a canvas is created automatically and the root card is ready for input.
+2. **Watch the answer**: text streams in; with thinking mode enabled, expand “Thinking” to read the reasoning.
 3. **Choose the next step**:
-   - Click a suggestion card to create a full chat card in place and continue along that direction; only one can be picked per round, and the group hides after the pick;
-   - Type into the full-width input bar below a card and press Enter to create a custom branch; the bar can be reused;
-   - “换一个方向” starts a new round of suggestions; the branch button at the card bottom opens the input bar again.
-4. **Compare branches**: any card can fork; branches never share content created after the fork.
-5. **Manage canvases**: switch, create, rename, delete from the left sidebar; follow-up questions are entered directly on cards.
-6. **Create and edit notes**: double-click empty canvas to create a note; double-click its title or body to edit (single click is reserved for dragging), and press Tab in the body editor to insert four spaces. Drag any edge or corner to resize it independently. Notes are excluded from auto layout and edges.
-7. **Adjust appearance and interaction**: the Settings dialog at the bottom-left has three tabs:
-   - **Model service**: provider (dropdown: DeepSeek / Volcengine Ark / OpenAI-compatible), API key, base URL, model, thinking mode, suggestion count;
-   - **Canvas**: connection style (direct branch / shared bus), card spacing (80px by default, shared by new cards and auto layout), canvas pan inertia and coefficient, canvas style, pointer device in the pointer section, double-click interval, pointer drift delay and distance, autosave interval and undo depth;
-   - **Appearance**: follow system / light / dark, body font size (12–24px), accent hue (with a reset button), edge width and color, note-link style / width / color / release action, 12/24-hour clock.
-   - **Restore defaults**: the button at the bottom-left resets every setting and keeps saved API keys.
-8. **Undo, save, and delete**: `Ctrl+Z` undoes the last action on the current canvas (stacks are per-canvas and include card-size changes); `Ctrl+S` saves the current canvas; autosave runs on the configured interval, and saving never clears undo history. Select one or more cards and press `Delete` to remove them quickly (the root question card still cannot be deleted).
+   - click a suggestion card to create a full chat card along that direction;
+   - type your own question in the input bar below a card;
+   - “another direction” starts a new round of suggestions.
+4. **Compare branches**: any card can fork, and later content in one branch never affects another.
+5. **Manage canvases**: create, switch, rename, and delete canvases from the left sidebar.
+6. **Take notes**: double-click empty space to create a note; double-click its title or body to edit; drag its edges to resize.
+7. **Adjust settings**: the gear at the bottom-left opens Model service / Canvas / Appearance tabs, and changes apply immediately.
+8. **Undo, save, delete**: `Ctrl+Z` undoes, `Ctrl+S` saves, and `Delete` removes selected cards (the root question card excluded).
 
-## Keyboard Action Priority
+More details are in [docs/features_en.md](docs/features_en.md).
 
-When a single key triggers several eligible actions, the **most recently executed/opened action runs first**; pressing the key again falls back to earlier actions.
+## FAQ
 
-For example, with reference drawers open on two cards, the first `Esc` closes the drawer that was opened last, and the second `Esc` closes the earlier one.
+**A card says “API key not configured”. What should I do?**
 
-This rule applies to every new shortcut and overlay. It is implemented by the shared Escape action stack (`frontend/src/lib/escapeStack.ts`); reuse it instead of registering a separate window-level Esc listener. See [docs/development.md](docs/development.md) for details.
+Open Settings at the bottom-left, paste the key, and save. No restart is needed.
+
+**The port is already in use. What should I do?**
+
+Run the backend with `--port 8001` and update the proxy target in `frontend/vite.config.ts`.
+
+**How do I wipe all data?**
+
+Stop the backend, delete `backend/data/app.db`, then start again.
+
+**Answers are slow or show no reasoning. What should I check?**
+
+Check thinking mode and the model name under Settings → Model service.
+
+**How do I change the theme?**
+
+Settings → Appearance offers follow system / light / dark, plus accent hue and edge colors.
+
+**How do I only change the defaults?**
+
+Edit `backend/.env` and restart the backend; values saved in the page take precedence.
+
+**Why do trackpad gestures not work?**
+
+Trackpad support is experimental. Switch “Settings → Canvas → Pointer → Pointer device” to “Trackpad (experimental)”; two-finger swipes pan the canvas, pinches zoom it, and holding Space also pans with two fingers. It has not been fully tested on all devices and trackpad drivers may behave differently; switch back to “Mouse” to restore standard wheel behavior. However, be aware that the trackpad support is not as stable as using the mouse.
+
+**Why does the Windows console show escape codes such as `[32mINFO[0m`?**
+
+Old consoles do not parse ANSI colors. Run `start.bat` in Windows Terminal, or run `reg add "HKCU\Console" /v VirtualTerminalLevel /t REG_DWORD /d 1 /f` and reopen the window.
+
+**Is it normal that `.env` is ignored by Git?**
+
+Yes, this is expected. Before committing, make sure `backend/.env`, real keys, and database files are not staged.
 
 ## Project Layout
 
 ```
 Tree_thinking/
-├─ start.bat / start.sh       # Windows / macOS one-click launchers
+├─ start.bat                  # Windows one-click launcher
 ├─ readme.md / readme_en.md   # Chinese / English docs
-├─ docs/development.md        # development conventions (keyboard priority)
+├─ LICENSE / NOTICE           # Apache 2.0 license, copyright and trademark notice
+├─ docs/
+│  ├─ features.md / features_en.md   # feature reference
+│  ├─ deploy.md / deploy_en.md       # server deployment guide
+│  └─ development.md                 # development conventions
 ├─ backend/
-│  ├─ .venv/                  # isolated virtualenv (not committed)
+│  ├─ .venv/                  # isolated virtualenv (not tracked)
 │  ├─ requirements.txt
 │  ├─ app/
-│  │  ├─ main.py              # FastAPI entry
+│  │  ├─ main.py              # FastAPI entry point
 │  │  ├─ db.py, models.py, schemas.py, config.py
 │  │  ├─ api/                 # auth / projects / nodes / links / attachments / models / settings
 │  │  └─ services/            # auth / llm / context / attachments / citations / suggestions / search / naming / settings / graph / urls
@@ -207,32 +221,20 @@ Tree_thinking/
       ├─ api/                 # client / sse / mock / types
       ├─ canvas/              # Canvas / CardNode / attachments / note links / layout
       ├─ components/          # Sidebar / SettingsDialog / AuthPage
-      ├─ lib/                 # escapeStack / theme / time helpers
+      ├─ lib/                 # escapeStack / theme / time / urlChips helpers
       ├─ store/               # Zustand graph state
-      └─ styles/theme.css     # theme tokens (light/dark)
+      └─ styles/theme.css     # theme tokens (light / dark)
 ```
 
-## Tech Stack
+Tech stack: React 19, TypeScript, Vite 8, @xyflow/react 12, Zustand 5, and Tailwind CSS v4 on the frontend; FastAPI, SQLAlchemy 2, and SQLite on the backend; streaming answers use SSE.
 
-- Frontend: React 19, TypeScript, Vite 8, @xyflow/react (React Flow 12), Zustand, Tailwind CSS v4, react-markdown, dagre
-- Backend: Python 3.10, FastAPI, SQLAlchemy 2.0, SQLite, openai SDK (DeepSeek / Volcengine Ark / OpenAI-compatible)
-- Streaming: SSE (`text/event-stream` from the backend, parsed with fetch + ReadableStream in the frontend)
+## License
 
-## FAQ
+### Apache 2.0
 
-- **“API key not configured” on a card**: open Settings at the bottom-left, paste the key, and save. No restart needed.
-- **Port already in use**: run the backend with `--port 8001` and update the proxy target in `frontend/vite.config.ts`.
-- **Reset all data**: stop the backend, delete `backend/data/app.db`, and start again.
-- **Slow answers / no reasoning panel**: check the thinking-mode switch and the selected model in Settings.
-- **How do I switch themes**: open Settings → Appearance and choose follow system / light / dark; accent hue, edge width, and edge color are adjustable there too.
-- **How do I undo or save**: with no input focused, press `Ctrl+Z` to undo the last action on the current canvas (including card-size changes) and `Ctrl+S` to save. Select cards and press `Delete` for quick deletion. The autosave interval and undo depth live under Settings → Canvas.
-- **How do I create or resize a note**: double-click empty canvas to create one; drag any edge or corner handle to resize it independently. Double-click the title or body to edit; press Tab in the body editor to insert four spaces. The delete button sits at the right of the title bar.
-- **Change defaults only**: edit `backend/.env` and restart the backend; settings saved in the UI take precedence.
-- **Windows console shows garbled `[32mINFO[0m` logs**: the legacy Windows console (conhost) does not interpret ANSI color escape codes by default, so the backend and frontend logs started by `start.bat` print the raw codes. Windows Terminal, macOS, and Linux terminals are not affected. Pick one fix:
-  1. Run `start.bat` in Windows Terminal (the default on most Windows 11 setups);
-  2. Enable virtual terminal processing for the current user: run `reg add "HKCU\Console" /v VirtualTerminalLevel /t REG_DWORD /d 1 /f` in PowerShell, then close and reopen the console windows;
-  3. Disable colored logs: add `--no-use-colors` to the backend command and set the `NO_COLOR=1` environment variable before starting the frontend.
-- **`.env` is ignored**: this is expected — environment files and suspected keys must not enter the repository. The repo does not ship a commit hook, so before committing check that `backend/.env`, real keys, and database files are not staged.
+This project is licensed under the Apache License 2.0. The full terms are in [LICENSE](LICENSE), and the copyright and trademark notice is in [NOTICE](NOTICE).
+
+You may use, modify, and distribute the project, including commercially, provided you keep the copyright and license notices and include the statements in [NOTICE](NOTICE) with any distribution. Apache 2.0 grants a license to the source code only; it does not grant a trademark license for the name “Tree-thinking”. Do not use the name to imply official endorsement or affiliation without written permission.
 
 ## Changelog
 
@@ -245,6 +247,9 @@ Versioning: each conversation iteration bumps one minor version (0.1.x) unless a
 - Improved: removed Settings → Canvas → Pointer → Wheel logic; scrollable regions inside cards (answer body, Thinking block, note body) now always scroll their content with the wheel, and holding Space makes the wheel zoom the canvas.
 - Docs: corrected the server deployment guides (Chinese and English) to match the current code — HTTPS section reference, Python 3.10+ / Node 20.19+, server mode ignoring `.env` model keys (each account configures its own in Settings), upgrade and 401 troubleshooting after the session-cookie rename, `backend/.env` (AUTH_SECRET) added to the backup scope, OpenAI-compatible egress, and provider ownership of document parsing and web search.
 - Version: bumped to 0.3.13.
+- readme: rewritten the introduction part.
+
+
 
 ### 0.3.12 — 2026-11-22
 - Added: server-mode registration now validates that the username is well-formed and not taken; a public read-only `GET /api/auth/check-username` endpoint backs the in-form check, and the registration endpoint still performs the final validation.

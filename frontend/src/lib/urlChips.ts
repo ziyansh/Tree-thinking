@@ -1,5 +1,8 @@
 /** 输入框中链接胶囊的解析与移除工具（规则与后端 backend/app/services/urls.py 保持一致） */
 
+/** 单条消息最多携带的链接数，与后端提取上限一致 */
+export const MAX_URLS = 10
+
 /** 裸域名只在这些常见顶级域名下视为链接，避免把普通文字或数字误判成网址 */
 const TLDS =
   'com|cn|org|net|io|dev|ai|co|edu|gov|info|me|app|xyz|top|cc|tv|tech|site|online|store|wiki'
@@ -74,6 +77,65 @@ export function removeUrl(text: string, url: string): string {
   if (lines[lineIndex] !== undefined && lines[lineIndex].trim() === '') {
     lines.splice(lineIndex, 1)
     return lines.join('\n')
+  }
+  return result
+}
+
+/**
+ * 把文本中已写完整的链接抽出来：返回移除链接后的文本与新发现的链接。
+ * 重复出现的同一链接会被全部移除，避免输入框里残留。
+ */
+export function splitUrls(text: string, limit = MAX_URLS): { text: string; urls: string[] } {
+  if (!text) return { text: '', urls: [] }
+  const urls = extractUrls(text, limit)
+  let rest = text
+  for (const url of urls) {
+    while (rest.includes(url)) {
+      const next = removeUrl(rest, url)
+      if (next === rest) break
+      rest = next
+    }
+  }
+  // 移除链接后可能留下连续空行，压缩为最多一个空行
+  rest = rest.replace(/\n{3,}/g, '\n\n')
+  return { text: rest, urls }
+}
+
+/** 合并链接列表：保持顺序、去重、最多 limit 个 */
+export function mergeUrls(current: string[], incoming: string[], limit = MAX_URLS): string[] {
+  const merged = [...current]
+  for (const url of incoming) {
+    if (!url || merged.includes(url)) continue
+    merged.push(url)
+    if (merged.length >= limit) break
+  }
+  return merged
+}
+
+/**
+ * 生成提交用的完整问题：正文在前，链接按胶囊编号顺序各占一行追加到末尾。
+ * 后端只识别最后一条用户消息中的链接，因此链接必须跟着问题一起提交。
+ */
+export function composeWithUrls(text: string, urls: string[]): string {
+  const body = text.trim()
+  if (urls.length === 0) return body
+  return [body, ...urls].filter(Boolean).join('\n')
+}
+
+/**
+ * 编辑胶囊里的链接：新值仍须是合法链接（按提取规则归一化），
+ * 替换后保持原编号顺序并去重；新值非法时原样返回。
+ */
+export function replaceUrl(urls: string[], oldUrl: string, raw: string): string[] {
+  const [next] = extractUrls(raw, 1)
+  if (!next) return urls
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of urls) {
+    const value = item === oldUrl ? next : item
+    if (seen.has(value)) continue
+    seen.add(value)
+    result.push(value)
   }
   return result
 }

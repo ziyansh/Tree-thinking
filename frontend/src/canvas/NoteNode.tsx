@@ -32,8 +32,6 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
   // 双击进入编辑：沿用设置中的双击间隔与漂移距离
   const doubleClickMs = useGraphStore((state) => state.preferences.doubleClickMs)
   const dragDriftDistance = useGraphStore((state) => state.preferences.dragDriftDistance)
-  // 滚轮逻辑：悬停笔记正文时滚动内容或缩放画布；按住空格时始终缩放
-  const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
   const spacePressed = useSpacePressed()
   // 连线拖拽状态：从回答端出发时笔记端连接点可连接
   const linkDrag = useNoteLinkDragSignal()
@@ -356,7 +354,7 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
           onPointerUp={handleContentPointerUp}
           className={[
             'mt-2 min-h-0 flex-1 select-none overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-subtle px-2 py-1.5 leading-[1.65] text-body',
-            wheelMode === 'scroll-card' && !spacePressed ? 'nowheel' : '',
+            spacePressed ? '' : 'nowheel',
           ].join(' ')}
           style={{ fontSize: 'var(--card-font-size)' }}
         >

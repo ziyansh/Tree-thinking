@@ -32,7 +32,8 @@ import { WebSearchToggle } from './WebSearchToggle'
 import { ThinkingToggle } from './ThinkingToggle'
 import { PromptDrawer } from './PromptDrawer'
 import { UrlChips } from './UrlChips'
-import { removeUrl } from '../lib/urlChips'
+import { splitUrls } from '../lib/urlChips'
+import { useUrlChips } from '../lib/useUrlChips'
 import {
   ANSWER_LINK_DOT,
   startNoteLinkDrag,
@@ -184,13 +185,12 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   // 标题双击编辑使用设置里的双击间隔与漂移距离
   const doubleClickMs = useGraphStore((state) => state.preferences.doubleClickMs)
   const dragDriftDistance = useGraphStore((state) => state.preferences.dragDriftDistance)
-  // 滚轮逻辑：悬停卡片时滚动内容或缩放画布；按住空格时始终让滚轮缩放画布
-  const wheelMode = useGraphStore((state) => state.preferences.wheelMode)
   // 火山方舟能力提示：当前模型与账号可见模型列表
   const arkModel = useGraphStore((state) => state.arkModel)
   const arkModels = useGraphStore((state) => state.arkModels)
   const spacePressed = useSpacePressed()
-  const wheelScrollClass = wheelMode === 'scroll-card' && !spacePressed ? 'nowheel' : ''
+  // 卡片内可滚动区域（思考过程）保持原生滚动；按住空格时滚轮交给画布缩放
+  const wheelScrollClass = spacePressed ? '' : 'nowheel'
   // 连线拖拽状态：从笔记端出发时回答端连接点可连接
   const linkDrag = useNoteLinkDragSignal()
   const linkConnectable = linkDrag.active && linkDrag.sourceKind === 'note'
@@ -205,6 +205,12 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const entering = !dragging && Number.isFinite(createdAtMs) && Date.now() - createdAtMs < 1200
 
   const [draft, setDraft] = useState('')
+  // 链接从输入框中抽离后单独保存，提交时再按编号拼回问题末尾
+  const urlChips = useUrlChips()
+  const { replace: replaceUrlChips, finalize: finalizeQuestion, clear: clearUrlChips } = urlChips
+  /** 预填判断读取最新草稿，避免把用户已清空的输入框重新填满 */
+  const draftRef = useRef(draft)
+  draftRef.current = draft
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [reasoningOpen, setReasoningOpen] = useState(false)
@@ -281,24 +287,31 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
     await regenerate(node.id)
   }
 
-  // 元问题卡片停止生成后会回到输入态，用之前的提问预填输入框
+  // 元问题卡片停止生成后会回到输入态，用之前的提问预填输入框；
+  // 预填文本中的链接直接转成胶囊，输入框内只保留正文
   useEffect(() => {
-    if (!isInput) return
-    setDraft((previous) => previous || node.prompt || '')
-  }, [isInput, node.prompt])
+    if (!isInput || draftRef.current) return
+    const source = node.prompt || ''
+    if (!source) return
+    const result = splitUrls(source)
+    setDraft(result.text)
+    replaceUrlChips(result.urls)
+  }, [isInput, node.prompt, replaceUrlChips])
 
   const handleSubmit = async () => {
-    const text = draft.trim()
-    if (!text || submitting) return
+    // 提交前兜底：把仍留在文本里的链接抽成胶囊，再按编号拼回问题末尾
+    const { question } = finalizeQuestion(draft)
+    if (!question || submitting) return
     setSubmitting(true)
     try {
       const targetId = await startQuestion(
         node.id,
-        text,
+        question,
         attachments.items.map((item) => item.id),
       )
       if (targetId) {
         setDraft('')
+        clearUrlChips()
         attachments.clear()
         await runAnswer(targetId)
       }
@@ -653,7 +666,12 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             autoFocus
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            onPaste={pasteAttachments}
+            onPaste={(event) => {
+              // 文件或超长文本已交给附件处理；否则把链接直接抽成胶囊
+              if (pasteAttachments(event)) return
+              urlChips.absorbPaste(event, setDraft)
+            }}
+            onBlur={() => setDraft(urlChips.absorbText(draft))}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
@@ -664,7 +682,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             className="selectable-text min-h-0 w-full flex-1 resize-none rounded-lg border border-subtle bg-elevated p-2 leading-[1.65] text-body outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent"
             style={{ fontSize: 'var(--card-font-size)' }}
           />
-          <UrlChips text={draft} onRemove={(url) => setDraft(removeUrl(draft, url))} />
+          <UrlChips urls={urlChips.urls} onRemove={urlChips.remove} onEdit={urlChips.edit} />
           <div className="mt-2 flex shrink-0 items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
               <button
@@ -700,7 +718,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
               />
               <button
                 type="button"
-                disabled={submitting || attachments.uploading || !draft.trim()}
+                disabled={submitting || attachments.uploading || (!draft.trim() && urlChips.urls.length === 0)}
                 onClick={() => void handleSubmit()}
                 className="shrink-0 rounded-lg bg-accent px-[calc(12px*var(--card-font-scale))] py-[calc(6px*var(--card-font-scale))] card-scale-13 font-medium text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
               >

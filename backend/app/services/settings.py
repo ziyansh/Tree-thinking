@@ -39,9 +39,6 @@ MAX_DRAG_DRIFT_DELAY_MS = 500
 DEFAULT_DRAG_DRIFT_DISTANCE = 10
 MIN_DRAG_DRIFT_DISTANCE = 0
 MAX_DRAG_DRIFT_DISTANCE = 50
-# 滚轮逻辑：悬停卡片时滚动内容（scroll-card）/ 始终缩放画布（zoom-canvas）
-DEFAULT_WHEEL_MODE = "zoom-canvas"
-WHEEL_MODES = ("scroll-card", "zoom-canvas")
 # 指针设备：鼠标（标准滚轮）/ 触摸板（实验性双指手势）
 DEFAULT_POINTER_MODE = "mouse"
 POINTER_MODES = ("mouse", "trackpad")
@@ -378,9 +375,6 @@ def effective(db: Session, user: User | None = None) -> dict:
             MIN_DRAG_DRIFT_DISTANCE,
             MAX_DRAG_DRIFT_DISTANCE,
         ),
-        "wheel_mode": _effective_choice(
-            row.wheel_mode if row else None, WHEEL_MODES, DEFAULT_WHEEL_MODE
-        ),
         "pointer_mode": _effective_choice(
             row.pointer_mode if row else None, POINTER_MODES, DEFAULT_POINTER_MODE
         ),
@@ -501,7 +495,6 @@ def dto(db: Session, user: User | None = None) -> dict:
         "doubleClickMs": values["double_click_ms"],
         "dragDriftDelayMs": values["drag_drift_delay_ms"],
         "dragDriftDistance": values["drag_drift_distance"],
-        "wheelMode": values["wheel_mode"],
         "pointerMode": values["pointer_mode"],
         "cardFontSize": values["card_font_size"],
         "autosaveMinutes": values["autosave_minutes"],
@@ -643,10 +636,6 @@ def update(db: Session, patch: dict, user: User | None = None) -> dict:
             DEFAULT_DRAG_DRIFT_DISTANCE,
             MIN_DRAG_DRIFT_DISTANCE,
             MAX_DRAG_DRIFT_DISTANCE,
-        )
-    if patch.get("wheel_mode") is not None:
-        row.wheel_mode = _effective_choice(
-            patch["wheel_mode"], WHEEL_MODES, DEFAULT_WHEEL_MODE
         )
     if patch.get("pointer_mode") is not None:
         row.pointer_mode = _effective_choice(

@@ -15,7 +15,8 @@ import {
 import { ThinkingToggle } from './ThinkingToggle'
 import { WebSearchToggle } from './WebSearchToggle'
 import { UrlChips } from './UrlChips'
-import { removeUrl } from '../lib/urlChips'
+import { splitUrls } from '../lib/urlChips'
+import { useUrlChips } from '../lib/useUrlChips'
 
 interface PromptDrawerProps {
   node: NodeDTO
@@ -39,7 +40,12 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
 
   const prompt = node.prompt || node.question
   const [editing, setEditing] = useState(initialEditing)
-  const [draft, setDraft] = useState(prompt)
+  // 打开时先把原提问里的链接拆成胶囊，输入框只保留正文（只在首次挂载时解析）
+  const [initialPrompt] = useState(() => splitUrls(prompt))
+  const [draft, setDraft] = useState(initialPrompt.text)
+  // 链接从输入框中抽离后单独保存，提交时再按编号拼回问题末尾
+  const urlChips = useUrlChips(initialPrompt.urls)
+  const { replace: replaceUrlChips, finalize: finalizeQuestion } = urlChips
   const [submitting, setSubmitting] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -53,10 +59,13 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
 
   useEscapeHandler(true, onClose)
 
-  // 外部提问变化时同步草稿（撤销、重新提交后）
+  // 外部提问变化时同步草稿（撤销、重新提交后）：链接同样转成胶囊
   useEffect(() => {
-    if (!editing) setDraft(prompt)
-  }, [prompt, editing])
+    if (editing) return
+    const result = splitUrls(prompt)
+    setDraft(result.text)
+    replaceUrlChips(result.urls)
+  }, [prompt, editing, replaceUrlChips])
 
   // 抽屉已打开时再点「重新提问」：父级把 initialEditing 置 true，这里立即进入编辑态
   useEffect(() => {
@@ -120,8 +129,9 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
   }
 
   const resubmit = async () => {
-    const text = draft.trim()
-    if (!text || submitting) return
+    // 提交前兜底：把仍留在文本里的链接抽成胶囊，再按编号拼回问题末尾
+    const { question } = finalizeQuestion(draft)
+    if (!question || submitting) return
     const state = useGraphStore.getState()
     const hasChildren = state.nodes.some((item) => item.data.node.parentId === node.id)
     if (hasChildren) {
@@ -137,7 +147,7 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
     try {
       await updateNodePrompt(
         node.id,
-        text,
+        question,
         attachments.items.map((item) => item.id),
       )
       setEditing(false)
@@ -181,7 +191,12 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
             value={draft}
             disabled={submitting}
             onChange={(event) => setDraft(event.target.value)}
-            onPaste={pasteAttachments}
+            onPaste={(event) => {
+              // 文件或超长文本已交给附件处理；否则把链接直接抽成胶囊
+              if (pasteAttachments(event)) return
+              urlChips.absorbPaste(event, setDraft)
+            }}
+            onBlur={() => setDraft(urlChips.absorbText(draft))}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
@@ -191,7 +206,7 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
             className="selectable-text min-h-[60px] w-full resize-none overflow-hidden rounded-md bg-transparent leading-[1.65] text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
             style={{ fontSize: 'var(--card-font-size)' }}
           />
-          <UrlChips text={draft} onRemove={(url) => setDraft(removeUrl(draft, url))} />
+          <UrlChips urls={urlChips.urls} onRemove={urlChips.remove} onEdit={urlChips.edit} />
           {attachments.items.length > 0 && (
             <AttachmentChips
               items={attachments.items}
@@ -242,7 +257,7 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
                 type="button"
                 title="重新提交"
                 aria-label="重新提交"
-                disabled={submitting || !draft.trim()}
+                disabled={submitting || (!draft.trim() && urlChips.urls.length === 0)}
                 onClick={() => void resubmit()}
                 className="flex h-[calc(32px*var(--card-font-scale))] w-[calc(32px*var(--card-font-scale))] shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
               >

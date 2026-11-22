@@ -15,7 +15,6 @@ import type {
   ThemeMode,
   TimeFormat,
   WebSearchMode,
-  WheelMode,
 } from '../api/types'
 import { useGraphStore } from '../store/graphStore'
 import { useEscapeHandler } from '../lib/escapeStack'
@@ -86,7 +85,6 @@ interface SettingsForm {
   doubleClickMs: number
   dragDriftDelayMs: number
   dragDriftDistance: number
-  wheelMode: WheelMode
   pointerMode: PointerMode
   cardFontSize: number
   autosaveMinutes: number
@@ -134,7 +132,6 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     doubleClickMs: data.doubleClickMs,
     dragDriftDelayMs: data.dragDriftDelayMs,
     dragDriftDistance: data.dragDriftDistance,
-    wheelMode: data.wheelMode,
     pointerMode: data.pointerMode ?? 'mouse',
     cardFontSize: data.cardFontSize,
     autosaveMinutes: data.autosaveMinutes,
@@ -816,7 +813,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     doubleClickMs: 300,
     dragDriftDelayMs: 0,
     dragDriftDistance: 10,
-    wheelMode: 'zoom-canvas',
     pointerMode: 'mouse',
     cardFontSize: 14,
     autosaveMinutes: 5,
@@ -948,7 +944,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         doubleClickMs: form.doubleClickMs,
         dragDriftDelayMs: form.dragDriftDelayMs,
         dragDriftDistance: form.dragDriftDistance,
-        wheelMode: form.wheelMode,
         pointerMode: form.pointerMode,
         cardFontSize: form.cardFontSize,
         autosaveMinutes: form.autosaveMinutes,
@@ -1461,20 +1456,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                     </Section>
 
                     <Section title="指针">
-                      <Row
-                        label="滚轮逻辑"
-                        hint="鼠标悬停在画布上时的滚轮行为；按住空格时始终缩放画布；默认缩放画布"
-                      >
-                        <ChoiceGroup
-                          value={form.wheelMode}
-                          options={[
-                            { value: 'scroll-card', label: '悬停时滑动卡片' },
-                            { value: 'zoom-canvas', label: '悬停时缩放画布' },
-                          ]}
-                          onChange={(wheelMode) => setForm({ ...form, wheelMode })}
-                        />
-                      </Row>
-
                       <Row
                         label="触摸板逻辑"
                         hint="鼠标：标准滚轮行为；触摸板（实验性）：双指滑动直接平移、捏合缩放；默认鼠标"

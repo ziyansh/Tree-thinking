@@ -1,5 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { FocusEvent as ReactFocusEvent } from 'react'
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  FocusEvent as ReactFocusEvent,
+} from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
 import { Paperclip, Send } from 'lucide-react'
@@ -12,7 +15,11 @@ import { useSpacePressed } from '../lib/spaceKey'
 import { setActiveGhostInput, useActiveGhostInput } from '../lib/ghostInputFocus'
 import { bumpUiLayer, getFocusedInput, setFocusedInput } from '../lib/uiLayers'
 import { UrlChips } from './UrlChips'
-import { removeUrl } from '../lib/urlChips'
+import { composeWithUrls, mergeUrls, replaceUrl, splitUrls } from '../lib/urlChips'
+import { absorbUrlPaste } from '../lib/useUrlChips'
+
+/** 空链接列表：store 中未记录时复用，避免 selector 每次返回新数组 */
+const EMPTY_URLS: string[] = []
 
 /**
  * 自定义方向输入箭头：收起时为单行输入，聚焦后展开为多行输入 + 附件区，
@@ -33,6 +40,9 @@ function GhostInputNodeInner({
   // 草稿按父卡片保存在 store 中：不同卡片的内容各自独立、收起后仍然保留
   const draft = useGraphStore((state) => state.ghostDrafts[data.parentId] ?? '')
   const setGhostDraft = useGraphStore((state) => state.setGhostDraft)
+  // 链接胶囊同样按父卡片保存在 store 中：链接从输入框抽离，提交时再拼回问题末尾
+  const urls = useGraphStore((state) => state.ghostUrlChips[data.parentId] ?? EMPTY_URLS)
+  const setGhostUrlChips = useGraphStore((state) => state.setGhostUrlChips)
   // 火山方舟能力提示：当前模型与账号可见模型列表
   const arkModel = useGraphStore((state) => state.arkModel)
   const arkModels = useGraphStore((state) => state.arkModels)
@@ -60,10 +70,26 @@ function GhostInputNodeInner({
   const handleBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget as Node | null
     if (next && event.currentTarget.contains(next)) return
+    // 失焦时把草稿中已写完整的链接转成胶囊
+    const result = splitUrls(draft)
+    if (result.urls.length > 0) {
+      setGhostDraft(data.parentId, result.text)
+      setGhostUrlChips(data.parentId, mergeUrls(urls, result.urls))
+    }
     // 输入框失焦：退出「聚焦输入」区段
     if (getFocusedInput() === id) setFocusedInput(null)
     setFocused(false)
     setActiveGhostInput(null)
+  }
+
+  /** 粘贴：文件交给附件处理，链接直接抽成胶囊，其余文本正常插入 */
+  const handlePaste = (event: ReactClipboardEvent<HTMLTextAreaElement>) => {
+    if (pasteAttachments(event)) return
+    absorbUrlPaste(
+      event,
+      (next) => setGhostDraft(data.parentId, next),
+      (found) => setGhostUrlChips(data.parentId, mergeUrls(urls, found)),
+    )
   }
 
   // 卸载时若仍记录为本输入框，清理聚焦状态
@@ -120,7 +146,10 @@ function GhostInputNodeInner({
   }, [draft, focused])
 
   const submit = async () => {
-    const question = draft.trim()
+    // 提交前兜底：把仍留在文本里的链接抽成胶囊，再按编号拼回问题末尾
+    const result = splitUrls(draft)
+    const merged = mergeUrls(urls, result.urls)
+    const question = composeWithUrls(result.text, merged)
     if (!question || pending || isStreaming || attachments.uploading) return
     setPending(true)
     try {
@@ -132,6 +161,7 @@ function GhostInputNodeInner({
         y: positionAbsoluteY,
       })
       setGhostDraft(data.parentId, '')
+      setGhostUrlChips(data.parentId, [])
       attachments.clear()
     } finally {
       setPending(false)
@@ -174,7 +204,7 @@ function GhostInputNodeInner({
             value={draft}
             disabled={isStreaming || pending}
             onChange={(event) => setGhostDraft(data.parentId, event.target.value)}
-            onPaste={pasteAttachments}
+            onPaste={handlePaste}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
@@ -189,8 +219,19 @@ function GhostInputNodeInner({
             style={{ fontSize: 'var(--card-font-size)' }}
           />
           <UrlChips
-            text={draft}
-            onRemove={(url) => setGhostDraft(data.parentId, removeUrl(draft, url))}
+            urls={urls}
+            onRemove={(url) =>
+              setGhostUrlChips(
+                data.parentId,
+                urls.filter((item) => item !== url),
+              )
+            }
+            onEdit={(oldUrl, nextUrl) =>
+              setGhostUrlChips(
+                data.parentId,
+                replaceUrl(urls, oldUrl, nextUrl),
+              )
+            }
           />
           {attachments.items.length > 0 && (
             <div className="mt-1">
@@ -240,7 +281,10 @@ function GhostInputNodeInner({
                 title="发送"
                 aria-label="发送"
                 disabled={
-                  isStreaming || pending || attachments.uploading || !draft.trim()
+                  isStreaming ||
+                  pending ||
+                  attachments.uploading ||
+                  (!draft.trim() && urls.length === 0)
                 }
                 onClick={() => void submit()}
                 className="nodrag flex h-[calc(32px*var(--card-font-scale))] w-[calc(32px*var(--card-font-scale))] shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
@@ -259,7 +303,7 @@ function GhostInputNodeInner({
             value={draft}
             disabled={isStreaming || pending}
             onChange={(event) => setGhostDraft(data.parentId, event.target.value)}
-            onPaste={pasteAttachments}
+            onPaste={handlePaste}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()

@@ -72,7 +72,6 @@ export type Preferences = Pick<
   | 'doubleClickMs'
   | 'dragDriftDelayMs'
   | 'dragDriftDistance'
-  | 'wheelMode'
   | 'pointerMode'
   | 'cardFontSize'
   | 'autosaveMinutes'
@@ -106,7 +105,6 @@ const DEFAULT_PREFERENCES: Preferences = {
   doubleClickMs: 300,
   dragDriftDelayMs: 0,
   dragDriftDistance: 10,
-  wheelMode: 'zoom-canvas',
   pointerMode: 'mouse',
   cardFontSize: 14,
   autosaveMinutes: 5,
@@ -141,7 +139,6 @@ function pickPreferences(settings: SettingsDTO): Preferences {
     doubleClickMs: settings.doubleClickMs,
     dragDriftDelayMs: settings.dragDriftDelayMs,
     dragDriftDistance: settings.dragDriftDistance,
-    wheelMode: settings.wheelMode ?? 'zoom-canvas',
     pointerMode: settings.pointerMode ?? 'mouse',
     cardFontSize: settings.cardFontSize,
     autosaveMinutes: settings.autosaveMinutes,
@@ -177,7 +174,6 @@ function mergePreferences(base: Preferences, patch: SettingsPatch): Preferences 
     doubleClickMs: patch.doubleClickMs ?? base.doubleClickMs,
     dragDriftDelayMs: patch.dragDriftDelayMs ?? base.dragDriftDelayMs,
     dragDriftDistance: patch.dragDriftDistance ?? base.dragDriftDistance,
-    wheelMode: patch.wheelMode ?? base.wheelMode,
     pointerMode: patch.pointerMode ?? base.pointerMode,
     cardFontSize: patch.cardFontSize ?? base.cardFontSize,
     autosaveMinutes: patch.autosaveMinutes ?? base.autosaveMinutes,
@@ -323,8 +319,12 @@ interface GraphState {
   branchInputs: BranchInput[]
   /** 分支输入草稿：parentId → 未提交文本，切换输入条后内容仍各自保留 */
   branchDrafts: Record<string, string>
+  /** 分支输入的链接胶囊：parentId → 已识别的链接，提交时按编号拼回问题末尾 */
+  branchUrlChips: Record<string, string[]>
   /** 自定义方向输入草稿：parentId → 未提交文本，各卡片独立保留 */
   ghostDrafts: Record<string, string>
+  /** 自定义方向输入的链接胶囊：parentId → 已识别的链接 */
+  ghostUrlChips: Record<string, string[]>
   /** 全局卡片尺寸，所有画布共用一份 */
   cardSize: { width: number; height: number }
   /** 个人偏好设置（外观、画布交互与保存参数），全局共用 */
@@ -382,8 +382,12 @@ interface GraphState {
   cancelBranchInput: (inputId: string) => void
   /** 写入分支输入草稿 */
   setBranchDraft: (parentId: string, text: string) => void
+  /** 写入分支输入的链接胶囊 */
+  setBranchUrlChips: (parentId: string, urls: string[]) => void
   /** 写入自定义方向输入草稿 */
   setGhostDraft: (parentId: string, text: string) => void
+  /** 写入自定义方向输入的链接胶囊 */
+  setGhostUrlChips: (parentId: string, urls: string[]) => void
   /** 提交分支问题：创建子卡片、写入落点并开始生成回答 */
   submitBranchInput: (inputId: string, question: string, attachmentIds?: string[]) => Promise<void>
   /** 更新卡片标题并同步后端返回的修改时间 */
@@ -497,7 +501,9 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     isStreamingIds: [],
     branchInputs: [],
     branchDrafts: {},
+    branchUrlChips: {},
     ghostDrafts: {},
+    ghostUrlChips: {},
     cardSize: { ...DEFAULT_CARD_SIZE },
     preferences: { ...DEFAULT_PREFERENCES },
     arkModel: '',
@@ -527,7 +533,9 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         isStreamingIds: [],
         branchInputs: [],
         branchDrafts: {},
+        branchUrlChips: {},
         ghostDrafts: {},
+        ghostUrlChips: {},
         projects: get().projects.map((project) =>
           project.id === graph.project.id ? graph.project : project,
         ),
@@ -691,7 +699,9 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         isStreamingIds: [],
         branchInputs: [],
         branchDrafts: {},
+        branchUrlChips: {},
         ghostDrafts: {},
+        ghostUrlChips: {},
       }))
     },
 
@@ -733,7 +743,9 @@ export const useGraphStore = create<GraphState>()((set, get) => {
           selectedNodeIds: [],
           branchInputs: [],
           branchDrafts: {},
+          branchUrlChips: {},
           ghostDrafts: {},
+          ghostUrlChips: {},
         }
       })
     },
@@ -790,7 +802,9 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         isStreamingIds: [],
         branchInputs: [],
         branchDrafts: {},
+        branchUrlChips: {},
         ghostDrafts: {},
+        ghostUrlChips: {},
         toast: null,
       })
     },
@@ -991,9 +1005,19 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         branchDrafts: { ...state.branchDrafts, [parentId]: text },
       })),
 
+    setBranchUrlChips: (parentId, urls) =>
+      set((state) => ({
+        branchUrlChips: { ...state.branchUrlChips, [parentId]: urls },
+      })),
+
     setGhostDraft: (parentId, text) =>
       set((state) => ({
         ghostDrafts: { ...state.ghostDrafts, [parentId]: text },
+      })),
+
+    setGhostUrlChips: (parentId, urls) =>
+      set((state) => ({
+        ghostUrlChips: { ...state.ghostUrlChips, [parentId]: urls },
       })),
 
     submitBranchInput: async (inputId, question, attachmentIds) => {
@@ -1025,13 +1049,16 @@ export const useGraphStore = create<GraphState>()((set, get) => {
       // 分支输入提交后，父卡片这一轮候选方向同样结束
       patchNode(input.parentId, (node) => ({ ...node, suggestionsConsumed: true }))
       set((state) => {
-        // 提交成功后清除该卡片的草稿，避免下次打开残留旧内容
+        // 提交成功后清除该卡片的草稿与链接胶囊，避免下次打开残留旧内容
         const drafts = { ...state.branchDrafts }
         delete drafts[input.parentId]
+        const urlChips = { ...state.branchUrlChips }
+        delete urlChips[input.parentId]
         return {
           nodes: [...state.nodes, toFlowNode(child)],
           branchInputs: state.branchInputs.filter((item) => item.id !== inputId),
           branchDrafts: drafts,
+          branchUrlChips: urlChips,
           selectedNodeId: child.id,
           selectedNodeIds: [child.id],
         }

@@ -23,8 +23,6 @@ def test_settings_defaults(client):
     assert data["doubleClickMs"] == 300
     assert data["dragDriftDelayMs"] == 0
     assert data["dragDriftDistance"] == 10
-    # 滚轮逻辑默认始终缩放画布
-    assert data["wheelMode"] == "zoom-canvas"
     # 指针设备默认鼠标，触摸板手势为实验性开关
     assert data["pointerMode"] == "mouse"
     # 旧的长按设置不再暴露

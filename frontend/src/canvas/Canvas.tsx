@@ -298,7 +298,7 @@ function CanvasInner() {
   const { fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
   const fittedProjectRef = useRef<string | null>(null)
   const viewportTimerRef = useRef<number | null>(null)
-  /** 空格是否按下：由全局 spaceKey 提供，卡片滚轮逻辑也共用同一状态 */
+  /** 空格是否按下：由全局 spaceKey 提供，卡片内滚动也共用同一状态 */
   const spacePressed = useSpacePressed()
   /** 是否启用实验性触控板手势（设置 → 画布 → 指针 → 触摸板逻辑） */
   const trackpadEnabled = preferences.pointerMode === 'trackpad'
@@ -769,7 +769,7 @@ function CanvasInner() {
    *   由「设置 → 显示 → 画布拖动惯性」决定；
    * - 可滚动区域：手势始于卡片正文等 `.nowheel` 区域时保留纵向原生滚动，横向滑动只吞掉事件，
    *   避免浏览器把它识别成前进 / 后退手势；
-   * - 鼠标滚轮：未按空格时交给 React Flow / 原生滚动按「滚轮逻辑」处理，按住空格时仍缩放。
+   * - 鼠标滚轮：未按空格时，可滚动区域走原生滚动、其余区域交给 React Flow 缩放；按住空格时仍缩放。
    * React 的 wheel 监听是 passive 的无法 preventDefault，改用原生监听 + 捕获阶段。
    */
   useEffect(() => {
@@ -1267,21 +1267,31 @@ function CanvasInner() {
     })
   }, [nodes])
 
-  // 聊天卡片与笔记分属不同层级区段：猜你想问高于笔记，分支输入条仍在最上层
+  // 层级区段：普通卡片 < 猜你想问 < 笔记 < 获焦/流式卡片 < 分支输入 < 聚焦输入
   const { cardZ, noteZ } = useMemo(() => {
-    const chatIds: string[] = []
+    const idleIds: string[] = []
+    const activeIds: string[] = []
     const noteIds: string[] = []
+    const selected = new Set(selectedNodeIds)
     nodes.forEach((item) => {
-      if (item.data.node.nodeType === 'note') noteIds.push(item.id)
-      else chatIds.push(item.id)
+      const isNote = item.data.node.nodeType === 'note'
+      // 点击选中或正在流式输出都算状态更新：该卡片需要压在笔记卡片之上
+      const active = selected.has(item.id) || item.data.node.status === 'streaming'
+      if (active) activeIds.push(item.id)
+      else if (isNote) noteIds.push(item.id)
+      else idleIds.push(item.id)
     })
     return {
-      cardZ: resolveLayerZ('card', chatIds),
+      // 聊天卡片与笔记卡片共用高区段：多选时按置顶序号排列，最后点击的在上
+      cardZ: new Map([
+        ...resolveLayerZ('card', idleIds),
+        ...resolveLayerZ('activeCard', activeIds),
+      ]),
       noteZ: resolveLayerZ('note', noteIds),
     }
     // layerVersion 变化即层级变化，节点本身未变也要重算
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, layerVersion])
+  }, [nodes, layerVersion, selectedNodeIds])
   const ghostZ = useMemo(
     () => resolveLayerZ('ghost', ghosts.map((item) => item.id)),
     [ghosts, layerVersion],
@@ -1307,8 +1317,11 @@ function CanvasInner() {
       // 固定卡片不可直接拖动；只有标题区（.card-drag-handle）作为拖动手柄
       ...nodes.map((item) => ({
         ...item,
+        // 获焦 / 流式的笔记会进入高区段（cardZ），其余笔记留在笔记区段
         zIndex:
-          item.data.node.nodeType === 'note' ? noteZ.get(item.id) : cardZ.get(item.id),
+          item.data.node.nodeType === 'note'
+            ? (noteZ.get(item.id) ?? cardZ.get(item.id))
+            : cardZ.get(item.id),
         draggable: !item.data.node.pinned,
         dragHandle: '.card-drag-handle',
       })),

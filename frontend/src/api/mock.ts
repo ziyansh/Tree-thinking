@@ -168,7 +168,6 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   doubleClickMs: 300,
   dragDriftDelayMs: 0,
   dragDriftDistance: 10,
-  wheelMode: 'zoom-canvas',
   pointerMode: 'mouse',
   cardFontSize: 14,
   autosaveMinutes: 5,
@@ -1016,9 +1015,6 @@ export const mockApi: ApiClient = {
     }
     if (patch.dragDriftDistance !== undefined) {
       settings.dragDriftDistance = Math.min(50, Math.max(0, Math.round(patch.dragDriftDistance)))
-    }
-    if (patch.wheelMode !== undefined) {
-      settings.wheelMode = patch.wheelMode
     }
     if (patch.pointerMode !== undefined) {
       settings.pointerMode = patch.pointerMode

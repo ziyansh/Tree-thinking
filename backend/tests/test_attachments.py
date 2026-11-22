@@ -42,6 +42,10 @@ def test_upload_and_read_text_attachment(client):
     got = client.get(meta["url"])
     assert got.status_code == 200
     assert "你好，附件" in got.text
+    # 可预览类型声明 inline，中文文件名按 RFC 5987 编码，避免被下载器直接捕获
+    disposition = got.headers["content-disposition"]
+    assert disposition.startswith("inline;")
+    assert "filename*=UTF-8''" in disposition
 
     missing = client.get("/api/attachments/" + "0" * 32)
     assert missing.status_code == 404

@@ -134,6 +134,7 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 ## 笔记连接线交互
 
 - **连接点位置**：问答卡片在底部工具栏一行、靠近右边框（`ANSWER_LINK_DOT`：`right: 6`、`bottom: 26`）；笔记卡片在标题行最左侧、靠近左边框（`NOTE_LINK_DOT`：`left: 6`、`top: 20`）。
+- **连接点尺寸**：圆点直径随卡片正文字号缩放（`calc(9px * var(--card-font-scale))`）；`answerLinkAnchor` / `noteLinkAnchor` 必须传入同一比例，否则连线端点与视觉圆心会错位。
 - **无方向**：可从任一端拖拽发起，连接只表示关联，不表示父子关系；同一对卡片重复连接时提示「连接已存在」。
 - **同类不连**：问答卡片只能连笔记卡片，笔记卡片只能连问答卡片；拖拽期间只高亮对侧类型的连接点。
 - **吸附**：指针落在可连接卡片的**整张矩形范围内**即吸附到该卡片连接点；同时保留连接点 24px 屏幕距离内的吸附。优先选择指针所在卡片，多张卡片重叠时选择连接点距离最近者。
@@ -142,6 +143,16 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 - **视觉状态**：空闲态为透明底 + 强调色边框；拖拽期间起点与可连接连接点为实心强调色并带光环/放大；被吸附者光环更明显，动画短促可中断。
 - **颜色与线型**：连线颜色取 `preferences.noteLinkColor`、粗细取 `noteLinkWidth`、线型取 `noteLinkStyle`，设置修改后立即生效；hover 仍使用强调色。
 - **底层渲染**：笔记连接线与逻辑连线一样始终位于卡片之下，不参与卡片动态层级。
+
+## 卡片字号缩放约定
+
+- **两个变量**：`--card-font-size` 控制卡片正文；`--card-font-scale = cardFontSize / 14` 控制所有固定像素元素（`applyTheme` 写入）。
+- **不只是文字**：卡片内的图标、图标按钮、附件标签、辅助小字、思考过程、停止 / 重试 / 暂停按钮、提交按钮、笔记卡片标题按钮都必须用该比例缩放，禁止只放大正文。
+- **工具类**：文本用 `.card-scale-11` / `.card-scale-12` / `.card-scale-13`；图标用 `.card-scale-icon`（14px 基准）/ `.card-scale-icon-sm`（12px 基准）；IconButton 自带 `.card-icon-button`，其 SVG 自动缩放。其它尺寸写 `calc(Npx * var(--card-font-scale))`。
+- **输入区**：元问题卡片、提问抽屉、自定义方向、分支输入条的 textarea 字号统一取 `var(--card-font-size)`；输入框内的工具栏按钮与附件标签同步缩放。
+- **提问抽屉高度**：只读与编辑态都不固定高度、不出现滚动条；抽屉以 `bottom-full` 为锚点，内容越多越向上扩展，底边保持不动。
+- **提示位置**：PDF 页数、模型能力等红色提示统一放在提交按钮左侧，不放在左侧操作组。
+- **连接点**：笔记连接点直径随字号缩放，连线端点函数必须传入相同比例。
 
 ## 模态标记
 
@@ -177,7 +188,8 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 - **provider 匹配注入**：附件元数据 `provider` 记录解析方（`ark` / `deepseek`，未解析为 `null`）；`build_message_parts(node, provider)` 遇到 `meta.provider` 与当前服务商不一致时跳过该附件（附件本身仍保留），避免把无效 `fileId` 传给模型。文本附件不区分服务商，始终按文本注入（单文件 20000 字符、合计 60000 字符上限）。
 - **ark 注入**：图片 / 视频 / 音频 / PDF 上传到 Files API（`POST {base_url}/files`，Bearer Key，`purpose=user_data`），轮询 `GET {base_url}/files/{id}` 直到 `status=active` 才保存 `fileId`（最长约 60 秒，失败只记日志并保留附件）。注入内容块为 `image_url` / `video_url` / `input_audio` / `file`，均只带 `file_id`；联网的 Responses 路径只有 PDF 转 `input_file`，其它附件类型跳过。
 - **DeepSeek 与 OpenAI 兼容**：DeepSeek 继续用 Files API（`purpose=text_recognition`）解析 PDF / Office；OpenAI 兼容保持图片 / 文本注入。
-- **PDF 页数提示**：上传接口的 `AttachmentDTO` 返回 `pageCount`（非 PDF 为 `null`）；前端 `PdfPageWarning`（`canvas/AttachmentComposer.tsx`）在任一 PDF `> 30` 页或合计 `> 30` 页时，于四个输入位置（元问题卡片、提问抽屉、自定义方向、分支输入条）底部工具栏的联网按钮左侧显示感叹号与「pdf页数过多，费用可能失控」，不区分服务商与模型。
+- **附件回读**：`GET /api/attachments/{id}` 对 `pdf` / `image` / `text` / `video` / `audio` 返回 `Content-Disposition: inline`（中文文件名用 RFC 5987 `filename*` 编码），其它类型按 `attachment` 下载；前端 `window.open` 后由浏览器直接预览，避免被下载器按附件捕获。
+- **PDF 页数提示**：上传接口的 `AttachmentDTO` 返回 `pageCount`（非 PDF 为 `null`）；前端 `PdfPageWarning`（`canvas/AttachmentComposer.tsx`）在任一 PDF `> 30` 页或合计 `> 30` 页时提示；总页数或单个 PDF `> 100` 页时提示「pdf页数过多，可能超出模型上下文」。提示统一放在提交按钮左侧（`PdfPageWarning` 与 `ArkCapabilityWarning` 同组），四个输入位置（元问题卡片、提问抽屉、自定义方向、分支输入条）保持一致。
 - **Files API 过期**：方舟文件默认保存 7 天（1–30 天可在方舟控制台配置）；`fileId` 与 API Key / 账号绑定，更换 Key 或账号后旧 `fileId` 可能失效，需要重新上传附件。
 
 ## 搜索结果与引用角标展示约定
@@ -214,3 +226,12 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 - **显示项数可调**：`SelectRow` 与 `ModelPicker` 均提供 `visibleCount` 参数（默认 9 项），高度按 `visibleCount * 32 + 8` 估算并与可用空间取小；选项较多时由浮层内部滚动。
 - **交互**：点击选项选中并关闭；当前值用强调色高亮；选项按钮 `onMouseDown` 阻止默认行为，避免浮层先因失焦关闭。
 - **新增下拉框**：复用上述组件，不要新增原生 `<select>`。
+
+## 更新日志写作约定
+
+- **分类前缀**：每条更新必须以分类前缀开头：`新增：` / `优化：` / `修复：` / `说明：` / `文档：` / `版本：`。
+- **建议顺序**：同一版本内尽量按 新增 → 优化 → 修复 → 说明 → 文档 → 版本 排列；修复项用 `修复：`，优化项用 `优化：`，不要写「调整」「改进」这类无前缀描述。
+- **分类含义**：`说明：` 用于使用限制、外部依赖与注意事项；`文档：` 只写文档变更；`版本：` 只写版本号升级。
+- **未发布版本的修复整合**：同一版本仍在开发中时，针对该版本新增 / 改动功能的修复直接并入对应条目，不单独写 `修复：`；`修复：` 只用于修复此前已发布版本的已知问题。例如 0.3.10 开发过程中给 0.3.10 新功能补的 bug，应合并进 0.3.10 的对应条目，而不是新增一条「修复：」。
+- **中英同步**：`readme.md` 与 `readme_en.md` 内容保持一致；英文对应前缀为 `Added:` / `Improved:` / `Fixed:` / `Notes:` / `Docs:` / `Version:`。
+- **版本与 hotfix**：默认每次对话递增一个小版本；hotfix 只在用户明确指定时创建，并写在对应版本的末尾。

@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.3.9** | [中文说明](readme.md)
+> Current version: **0.3.10** | [中文说明](readme.md)
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
@@ -206,19 +206,35 @@ Tree_thinking/
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
 
+### 0.3.10 — 2026-11-21
+- Improved: attachment chips are slightly larger and scale with the card font size; title icon buttons, “Thinking process”, footer actions, stop / retry / pause controls, input toolbars, and note-card buttons also scale proportionally. When attachments are collapsed, hovering only the “Attachments N” entry or the popup expands it, and the pointer can move into the popup without it closing.
+- Added: every attachment chip can be left-clicked to open the original file — PDFs and images open as an inline preview in a new browser tab (`Content-Disposition: inline`), other types are opened or downloaded by the system.
+- Added: empty-answer fallback — when a card shows “暂无回答”, hovering the card shows an accent-colored “重新提交” button in the center that re-requests the current question.
+- Improved: very large PDF attachments (many pages) warn “pdf页数过多，可能超出模型上下文”; context-overflow errors are translated into Chinese with advice to remove attachments / history or switch to a model with a larger context window.
+- Improved: the “My prompt” drawer no longer scrolls in read or edit mode; content grows upward while the bottom edge stays fixed.
+- Improved: PDF page / model capability warnings now sit to the left of the submit button.
+- Improved: note-link dots scale with the card font size, link anchors use the same scale, and the error box leaves room for the dot on its right.
+- Improved: card and canvas dragging now follow the pointer directly; the smoothing interpolation for node and trackpad panning was removed to eliminate damping.
+- Fixed: suggested follow-ups no longer leak truncated JSON fragments (e.g. `{"suggestions":[{"te`) as directions; invalid fragments are filtered and complete `text` fields are salvaged when possible.
+- Docs: added the “card font scaling” and “changelog writing” conventions to the development guide.
+- Version: bumped to 0.3.10.
+
 ### 0.3.9 — 2026-11-20
-- Added the Volcengine Ark (`ark`) provider: the API key is encrypted at rest, the base URL (default `https://ark.cn-beijing.volces.com/api/v3`) and model name (default `doubao-seed-2-1-pro-260915`) are configurable, and streaming answers, deep thinking, and smart web search are supported; the Deep Thinking toggle works exactly as it does for DeepSeek.
-- Provider dropdown order is fixed to DeepSeek → Volcengine Ark → OpenAI-compatible (OpenAI-compatible always last).
-- Ark model candidates are loaded from the Ark Models API for every model visible to the account (save the key first). Only text-output LLMs are listed (image / video / 3D generation models and `seed-character` are excluded), shown with readable names and sorted alphabetically; without a key or when the API fails it falls back to the built-in LLM candidates, and manual input still works.
-- Based on each model's `input_modalities`, uploading an attachment now shows “this model does not support image / video / audio / may not support PDF document understanding” in the same place as the PDF page warning; PDF support is inferred from vision support. Attachments that failed to parse show a warning icon on the chip.
-- Attachment input now covers images, text, PDF, video, audio, and other files: Ark uploads through the Files API (`purpose=user_data`) and injects `fileId`; DeepSeek keeps its existing document parsing; OpenAI-compatible providers keep images / text. Ark files are stored for 7 days by default (configurable 1–30 days); `fileId` values may become invalid after changing the key or account and must be re-uploaded.
-- Added the PDF page-count warning: the attachment DTO returns `pageCount`; when any PDF exceeds 30 pages or the total exceeds 30, the bottom toolbar of all four input locations (left of the web-search button) shows a warning icon and “pdf页数过多，费用可能失控”, regardless of provider or model.
-- Ark web search only shows the `sources` list and never inserts `[n]` badges into the answer; DeepSeek keeps precise citation badges. Forced search is DeepSeek-only; Ark falls back to smart search and hides the forced-search switch in the hover panel; session titles are DeepSeek-only.
-- When Ark web search returns 403, enable the “Doubao Search Custom” component in the Ark console; the error message is shown verbatim.
-- Model selection now uses one shared interaction: a text input with a scrollable frosted-glass candidate popup. Focusing clears the field to show every candidate; blur restores or keeps the choice. DeepSeek and Volcengine Ark provide candidates; the OpenAI-compatible provider has none and takes whatever model name the service requires. The settings control column is 380px (max 46%) and the popup's visible item count is configurable (9 by default, about 296px), opening upward when space is tight.
-- All dropdowns use the same frosted-glass popup as the provider and model pickers; the visible item count is configurable (9 by default), and native `<select>` / `datalist` are no longer used.
+- Added: the Volcengine Ark (`ark`) provider — the API key is encrypted at rest, the base URL (default `https://ark.cn-beijing.volces.com/api/v3`) and model name (default `doubao-seed-2-1-pro-260915`) are configurable, and streaming answers, deep thinking, and smart web search are supported.
+- Improved: provider dropdown order is fixed to DeepSeek → Volcengine Ark → OpenAI-compatible (OpenAI-compatible always last).
+- Improved: Ark model candidates are loaded from the Ark Models API for every model visible to the account; only text-output LLMs are listed (image / video / 3D generation models and `seed-character` excluded), shown with readable names and sorted alphabetically; without a key or when the API fails it falls back to built-in LLM candidates, and manual input still works.
+- Added: model capability hints based on `input_modalities` (“this model does not support image / video / audio / may not support PDF document understanding”), shown next to the PDF page warning; attachments that failed to parse show a warning icon on the chip.
+- Added: attachment input covers images, text, PDF, video, audio, and other files; Ark uploads through the Files API (`purpose=user_data`) and injects `fileId`, DeepSeek keeps its existing document parsing, and OpenAI-compatible providers keep images / text.
+- Added: the PDF page-count warning — the attachment DTO returns `pageCount`; when any PDF exceeds 30 pages or the total exceeds 30, all four input locations warn “pdf页数过多，费用可能失控”.
+- Improved: Ark web search only shows the `sources` list and never inserts `[n]` badges into the answer; DeepSeek keeps precise citation badges.
+- Improved: forced search is DeepSeek-only; Ark falls back to smart search and hides the forced-search switch; session titles are DeepSeek-only.
+- Notes: when Ark web search returns 403, enable the “Doubao Search Custom” component in the Ark console; the error message is shown verbatim.
+- Notes: Ark files are stored for 7 days by default (configurable 1–30 days); `fileId` values may become invalid after changing the key or account and must be re-uploaded.
+- Improved: model selection uses one shared interaction — a text input with a scrollable frosted-glass candidate popup; focusing clears the field to show every candidate, blur restores or keeps the choice; DeepSeek and Volcengine Ark provide candidates, the OpenAI-compatible provider has none and takes whatever model name the service requires.
+- Improved: all dropdowns use the same frosted-glass popup; the visible item count is configurable (9 by default), native `<select>` / `datalist` are no longer used, and the settings control column is 380px (max 46%).
+- Fixed: the Deep Thinking toggle was incorrectly disabled for Volcengine Ark; it now works exactly as it does for DeepSeek.
 - Docs: added Ark adaptation, file input, and source-display conventions to the development guide, plus the “model picker input” and “dropdown” conventions; Ark environment variables and outbound-network notes were added to the deployment guide.
-- Bumped the version to 0.3.9.
+- Version: bumped to 0.3.9.
 
 ### 0.3.8 — 2026-11-20
 - Rewrote trackpad gestures: a two-finger swipe pans the canvas and a pinch zooms it; pinch also works over scrollable card content and zooms around the pointer; while Space is held, a two-finger swipe pans the canvas (matching Space + left drag), and pinch and mouse wheel still zoom.

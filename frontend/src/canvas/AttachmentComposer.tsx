@@ -87,9 +87,21 @@ export function useAttachmentUploads(initialItems: AttachmentDTO[] = []): Attach
 
 /** 按附件类型选择图标：视频 / 音频使用媒体图标，其余（含 PDF）使用文件图标 */
 function AttachmentKindIcon({ kind, size }: { kind: AttachmentDTO['kind']; size: number }) {
-  if (kind === 'video') return <Film size={size} className="shrink-0 text-muted" />
-  if (kind === 'audio') return <Music size={size} className="shrink-0 text-muted" />
-  return <FileText size={size} className="shrink-0 text-muted" />
+  // 图标随卡片字号缩放，与附件的文字大小保持一致
+  const scaleClass = size <= 12 ? 'card-scale-icon-sm' : 'card-scale-icon'
+  if (kind === 'video') {
+    return <Film size={size} className={`shrink-0 text-muted ${scaleClass}`} />
+  }
+  if (kind === 'audio') {
+    return <Music size={size} className={`shrink-0 text-muted ${scaleClass}`} />
+  }
+  return <FileText size={size} className={`shrink-0 text-muted ${scaleClass}`} />
+}
+
+/** 在新窗口打开附件原始文件：PDF / 图片由浏览器直接预览，其它类型交给系统下载或打开 */
+export function openAttachment(attachment: AttachmentDTO) {
+  if (!attachment.url) return
+  window.open(attachment.url, '_blank', 'noopener,noreferrer')
 }
 
 /**
@@ -105,10 +117,13 @@ export function PdfPageWarning({ items }: { items: AttachmentDTO[] }) {
   const total = pages.reduce((sum, value) => sum + value, 0)
   if (!pages.some((value) => value > 30) && total <= 30) return null
 
+  // 页数特别多时优先提示上下文超限风险（比费用提示更直接）
+  const oversized = pages.some((value) => value > 100) || total > 100
+
   return (
     <span className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-danger">
       <AlertTriangle size={12} className="shrink-0" />
-      pdf页数过多，费用可能失控
+      {oversized ? 'pdf页数过多，可能超出模型上下文' : 'pdf页数过多，费用可能失控'}
     </span>
   )
 }
@@ -181,13 +196,16 @@ export function AttachmentChips({ items, onRemove, compact, onOpen }: Attachment
           key={attachment.id}
           title={attachment.name}
           className={[
-            'chip-in flex min-w-0 items-center gap-1.5 rounded-lg border border-subtle bg-elevated px-1.5 py-1',
+            'chip-in flex min-w-0 items-center gap-1.5 rounded-lg border border-subtle bg-elevated px-2 py-1',
             onOpen ? 'cursor-pointer hover:border-accent' : '',
           ].join(' ')}
           onClick={() => onOpen?.(attachment)}
         >
           <AttachmentKindIcon kind={attachment.kind} size={compact ? 12 : 14} />
-          <span className="truncate text-[11px] text-body" style={{ maxWidth: '120px' }}>
+          <span
+            className="truncate card-scale-12 text-body"
+            style={{ maxWidth: 'calc(120px * var(--card-font-scale))' }}
+          >
             {attachment.name}
           </span>
           {attachment.parsed === false &&
@@ -197,7 +215,7 @@ export function AttachmentChips({ items, onRemove, compact, onOpen }: Attachment
                 aria-label="附件未解析"
                 className="shrink-0 text-danger"
               >
-                <AlertTriangle size={11} />
+                <AlertTriangle size={11} className="card-scale-icon-sm" />
               </span>
             )}
           {onRemove && (
@@ -209,9 +227,9 @@ export function AttachmentChips({ items, onRemove, compact, onOpen }: Attachment
                 event.stopPropagation()
                 onRemove(attachment.id)
               }}
-              className="nodrag flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted transition-colors duration-150 hover:text-danger"
+              className="nodrag flex h-[calc(16px*var(--card-font-scale))] w-[calc(16px*var(--card-font-scale))] shrink-0 items-center justify-center rounded text-muted transition-colors duration-150 hover:text-danger"
             >
-              <X size={11} />
+              <X size={11} className="card-scale-icon-sm" />
             </button>
           )}
         </div>

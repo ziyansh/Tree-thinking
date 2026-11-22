@@ -10,6 +10,7 @@ import {
   ArkCapabilityWarning,
   AttachmentChips,
   PdfPageWarning,
+  openAttachment,
   useAttachmentUploads,
   useFileDropZone,
   usePasteAttachments,
@@ -143,7 +144,7 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
       ].join(' ')}
       style={{ width: cardWidth }}
     >
-      <span className="shrink-0 text-[10px] leading-none text-muted/70">分支问题</span>
+      <span className="shrink-0 card-scale-11 leading-none text-muted/70">分支问题</span>
       <textarea
         ref={textareaRef}
         autoFocus
@@ -165,9 +166,10 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
           }
         }}
         className={[
-          'nodrag selectable-text min-h-[60px] w-full resize-none bg-transparent text-[13px] leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
+          'nodrag selectable-text min-h-[60px] w-full resize-none bg-transparent leading-[1.65] text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
           spacePressed ? '' : 'nowheel',
         ].join(' ')}
+        style={{ fontSize: 'var(--card-font-size)' }}
       />
 
       <UrlChips
@@ -176,7 +178,12 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
       />
 
       {attachments.items.length > 0 && (
-        <AttachmentChips items={attachments.items} onRemove={attachments.remove} compact />
+        <AttachmentChips
+          items={attachments.items}
+          onRemove={attachments.remove}
+          onOpen={openAttachment}
+          compact
+        />
       )}
 
       <div className="flex items-center justify-between gap-2">
@@ -186,11 +193,11 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
             title="添加附件"
             aria-label="添加附件"
             onClick={() => fileInputRef.current?.click()}
-            className="nodrag flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
+            className="nodrag flex h-[calc(28px*var(--card-font-scale))] w-[calc(28px*var(--card-font-scale))] items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
           >
-            <Paperclip size={13} />
+            <Paperclip size={13} className="card-scale-icon" />
           </button>
-          {attachments.uploading && <span className="text-[11px] text-muted">上传中…</span>}
+          {attachments.uploading && <span className="card-scale-11 text-muted">上传中…</span>}
           <input
             ref={fileInputRef}
             type="file"
@@ -203,24 +210,26 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
             }}
           />
           <ThinkingToggle />
+          <WebSearchToggle />
+        </div>
+        <div className="flex min-w-0 items-center gap-1.5">
           <PdfPageWarning items={attachments.items} />
           <ArkCapabilityWarning
             items={attachments.items}
             model={arkModel}
             models={arkModels}
           />
-          <WebSearchToggle />
+          <button
+            type="button"
+            title="发送"
+            aria-label="发送"
+            disabled={pending || attachments.uploading || !draft.trim()}
+            onClick={() => void submit()}
+            className="nodrag flex h-[calc(32px*var(--card-font-scale))] w-[calc(32px*var(--card-font-scale))] shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Send size={14} className="card-scale-icon" />
+          </button>
         </div>
-        <button
-          type="button"
-          title="发送"
-          aria-label="发送"
-          disabled={pending || attachments.uploading || !draft.trim()}
-          onClick={() => void submit()}
-          className="nodrag flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          <Send size={14} />
-        </button>
       </div>
     </div>
   )

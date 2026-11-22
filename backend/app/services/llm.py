@@ -21,6 +21,28 @@ class LLMError(Exception):
     """模型调用异常；message 为可直接展示给用户的中文提示。"""
 
 
+# 上下文超限错误的识别关键字：统一转成可执行的中文提示
+_CONTEXT_ERROR_HINTS = (
+    "input too long",
+    "tokens exceeds",
+    "maximum context",
+    "context length",
+    "too many tokens",
+)
+
+
+def _friendly_error(exc: Exception) -> str:
+    """把底层异常转成用户可理解的提示；上下文超限时给出处理建议。"""
+    text = str(exc)
+    lowered = text.lower()
+    if any(hint in lowered for hint in _CONTEXT_ERROR_HINTS):
+        return (
+            "上下文超过模型上限：附件或历史内容过长，请减少附件（尤其是页数较多的 PDF）、"
+            "删减历史分支或改用上下文更大的模型后重试。\n原始错误：" + text
+        )
+    return f"模型调用失败：{text}"
+
+
 # 按客户端配置缓存实例；设置改动后自动切到新客户端
 _clients: dict[tuple[str, str, str, str], AsyncOpenAI] = {}
 
@@ -445,7 +467,7 @@ async def stream_chat(
         raise
     except Exception as exc:
         # 统一转成中文提示，避免把英文异常直接暴露给用户
-        raise LLMError(f"模型调用失败：{exc}") from exc
+        raise LLMError(_friendly_error(exc)) from exc
 
 
 async def complete_json(
@@ -471,7 +493,7 @@ async def complete_json(
             **params,
         )
     except Exception as exc:
-        raise LLMError(f"模型调用失败：{exc}") from exc
+        raise LLMError(_friendly_error(exc)) from exc
 
     # 空响应或无内容时返回空串，由调用方决定如何降级
     if not response.choices:

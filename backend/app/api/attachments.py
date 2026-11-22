@@ -1,5 +1,7 @@
 """附件 API：上传文件与按 id 读取（用于前端预览）。"""
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
@@ -39,4 +41,19 @@ def read_attachment(
     path = attachments.file_path(meta)
     if path is None:
         raise HTTPException(status_code=404, detail="附件不存在")
-    return FileResponse(path, media_type=meta.get("mime") or "application/octet-stream")
+    # 浏览器可直接预览的类型声明 inline，避免被下载器按附件捕获；
+    # 其它类型仍按附件下载。中文文件名使用 RFC 5987 编码。
+    filename = str(meta.get("name") or path.name)
+    disposition = (
+        "inline"
+        if meta.get("kind") in {"pdf", "image", "text", "video", "audio"}
+        else "attachment"
+    )
+    headers = {
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(filename)}",
+    }
+    return FileResponse(
+        path,
+        media_type=meta.get("mime") or "application/octet-stream",
+        headers=headers,
+    )

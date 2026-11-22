@@ -20,6 +20,8 @@
 
   /* 卡片正文字号，运行时由设置覆盖 */
   --card-font-size: 14px;
+  /* 卡片内固定尺寸元素的缩放比例，运行时由设置覆盖 */
+  --card-font-scale: 1;
 
   /* 毛玻璃材质参数：集中在此，便于统一调整浮层通透度与模糊度 */
   /* 默认浮层：背景不透明度（越低越透） */
@@ -95,6 +97,37 @@
   --ghost-border: rgba(0, 0, 0, 0.08);
 
   color-scheme: light;
+}
+
+/* 卡片内固定像素尺寸的元素跟随正文字号缩放：按钮、图标与辅助小字 */
+.card-scale-11 {
+  font-size: calc(11px * var(--card-font-scale));
+}
+
+.card-scale-12 {
+  font-size: calc(12px * var(--card-font-scale));
+}
+
+.card-scale-13 {
+  font-size: calc(13px * var(--card-font-scale));
+}
+
+.card-scale-icon {
+  width: calc(14px * var(--card-font-scale));
+  height: calc(14px * var(--card-font-scale));
+  flex: none;
+}
+
+.card-scale-icon-sm {
+  width: calc(12px * var(--card-font-scale));
+  height: calc(12px * var(--card-font-scale));
+  flex: none;
+}
+
+/* 卡片标题行的图标按钮：按钮内 SVG 随正文字号缩放 */
+.card-icon-button > svg {
+  width: calc(14px * var(--card-font-scale));
+  height: calc(14px * var(--card-font-scale));
 }
 
 /* 把 CSS 变量映射为 Tailwind 颜色工具类 */
@@ -630,10 +663,10 @@ button:not(:disabled):active {
 /* ---------- 笔记卡片连线（v0.3.4 / v0.3.5） ---------- */
 /* 连接点：空闲态为透明底 + 强调色边框；hover / 可连接 / 被吸附 / 起点逐级强调 */
 .react-flow__handle.note-link-handle {
-  width: 9px;
-  height: 9px;
-  min-width: 9px;
-  min-height: 9px;
+  width: calc(9px * var(--card-font-scale));
+  height: calc(9px * var(--card-font-scale));
+  min-width: calc(9px * var(--card-font-scale));
+  min-height: calc(9px * var(--card-font-scale));
   padding: 0;
   border: 1px solid var(--accent);
   border-radius: 999px;

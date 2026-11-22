@@ -27,7 +27,7 @@ import { useEscapeHandler } from '../lib/escapeStack'
 import { useSpacePressed } from '../lib/spaceKey'
 import { bumpUiLayer } from '../lib/uiLayers'
 import { AttachmentBar } from './AttachmentBar'
-import { AttachmentChips, ArkCapabilityWarning, PdfPageWarning, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
+import { AttachmentChips, ArkCapabilityWarning, PdfPageWarning, openAttachment, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
 import { WebSearchToggle } from './WebSearchToggle'
 import { ThinkingToggle } from './ThinkingToggle'
 import { PromptDrawer } from './PromptDrawer'
@@ -117,7 +117,7 @@ export function IconButton({ title, onClick, disabled, danger, active, children 
       disabled={disabled}
       onClick={onClick}
       className={[
-        'nodrag flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-150',
+        'card-icon-button nodrag flex h-[calc(28px*var(--card-font-scale))] w-[calc(28px*var(--card-font-scale))] shrink-0 items-center justify-center rounded-lg transition-colors duration-150',
         'disabled:cursor-not-allowed disabled:opacity-40',
         danger
           ? 'text-muted hover:bg-ghost-border hover:text-danger'
@@ -566,17 +566,17 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             }}
             active={promptOpen}
           >
-            <MessageSquareText size={14} />
+            <MessageSquareText size={14} className="card-scale-icon" />
           </IconButton>
           <IconButton title="复制问题和回答" onClick={() => void handleCopy()}>
-            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? <Check size={14} className="card-scale-icon" /> : <Copy size={14} className="card-scale-icon" />}
           </IconButton>
           <IconButton
             title="重新生成回答"
             disabled={isStreaming || isInput}
             onClick={() => void handleRegenerate()}
           >
-            <RefreshCw size={14} />
+            <RefreshCw size={14} className="card-scale-icon" />
           </IconButton>
           {!isRoot && (
             <IconButton
@@ -585,7 +585,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
               disabled={isStreaming}
               onClick={() => void removeNode(node.id)}
             >
-              <Trash2 size={14} />
+              <Trash2 size={14} className="card-scale-icon" />
             </IconButton>
           )}
           {/* 固定按钮放在最右侧：固定后卡片不可直接拖动，元卡片默认固定 */}
@@ -594,7 +594,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             active={node.pinned}
             onClick={() => void togglePin(node.id)}
           >
-            <Pin size={14} />
+            <Pin size={14} className="card-scale-icon" />
           </IconButton>
         </div>
       </div>
@@ -607,11 +607,11 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           <button
             type="button"
             onClick={() => setReasoningOpen((open) => !open)}
-            className="nodrag flex w-full items-center gap-1 text-left text-[13px] text-muted transition-colors duration-150 hover:text-body"
+            className="nodrag flex w-full items-center gap-1 text-left card-scale-13 text-muted transition-colors duration-150 hover:text-body"
           >
             <ChevronRight
               size={14}
-              className={`transition-transform duration-200 ease-out ${reasoningOpen ? 'rotate-90' : ''}`}
+              className={`card-scale-icon transition-transform duration-200 ease-out ${reasoningOpen ? 'rotate-90' : ''}`}
             />
             <span>{isStreaming ? '思考中…' : '思考过程'}</span>
           </button>
@@ -622,7 +622,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             }`}
           >
             <div className="min-h-0">
-              <div className={`nodrag ${wheelScrollClass} selectable-text mt-2 inline-block max-h-[200px] max-w-full overflow-y-auto whitespace-pre-wrap pr-1 text-[13px] leading-[1.6] text-muted`}>
+              <div className={`nodrag ${wheelScrollClass} selectable-text mt-2 inline-block max-h-[200px] max-w-full overflow-y-auto whitespace-pre-wrap pr-1 card-scale-13 leading-[1.6] text-muted`}>
                 {node.reasoning}
               </div>
             </div>
@@ -642,7 +642,11 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
         >
           {attachments.items.length > 0 && (
             <div className="mb-1">
-              <AttachmentChips items={attachments.items} onRemove={attachments.remove} />
+              <AttachmentChips
+                items={attachments.items}
+                onRemove={attachments.remove}
+                onOpen={openAttachment}
+              />
             </div>
           )}
           <textarea
@@ -668,11 +672,11 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                 title="添加附件"
                 aria-label="添加附件"
                 onClick={() => fileInputRef.current?.click()}
-                className="nodrag flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
+                className="nodrag flex h-[calc(28px*var(--card-font-scale))] w-[calc(28px*var(--card-font-scale))] items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
               >
-                <Paperclip size={14} />
+                <Paperclip size={14} className="card-scale-icon" />
               </button>
-              {attachments.uploading && <span className="text-[11px] text-muted">上传中…</span>}
+              {attachments.uploading && <span className="card-scale-11 text-muted">上传中…</span>}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -685,22 +689,24 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                 }}
               />
               <ThinkingToggle />
+              <WebSearchToggle />
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5">
               <PdfPageWarning items={attachments.items} />
               <ArkCapabilityWarning
                 items={attachments.items}
                 model={arkModel}
                 models={arkModels}
               />
-              <WebSearchToggle />
+              <button
+                type="button"
+                disabled={submitting || attachments.uploading || !draft.trim()}
+                onClick={() => void handleSubmit()}
+                className="shrink-0 rounded-lg bg-accent px-[calc(12px*var(--card-font-scale))] py-[calc(6px*var(--card-font-scale))] card-scale-13 font-medium text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                发送
+              </button>
             </div>
-            <button
-              type="button"
-              disabled={submitting || attachments.uploading || !draft.trim()}
-              onClick={() => void handleSubmit()}
-              className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              发送
-            </button>
           </div>
         </div>
       ) : (
@@ -744,7 +750,11 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                   </Markdown>
                 </div>
               ) : (
-                !isStreaming && <p className="text-[13px] text-muted">暂无回答</p>
+                !isStreaming && (
+                  <div className="flex min-h-[72px] items-center justify-center rounded-lg border border-dashed border-subtle">
+                    <p className="card-scale-13 text-muted">暂无回答</p>
+                  </div>
+                )
               )}
               {isStreaming && (
                 <span className="ml-0.5 streaming-caret inline-block h-4 w-[2px] bg-accent align-middle" />
@@ -774,7 +784,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                 >
                   <span className="h-1 w-10 rounded-full bg-strong" />
                 </div>
-                <p className="shrink-0 px-3 pb-1 text-[11px] text-muted">
+                <p className="shrink-0 px-3 pb-1 card-scale-11 text-muted">
                   参考资料 · {node.sources.length} 篇
                 </p>
                 <div className={`${spacePressed ? '' : 'nowheel'} min-h-0 flex-1 overflow-y-auto px-3 pb-3`}>
@@ -788,7 +798,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                         target="_blank"
                         rel="noreferrer"
                         title={source.url}
-                        className="mb-2 flex items-start gap-2 text-[12px] leading-[1.5] last:mb-0"
+                        className="mb-2 flex items-start gap-2 card-scale-12 leading-[1.5] last:mb-0"
                       >
                         <span className="w-4 shrink-0 text-right tabular-nums text-muted">
                           {index + 1}.
@@ -805,16 +815,17 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           </div>
 
           {isError && (
-            <div className="error-in mt-3 flex shrink-0 items-start justify-between gap-3 rounded-lg border border-danger px-3 py-2">
-              <p className="min-w-0 break-words text-[13px] leading-[1.6] text-danger">
+            // 右侧留出连接点空间，避免错误框压住笔记连接点
+            <div className="error-in mt-3 mr-[calc(20px*var(--card-font-scale))] flex shrink-0 items-start justify-between gap-3 rounded-lg border border-danger px-3 py-2">
+              <p className="min-w-0 break-words card-scale-13 leading-[1.6] text-danger">
                 {node.error || '回答失败，请稍后重试'}
               </p>
               <button
                 type="button"
                 onClick={() => void regenerate(node.id)}
-                className="nodrag flex shrink-0 items-center gap-1 rounded-lg border border-subtle px-2 py-1 text-[13px] text-body transition-colors duration-150 hover:border-strong"
+                className="nodrag flex shrink-0 items-center gap-1 rounded-lg border border-subtle px-2 py-1 card-scale-13 text-body transition-colors duration-150 hover:border-strong"
               >
-                <RefreshCw size={13} />
+                <RefreshCw size={13} className="card-scale-icon-sm" />
                 重试
               </button>
             </div>
@@ -826,9 +837,9 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
               <button
                 type="button"
                 onClick={() => void stopGeneration(node.id)}
-                className="nodrag flex items-center gap-1 rounded-md border border-subtle px-2 py-0.5 text-[12px] text-danger transition-colors duration-150 hover:border-danger hover:bg-ghost-border"
+                className="nodrag flex items-center gap-1 rounded-md border border-subtle px-2 py-0.5 card-scale-12 text-danger transition-colors duration-150 hover:border-danger hover:bg-ghost-border"
               >
-                <Square size={10} fill="currentColor" />
+                <Square size={10} fill="currentColor" className="card-scale-icon-sm" />
                 停止生成
               </button>
             </div>
@@ -845,13 +856,13 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                 <button
                   type="button"
                   onClick={() => setSourcesOpen((open) => !open)}
-                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 card-scale-12 text-muted transition-colors duration-150 hover:text-ink"
                 >
                   参考 {node.sources.length} 篇资料
                   <ChevronRight
                     size={12}
                     // 收起时指向右，展开时指向上
-                    className={`transition-transform duration-200 ease-out ${sourcesOpen ? '-rotate-90' : ''}`}
+                    className={`card-scale-icon-sm transition-transform duration-200 ease-out ${sourcesOpen ? '-rotate-90' : ''}`}
                   />
                 </button>
               )}
@@ -869,9 +880,9 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                     setPromptOpen(true)
                     bumpUiLayer(node.id)
                   }}
-                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 card-scale-12 text-muted transition-colors duration-150 hover:text-ink"
                 >
-                  <MessageSquareText size={12} />
+                  <MessageSquareText size={12} className="card-scale-icon-sm" />
                   重新提问
                 </button>
                 <button
@@ -879,9 +890,9 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                   title="新建分支"
                   aria-label="新建分支"
                   onClick={() => addBranchInput(node.id)}
-                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 text-[12px] text-muted transition-colors duration-150 hover:text-ink"
+                  className="nodrag flex items-center gap-1 rounded-md px-1 py-0.5 card-scale-12 text-muted transition-colors duration-150 hover:text-ink"
                 >
-                  <GitBranch size={12} />
+                  <GitBranch size={12} className="card-scale-icon-sm" />
                   新建分支
                 </button>
               </div>
@@ -894,7 +905,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
         {/* 暂停态遮罩：正文与思考区域已模糊，中央提供继续生成 / 重新输入 */}
         {isPaused && (
           <div className="pause-in nodrag absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-lg border border-subtle bg-panel/55 backdrop-blur-sm">
-            <span className="text-[12px] text-muted">生成已暂停</span>
+            <span className="card-scale-12 text-muted">生成已暂停</span>
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -904,11 +915,11 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                 }
                 onClick={() => void continueGeneration(node.id)}
                 className={[
-                  'flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-canvas transition-opacity duration-150',
+                  'flex items-center gap-1 rounded-lg bg-accent px-3 py-1.5 card-scale-12 font-medium text-canvas transition-opacity duration-150',
                   node.webToolUsed ? 'cursor-not-allowed opacity-40' : 'hover:opacity-90',
                 ].join(' ')}
               >
-                <Play size={12} />
+                <Play size={12} className="card-scale-icon-sm" />
                 继续生成
               </button>
               <button
@@ -919,15 +930,28 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
                   setPromptOpen(true)
                   bumpUiLayer(node.id)
                 }}
-                className="flex items-center gap-1 rounded-lg border border-subtle px-3 py-1.5 text-[12px] text-body transition-colors duration-150 hover:border-strong hover:text-ink"
+                className="flex items-center gap-1 rounded-lg border border-subtle px-3 py-1.5 card-scale-12 text-body transition-colors duration-150 hover:border-strong hover:text-ink"
               >
-                <MessageSquareText size={12} />
+                <MessageSquareText size={12} className="card-scale-icon-sm" />
                 重新输入
               </button>
             </div>
           </div>
         )}
       </div>
+
+      {/* 空回答兜底：悬停时在卡片正中显示强调色「重新提交」，重新请求当前问题 */}
+      {!node.answer && !isStreaming && !isInput && !isError && !isPaused && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+          <button
+            type="button"
+            onClick={() => void handleRegenerate()}
+            className="nodrag pointer-events-auto rounded-lg border border-accent bg-accent-dim px-[calc(12px*var(--card-font-scale))] py-[calc(6px*var(--card-font-scale))] opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+          >
+            <span className="card-scale-13 font-medium text-accent">重新提交</span>
+          </button>
+        </div>
+      )}
 
       {/* 四边与四角缩放命中区：仅提供光标与命中，不绘制高亮；根卡片同样可缩放 */}
       {EDGE_ZONES.map((zone) => (

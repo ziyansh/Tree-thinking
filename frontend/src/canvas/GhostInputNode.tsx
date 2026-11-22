@@ -5,7 +5,7 @@ import { Handle, Position } from '@xyflow/react'
 import { Paperclip, Send } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
 import type { InputGhostNode } from './ghosts'
-import { AttachmentChips, ArkCapabilityWarning, PdfPageWarning, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
+import { AttachmentChips, ArkCapabilityWarning, PdfPageWarning, openAttachment, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
 import { WebSearchToggle } from './WebSearchToggle'
 import { ThinkingToggle } from './ThinkingToggle'
 import { useSpacePressed } from '../lib/spaceKey'
@@ -167,7 +167,7 @@ function GhostInputNodeInner({
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       {focused ? (
         <div className="tab-panel-in flex min-h-0 flex-1 flex-col gap-1.5">
-          <span className="shrink-0 text-[10px] leading-none text-muted/70">自定义方向</span>
+          <span className="shrink-0 card-scale-11 leading-none text-muted/70">自定义方向</span>
           <textarea
             ref={textareaRef}
             rows={3}
@@ -183,9 +183,10 @@ function GhostInputNodeInner({
             }}
             placeholder="输入问题，继续你的思考方向"
             className={[
-              'nodrag selectable-text min-h-[60px] w-full resize-none bg-transparent text-[13px] leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
+              'nodrag selectable-text min-h-[60px] w-full resize-none bg-transparent leading-[1.65] text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
               spacePressed ? '' : 'nowheel',
             ].join(' ')}
+            style={{ fontSize: 'var(--card-font-size)' }}
           />
           <UrlChips
             text={draft}
@@ -196,6 +197,7 @@ function GhostInputNodeInner({
               <AttachmentChips
                 items={attachments.items}
                 onRemove={attachments.remove}
+                onOpen={openAttachment}
                 compact
               />
             </div>
@@ -207,11 +209,11 @@ function GhostInputNodeInner({
                 title="添加附件"
                 aria-label="添加附件"
                 onClick={() => fileInputRef.current?.click()}
-                className="nodrag flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
+                className="nodrag flex h-[calc(28px*var(--card-font-scale))] w-[calc(28px*var(--card-font-scale))] items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
               >
-                <Paperclip size={13} />
+                <Paperclip size={13} className="card-scale-icon" />
               </button>
-              {attachments.uploading && <span className="text-[11px] text-muted">上传中…</span>}
+              {attachments.uploading && <span className="card-scale-11 text-muted">上传中…</span>}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -224,31 +226,33 @@ function GhostInputNodeInner({
                 }}
               />
               <ThinkingToggle />
+              <WebSearchToggle />
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5">
               <PdfPageWarning items={attachments.items} />
               <ArkCapabilityWarning
                 items={attachments.items}
                 model={arkModel}
                 models={arkModels}
               />
-              <WebSearchToggle />
+              <button
+                type="button"
+                title="发送"
+                aria-label="发送"
+                disabled={
+                  isStreaming || pending || attachments.uploading || !draft.trim()
+                }
+                onClick={() => void submit()}
+                className="nodrag flex h-[calc(32px*var(--card-font-scale))] w-[calc(32px*var(--card-font-scale))] shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Send size={14} className="card-scale-icon" />
+              </button>
             </div>
-            <button
-              type="button"
-              title="发送"
-              aria-label="发送"
-              disabled={
-                isStreaming || pending || attachments.uploading || !draft.trim()
-              }
-              onClick={() => void submit()}
-              className="nodrag flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Send size={14} />
-            </button>
           </div>
         </div>
       ) : (
         <>
-          <span className="shrink-0 text-[10px] leading-none text-muted/70">自定义方向</span>
+          <span className="shrink-0 card-scale-11 leading-none text-muted/70">自定义方向</span>
           <textarea
             ref={textareaRef}
             rows={1}
@@ -264,9 +268,10 @@ function GhostInputNodeInner({
             }}
             placeholder="输入问题，继续你的思考方向"
             className={[
-              'nodrag h-5 min-w-0 flex-1 resize-none bg-transparent text-[13px] leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
+              'nodrag h-5 min-w-0 flex-1 resize-none bg-transparent leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
               spacePressed ? '' : 'nowheel',
             ].join(' ')}
+            style={{ fontSize: 'var(--card-font-size)' }}
           />
         </>
       )}

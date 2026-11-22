@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { FocusEvent } from 'react'
 import { Paperclip, RefreshCw, X } from 'lucide-react'
 import type { NodeDTO } from '../api/types'
@@ -8,6 +8,7 @@ import {
   ArkCapabilityWarning,
   AttachmentChips,
   PdfPageWarning,
+  openAttachment,
   useAttachmentUploads,
   usePasteAttachments,
 } from './AttachmentComposer'
@@ -69,6 +70,15 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
     element?.focus()
     element?.setSelectionRange(element.value.length, element.value.length)
   }, [editing])
+
+  // 编辑态自动增高：不出现滚动条，抽屉以底边为锚点向上扩展
+  useLayoutEffect(() => {
+    if (!editing) return
+    const element = textareaRef.current
+    if (!element) return
+    element.style.height = 'auto'
+    element.style.height = `${element.scrollHeight}px`
+  }, [draft, editing])
 
   // 文件选择框关闭后清除抑制标记：选中文件（change）或取消（窗口重新获得焦点）
   useEffect(() => {
@@ -142,7 +152,7 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
     <div
       ref={containerRef}
       data-modal-open="true"
-      className="glass-surface-airy drawer-pull-up nodrag nowheel absolute inset-x-0 bottom-full z-30 mb-2 flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-subtle shadow-[0_12px_32px_rgba(0,0,0,0.24)]"
+      className="glass-surface-airy drawer-pull-up nodrag nowheel absolute inset-x-0 bottom-full z-30 mb-2 flex flex-col overflow-hidden rounded-xl border border-subtle shadow-[0_12px_32px_rgba(0,0,0,0.24)]"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
       onBlur={handleBlur}
@@ -151,21 +161,21 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
       }}
     >
       <div className="flex shrink-0 items-center justify-between px-3 pt-2">
-        <span className="text-[11px] text-muted">我的提问</span>
+        <span className="card-scale-11 text-muted">我的提问</span>
         <button
           type="button"
           title="收起提问"
           aria-label="收起提问"
           onClick={onClose}
-          className="flex h-5 w-5 items-center justify-center rounded text-muted transition-colors duration-150 hover:text-ink"
+          className="flex h-[calc(20px*var(--card-font-scale))] w-[calc(20px*var(--card-font-scale))] items-center justify-center rounded text-muted transition-colors duration-150 hover:text-ink"
         >
-          <X size={12} />
+          <X size={12} className="card-scale-icon-sm" />
         </button>
       </div>
 
       {editing ? (
         <div className="tab-panel-in flex min-h-0 flex-1 flex-col gap-1.5 px-3 pb-2">
-          <span className="shrink-0 text-[10px] leading-none text-muted/70">自定义方向</span>
+          <span className="shrink-0 card-scale-11 leading-none text-muted/70">自定义方向</span>
           <textarea
             ref={textareaRef}
             value={draft}
@@ -178,13 +188,15 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
                 void resubmit()
               }
             }}
-            className="selectable-text min-h-[60px] w-full resize-none rounded-md bg-transparent text-[13px] leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
+            className="selectable-text min-h-[60px] w-full resize-none overflow-hidden rounded-md bg-transparent leading-[1.65] text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ fontSize: 'var(--card-font-size)' }}
           />
           <UrlChips text={draft} onRemove={(url) => setDraft(removeUrl(draft, url))} />
           {attachments.items.length > 0 && (
             <AttachmentChips
               items={attachments.items}
               onRemove={attachments.remove}
+              onOpen={openAttachment}
               compact
             />
           )}
@@ -199,11 +211,11 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
                   suppressBlurRef.current = true
                   fileInputRef.current?.click()
                 }}
-                className="nodrag flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
+                className="nodrag flex h-[calc(28px*var(--card-font-scale))] w-[calc(28px*var(--card-font-scale))] items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
               >
-                <Paperclip size={13} />
+                <Paperclip size={13} className="card-scale-icon" />
               </button>
-              {attachments.uploading && <span className="text-[11px] text-muted">上传中…</span>}
+              {attachments.uploading && <span className="card-scale-11 text-muted">上传中…</span>}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -217,32 +229,37 @@ export function PromptDrawer({ node, initialEditing = false, onClose }: PromptDr
                 }}
               />
               <ThinkingToggle />
+              <WebSearchToggle />
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5">
               <PdfPageWarning items={attachments.items} />
               <ArkCapabilityWarning
                 items={attachments.items}
                 model={arkModel}
                 models={arkModels}
               />
-              <WebSearchToggle />
+              <button
+                type="button"
+                title="重新提交"
+                aria-label="重新提交"
+                disabled={submitting || !draft.trim()}
+                onClick={() => void resubmit()}
+                className="flex h-[calc(32px*var(--card-font-scale))] w-[calc(32px*var(--card-font-scale))] shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <RefreshCw size={14} className="card-scale-icon" />
+              </button>
             </div>
-            <button
-              type="button"
-              title="重新提交"
-              aria-label="重新提交"
-              disabled={submitting || !draft.trim()}
-              onClick={() => void resubmit()}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <RefreshCw size={14} />
-            </button>
           </div>
         </div>
       ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
-          <p className="selectable-text whitespace-pre-wrap break-words text-[13px] leading-[1.65] text-body">
+        <div className="px-3 pb-2">
+          <p
+            className="selectable-text whitespace-pre-wrap break-words leading-[1.65] text-body"
+            style={{ fontSize: 'var(--card-font-size)' }}
+          >
             {prompt || <span className="text-muted">还没有提问</span>}
           </p>
-          <p className="mt-1 text-[11px] text-muted/70">双击可修改并重新提交</p>
+          <p className="mt-1 card-scale-11 text-muted/70">双击可修改并重新提交</p>
         </div>
       )}
     </div>

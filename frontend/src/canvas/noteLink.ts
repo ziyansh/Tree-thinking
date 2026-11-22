@@ -21,19 +21,24 @@ export interface NoteLinkRect {
 /** 连线端点：从哪类卡片出发 */
 export type NoteLinkSourceKind = 'answer' | 'note'
 
-/** 回答卡片连接点圆心（flow 坐标） */
-export function answerLinkAnchor(rect: NoteLinkRect): { x: number; y: number } {
+/** 回答卡片连接点圆心（flow 坐标）；scale 与卡片正文字号同步 */
+export function answerLinkAnchor(
+  rect: NoteLinkRect,
+  scale = 1,
+): { x: number; y: number } {
+  const size = NOTE_LINK_DOT_SIZE * scale
   return {
-    x: rect.x + rect.width - ANSWER_LINK_DOT.right - NOTE_LINK_DOT_SIZE / 2,
-    y: rect.y + rect.height - ANSWER_LINK_DOT.bottom - NOTE_LINK_DOT_SIZE / 2,
+    x: rect.x + rect.width - ANSWER_LINK_DOT.right - size / 2,
+    y: rect.y + rect.height - ANSWER_LINK_DOT.bottom - size / 2,
   }
 }
 
-/** 笔记卡片连接点圆心（flow 坐标） */
-export function noteLinkAnchor(rect: NoteLinkRect): { x: number; y: number } {
+/** 笔记卡片连接点圆心（flow 坐标）；scale 与卡片正文字号同步 */
+export function noteLinkAnchor(rect: NoteLinkRect, scale = 1): { x: number; y: number } {
+  const size = NOTE_LINK_DOT_SIZE * scale
   return {
-    x: rect.x + NOTE_LINK_DOT.left + NOTE_LINK_DOT_SIZE / 2,
-    y: rect.y + NOTE_LINK_DOT.top + NOTE_LINK_DOT_SIZE / 2,
+    x: rect.x + NOTE_LINK_DOT.left + size / 2,
+    y: rect.y + NOTE_LINK_DOT.top + size / 2,
   }
 }
 

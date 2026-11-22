@@ -325,8 +325,7 @@ function CanvasInner() {
     rootId: string
     positions: Map<string, { x: number; y: number }>
   } | null>(null)
-  /** 拖动坐标更新按帧合并：高刷新率指针事件只触发一次重渲染 */
-  const dragFrameRef = useRef<number | null>(null)
+  /** 本次拖动的偏移：每次 onNodeDrag 立即写回 store，直接跟随指针 */
   const dragPendingRef = useRef<{ x: number; y: number } | null>(null)
   /** 拖拽结束时间：抑制拖拽后的 click 把多选收缩成单选 */
   const lastDragEndRef = useRef(0)
@@ -369,7 +368,6 @@ function CanvasInner() {
     zoomAnchorX: number
     zoomAnchorY: number
     lastPanAt: number
-    lastFrameAt: number
     velocityX: number
     velocityY: number
   }>({
@@ -380,7 +378,6 @@ function CanvasInner() {
     zoomAnchorX: 0,
     zoomAnchorY: 0,
     lastPanAt: 0,
-    lastFrameAt: 0,
     velocityX: 0,
     velocityY: 0,
   })
@@ -443,7 +440,12 @@ function CanvasInner() {
       if (payload.kind === 'answer' ? nodeType !== 'chat' : nodeType !== 'note') return
 
       const rect = nodeRect(card, initialState.cardSize)
-      const origin = payload.kind === 'answer' ? answerLinkAnchor(rect) : noteLinkAnchor(rect)
+      // 连接点尺寸随卡片字号缩放，端点必须用同一比例计算圆心
+      const linkScale = (initialState.preferences.cardFontSize || 14) / 14
+      const origin =
+        payload.kind === 'answer'
+          ? answerLinkAnchor(rect, linkScale)
+          : noteLinkAnchor(rect, linkScale)
       const bounds = container.getBoundingClientRect()
 
       /** 画布坐标 → 画布容器内的屏幕坐标，按当前视口换算 */
@@ -468,11 +470,14 @@ function CanvasInner() {
         // 指针整张卡片范围内优先吸附；多张卡片重叠时取连接点最近者
         let inside: { nodeId: string; anchor: { x: number; y: number } } | null = null
         let insideDistance = Number.POSITIVE_INFINITY
+        const linkScale = (current.preferences.cardFontSize || 14) / 14
         for (const item of current.nodes) {
           const isNote = item.data.node.nodeType === 'note'
           if (isNote !== wantNote) continue
           const targetRect = nodeRect(item, current.cardSize)
-          const anchor = isNote ? noteLinkAnchor(targetRect) : answerLinkAnchor(targetRect)
+          const anchor = isNote
+            ? noteLinkAnchor(targetRect, linkScale)
+            : answerLinkAnchor(targetRect, linkScale)
           const distance = Math.hypot(anchor.x - pointerFlow.x, anchor.y - pointerFlow.y) * zoom
           if (distance <= NOTE_LINK_SNAP_SCREEN && distance < bestDistance) {
             bestDistance = distance
@@ -760,7 +765,7 @@ function CanvasInner() {
    * - 双指滑动：平移画布；按住空格时与「空格 + 左键拖动」一致，可滚动区域也一律平移；
    * - 手势会话：一次连续滑动只判定一次类型与目标，指针中途经过卡片、猜你想问也不会
    *   突然变成缩放或滚动；首条事件被误判为鼠标滚轮时，用后续高频事件自动纠正；
-   * - 运动插值：平移与缩放都向目标按帧逼近，中途变向下一帧立即跟随；松手后是否滑行
+   * - 运动跟随：平移直接消费手势位移（不做平滑 / 阻尼），缩放按帧向目标逼近；松手后是否滑行
    *   由「设置 → 显示 → 画布拖动惯性」决定；
    * - 可滚动区域：手势始于卡片正文等 `.nowheel` 区域时保留纵向原生滚动，横向滑动只吞掉事件，
    *   避免浏览器把它识别成前进 / 后退手势；
@@ -777,8 +782,6 @@ function CanvasInner() {
     const SESSION_GAP = 200
     /** 高频连续事件只可能来自触控板，用于纠正首条事件被误判为鼠标滚轮的情况 */
     const HIGH_FREQUENCY_GAP = 30
-    /** 平移插值时间常数（毫秒）：越小越跟手，越大越平滑 */
-    const PAN_EASE_MS = 32
     /** 缩放每帧向目标靠近的比例 */
     const ZOOM_EASE = 0.35
     /** 手势结束后的静默时间：超过后才按设置触发惯性滑行 */
@@ -806,28 +809,14 @@ function CanvasInner() {
       let zoom = viewport.zoom
       let moved = false
 
-      // 平移：按时间常数向目标逼近，方向变化时新位移立即参与下一帧
+      // 平移：直接消费全部待处理位移，双指移动与画布一一对应，不做平滑 / 阻尼
       if (motion.panX !== 0 || motion.panY !== 0) {
-        const dt = Math.min(Math.max(now - (motion.lastFrameAt || now), 4), 32)
-        const ease = 1 - Math.exp(-dt / PAN_EASE_MS)
-        let moveX = motion.panX * ease
-        let moveY = motion.panY * ease
-        motion.panX -= moveX
-        motion.panY -= moveY
-        // 尾巴直接吃掉，避免无限逼近
-        if (Math.abs(motion.panX) < 0.25) {
-          moveX += motion.panX
-          motion.panX = 0
-        }
-        if (Math.abs(motion.panY) < 0.25) {
-          moveY += motion.panY
-          motion.panY = 0
-        }
-        x += moveX
-        y += moveY
+        x += motion.panX
+        y += motion.panY
+        motion.panX = 0
+        motion.panY = 0
         moved = true
       }
-      motion.lastFrameAt = now
 
       // 缩放：向目标缩放插值，锚点保持为最近一次捏合位置
       if (motion.zoomTarget !== null) {
@@ -1584,9 +1573,8 @@ function CanvasInner() {
     setIsNodeDragging(true)
   }, [stopInertia])
 
-  /** 把待处理的拖动偏移写回 store；每帧最多执行一次 */
+  /** 把拖动偏移立即写回 store：不排队到下一帧，卡片组直接跟随指针 */
   const applyDragOffset = useCallback(() => {
-    dragFrameRef.current = null
     const origin = dragOriginRef.current
     const offset = dragPendingRef.current
     if (!origin || !offset) return
@@ -1641,10 +1629,8 @@ function CanvasInner() {
     }
 
     dragPendingRef.current = { x: offsetX, y: offsetY }
-    // 跟随 requestAnimationFrame 调度：每帧只写一次 store，不额外限制刷新率
-    if (dragFrameRef.current === null) {
-      dragFrameRef.current = window.requestAnimationFrame(applyDragOffset)
-    }
+    // 立即写回，卡片组与指针保持同步，不额外做平滑 / 阻尼
+    applyDragOffset()
   }, [applyDragOffset])
 
   // 松手后批量保存本次移动的所有节点坐标
@@ -1654,10 +1640,6 @@ function CanvasInner() {
       const origin = dragOriginRef.current
       if (!origin) return
       // 把最后一帧尚未写回的坐标补齐，再保存
-      if (dragFrameRef.current !== null) {
-        window.cancelAnimationFrame(dragFrameRef.current)
-        dragFrameRef.current = null
-      }
       applyDragOffset()
       dragPendingRef.current = null
       dragOriginRef.current = null
@@ -1892,7 +1874,6 @@ function CanvasInner() {
       if (viewportTimerRef.current !== null) window.clearTimeout(viewportTimerRef.current)
       if (inertiaRef.current !== null) window.cancelAnimationFrame(inertiaRef.current)
       if (layoutAnimationRef.current !== null) window.cancelAnimationFrame(layoutAnimationRef.current)
-      if (dragFrameRef.current !== null) window.cancelAnimationFrame(dragFrameRef.current)
       if (linkPreviewTimerRef.current !== null) window.clearTimeout(linkPreviewTimerRef.current)
     }
   }, [])

@@ -1455,7 +1455,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
                       <Row
                         label="触摸板逻辑"
-                        hint="鼠标：标准滚轮行为；触摸板（实验性）：双指滑动平移、捏合缩放，带插值与惯性；默认鼠标"
+                        hint="鼠标：标准滚轮行为；触摸板（实验性）：双指滑动直接平移、捏合缩放；默认鼠标"
                       >
                         <ChoiceGroup
                           value={form.pointerMode}

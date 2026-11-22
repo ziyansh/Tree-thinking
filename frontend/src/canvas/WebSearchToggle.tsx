@@ -31,7 +31,7 @@ export function WebSearchToggle() {
       aria-disabled={disabled}
       onClick={() => void toggle()}
       className={[
-        'nodrag flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-150',
+        'nodrag flex h-[calc(28px*var(--card-font-scale))] w-[calc(28px*var(--card-font-scale))] shrink-0 items-center justify-center rounded-lg transition-colors duration-150',
         disabled
           ? 'cursor-not-allowed text-muted opacity-40'
           : enabled
@@ -39,7 +39,7 @@ export function WebSearchToggle() {
             : 'text-muted hover:bg-ghost-border hover:text-ink',
       ].join(' ')}
     >
-      <Globe size={14} />
+      <Globe size={14} className="card-scale-icon" />
     </button>
   )
 }

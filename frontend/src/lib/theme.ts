@@ -39,6 +39,11 @@ export function applyTheme(preferences: ThemePreferences): void {
   root.style.setProperty('--edge', preferences.edgeColor)
   // 卡片正文字号：卡片内文字统一取该变量
   root.style.setProperty('--card-font-size', `${preferences.cardFontSize || 14}px`)
+  // 卡片内固定尺寸元素（按钮、图标、小字）按同一比例缩放
+  root.style.setProperty(
+    '--card-font-scale',
+    String((preferences.cardFontSize || 14) / 14),
+  )
 
   stopSystemWatch?.()
   stopSystemWatch = null

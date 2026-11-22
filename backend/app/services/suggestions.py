@@ -38,6 +38,30 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
 
+def _looks_like_json(text: str) -> bool:
+    """判断文本是否像 JSON 片段（模型输出被截断时会漏出这类内容）。"""
+    stripped = text.strip()
+    return (
+        stripped.startswith(("{", "[", '"'))
+        or '"suggestions"' in stripped
+        or '"text"' in stripped
+    )
+
+
+def _from_json_texts(raw: str) -> list[str]:
+    """从被截断的 JSON 中提取已经完整输出的 "text" 字段。"""
+    result: list[str] = []
+    for match in re.finditer(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', raw):
+        try:
+            value = json.loads(f'"{match.group(1)}"')
+        except ValueError:
+            value = match.group(1)
+        text = value.strip()
+        if text:
+            result.append(text[:MAX_TEXT_LENGTH])
+    return result
+
+
 def _from_lines(raw: str) -> list[str]:
     """纯文本降级：按行切分，去掉空行与序号/项目符号前缀。"""
     result: list[str] = []
@@ -46,7 +70,8 @@ def _from_lines(raw: str) -> list[str]:
         # 兼容「1. 方向」「- 方向」「• 方向」这类列表前缀
         text = re.sub(r"^[0-9一二三四五六七八九十]+[.、)）]\s*", "", text)
         text = re.sub(r"^[-•*]\s*", "", text)
-        if text:
+        # 截断的 JSON 片段不能当候选方向展示
+        if text and not _looks_like_json(text):
             result.append(text[:MAX_TEXT_LENGTH])
     return result
 
@@ -62,7 +87,7 @@ def _from_items(items: list) -> list[str]:
         if not isinstance(value, str):
             continue
         text = value.strip()
-        if text:
+        if text and not _looks_like_json(text):
             result.append(text[:MAX_TEXT_LENGTH])
     return result
 
@@ -70,7 +95,8 @@ def _from_items(items: list) -> list[str]:
 def parse_suggestions(raw: str) -> list[str]:
     """解析模型输出，容错优先级：suggestions 字段 → 顶层数组 → 纯文本按行。
 
-    空 content、非法 JSON 都降级为按行切分；仍为空时返回空列表。
+    空 content、非法 JSON 都降级；非法 JSON 先尝试提取已完整写出的 text 字段，
+    再按行切分并过滤 JSON 片段，避免把 '{"suggestions":[{"te' 当成方向展示。
     """
     text = (raw or "").strip()
     if not text:
@@ -79,7 +105,10 @@ def parse_suggestions(raw: str) -> list[str]:
     try:
         data = json.loads(text)
     except ValueError:
-        # JSON Output 可能把非 JSON 内容替换为空格，这里统一按纯文本降级
+        # JSON Output 可能把非 JSON 内容替换为空格；截断输出则优先抢救完整字段
+        extracted = _from_json_texts(text)
+        if extracted:
+            return extracted
         return _from_lines(text)
 
     if isinstance(data, dict):

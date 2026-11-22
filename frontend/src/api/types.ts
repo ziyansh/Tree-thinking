@@ -134,9 +134,6 @@ export type ConnectionStyle = 'direct' | 'bus'
 /** 时间制式：24 小时制 / 12 小时制 */
 export type TimeFormat = '24h' | '12h'
 
-/** 滚轮逻辑：悬停卡片时滚动内容 / 始终缩放画布 */
-export type WheelMode = 'scroll-card' | 'zoom-canvas'
-
 /** 指针设备：鼠标（标准滚轮）/ 触摸板（实验性双指手势） */
 export type PointerMode = 'mouse' | 'trackpad'
 
@@ -201,8 +198,6 @@ export interface SettingsDTO {
   dragDriftDelayMs: number
   /** 判定为拖动的最小位移（默认 10px，范围 0–50） */
   dragDriftDistance: number
-  /** 滚轮逻辑（默认 zoom-canvas） */
-  wheelMode: WheelMode
   /** 指针设备（默认 mouse；trackpad 为实验性双指手势） */
   pointerMode: PointerMode
   /** 卡片正文字号（默认 14，范围 12–24） */
@@ -325,7 +320,6 @@ export interface SettingsPatch {
   doubleClickMs?: number
   dragDriftDelayMs?: number
   dragDriftDistance?: number
-  wheelMode?: WheelMode
   /** 指针设备：mouse（标准滚轮）/ trackpad（实验性双指手势） */
   pointerMode?: PointerMode
   cardFontSize?: number

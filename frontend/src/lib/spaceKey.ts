@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 
 /**
- * 全局空格键状态：画布平移与滚轮逻辑都依赖它。
+ * 全局空格键状态：画布平移与滚轮行为都依赖它。
  * 统一在一处监听，避免每个卡片各自注册 keydown 监听。
  */
 let pressed = false

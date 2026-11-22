@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import type { FocusEvent as ReactFocusEvent } from 'react'
+import type { ClipboardEvent, FocusEvent as ReactFocusEvent } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Paperclip, Send } from 'lucide-react'
 import { useGraphStore } from '../store/graphStore'
@@ -18,7 +18,11 @@ import {
 import { ThinkingToggle } from './ThinkingToggle'
 import { WebSearchToggle } from './WebSearchToggle'
 import { UrlChips } from './UrlChips'
-import { removeUrl } from '../lib/urlChips'
+import { composeWithUrls, mergeUrls, replaceUrl, splitUrls } from '../lib/urlChips'
+import { absorbUrlPaste } from '../lib/useUrlChips'
+
+/** 空链接列表：store 中未记录时复用，避免 selector 每次返回新数组 */
+const EMPTY_URLS: string[] = []
 
 /** 失焦收起的动画时长，与 theme.css 的 composer-out 保持一致 */
 const CLOSE_ANIM_MS = 160
@@ -33,6 +37,9 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   // 草稿按父卡片保存在 store 中：切换输入条后再打开，各自的内容仍然保留
   const draft = useGraphStore((state) => state.branchDrafts[data.parentId] ?? '')
   const setBranchDraft = useGraphStore((state) => state.setBranchDraft)
+  // 链接胶囊同样按父卡片保存在 store 中：链接从输入框抽离，提交时再拼回问题末尾
+  const urls = useGraphStore((state) => state.branchUrlChips[data.parentId] ?? EMPTY_URLS)
+  const setBranchUrlChips = useGraphStore((state) => state.setBranchUrlChips)
   // 与全局卡片同宽；卡片缩放后输入条实时跟随
   const cardWidth = useGraphStore((state) => state.cardSize.width)
   // 火山方舟能力提示：当前模型与账号可见模型列表
@@ -49,6 +56,9 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   /** 失焦回调里读取最新草稿，避免绑定过期闭包 */
   const draftRef = useRef(draft)
   draftRef.current = draft
+  /** 失焦回调里读取最新链接胶囊，只有链接时也要保留输入条 */
+  const urlsRef = useRef(urls)
+  urlsRef.current = urls
   const attachments = useAttachmentUploads()
   const pasteAttachments = usePasteAttachments(attachments)
   const dropZone = useFileDropZone((files) => void attachments.addFiles(files))
@@ -71,24 +81,40 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   }, [])
 
   // 失焦判定（docs/lose_focus.md）：焦点移到容器外、切窗口、打开弹窗都会触发；
-  // 已输入内容时保留输入条，避免误点画布丢失草稿
+  // 已输入内容或已有链接胶囊时保留输入条，避免误点画布丢失草稿
   const handleBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget as Node | null
     if (next && event.currentTarget.contains(next)) return
     // 焦点已离开容器：退出「聚焦输入」区段（是否保留输入条另按草稿判断）
     if (getFocusedInput() === data.inputId) setFocusedInput(null)
-    if (draftRef.current.trim()) return
+    // 失焦时把草稿中已写完整的链接转成胶囊
+    const result = splitUrls(draftRef.current)
+    if (result.urls.length > 0) {
+      setBranchDraft(data.parentId, result.text)
+      setBranchUrlChips(data.parentId, mergeUrls(urlsRef.current, result.urls))
+    }
+    if (result.text.trim() || result.urls.length > 0 || urlsRef.current.length > 0) return
     closeWithAnimation()
   }
 
   useEffect(() => {
     const onWindowBlur = () => {
-      if (draftRef.current.trim()) return
+      if (draftRef.current.trim() || urlsRef.current.length > 0) return
       closeWithAnimation()
     }
     window.addEventListener('blur', onWindowBlur)
     return () => window.removeEventListener('blur', onWindowBlur)
   }, [closeWithAnimation])
+
+  /** 粘贴：文件交给附件处理，链接直接抽成胶囊，其余文本正常插入 */
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (pasteAttachments(event)) return
+    absorbUrlPaste(
+      event,
+      (next) => setBranchDraft(data.parentId, next),
+      (found) => setBranchUrlChips(data.parentId, mergeUrls(urls, found)),
+    )
+  }
 
   // 新显示的分支输入条置顶（层级高于卡片与猜你想问）
   useEffect(() => {
@@ -109,7 +135,10 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
   }, [draft, cardWidth])
 
   const submit = async () => {
-    const question = draft.trim()
+    // 提交前兜底：把仍留在文本里的链接抽成胶囊，再按编号拼回问题末尾
+    const result = splitUrls(draft)
+    const merged = mergeUrls(urls, result.urls)
+    const question = composeWithUrls(result.text, merged)
     if (!question || pending) return
     setPending(true)
     try {
@@ -153,7 +182,7 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
         disabled={pending}
         placeholder="输入问题，继续你的思考方向"
         onChange={(event) => setBranchDraft(data.parentId, event.target.value)}
-        onPaste={pasteAttachments}
+        onPaste={handlePaste}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault()
@@ -173,8 +202,19 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
       />
 
       <UrlChips
-        text={draft}
-        onRemove={(url) => setBranchDraft(data.parentId, removeUrl(draft, url))}
+        urls={urls}
+        onRemove={(url) =>
+          setBranchUrlChips(
+            data.parentId,
+            urls.filter((item) => item !== url),
+          )
+        }
+        onEdit={(oldUrl, nextUrl) =>
+          setBranchUrlChips(
+            data.parentId,
+            replaceUrl(urls, oldUrl, nextUrl),
+          )
+        }
       />
 
       {attachments.items.length > 0 && (
@@ -223,7 +263,7 @@ function BranchInputNodeInner({ data }: NodeProps<BranchInputFlowNode>) {
             type="button"
             title="发送"
             aria-label="发送"
-            disabled={pending || attachments.uploading || !draft.trim()}
+            disabled={pending || attachments.uploading || (!draft.trim() && urls.length === 0)}
             onClick={() => void submit()}
             className="nodrag flex h-[calc(32px*var(--card-font-scale))] w-[calc(32px*var(--card-font-scale))] shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           >

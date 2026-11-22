@@ -388,8 +388,6 @@ class SettingsPatch(CamelModel):
     double_click_ms: int | None = None
     drag_drift_delay_ms: int | None = None
     drag_drift_distance: int | None = None
-    # 滚轮逻辑：scroll-card（悬停卡片时滚动内容）/ zoom-canvas（始终缩放画布）
-    wheel_mode: str | None = None
     # 指针设备：mouse（标准滚轮）/ trackpad（实验性双指手势，默认 mouse）
     pointer_mode: Literal["mouse", "trackpad"] | None = None
     # 外观：卡片正文字号（12–24，非法值返回 422）

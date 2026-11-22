@@ -1,12 +1,15 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.3.10** | [中文说明](readme.md)
+> Current version: **0.3.13** | [中文说明](readme.md)
+>
+> **WIP**: this project is still under active development; features and UI may change at any time and do not represent final quality.
+> **Platforms**: Windows 10/11 is the primary target; macOS is experimental; Linux has been verified for server deployment.
 
 Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is a card on an infinite canvas, each card grows candidate follow-up arrows on its right, and clicking any arrow continues the conversation along that path. Branches keep independent context, so you can compare ideas without overwriting the main thread.
 
 ## Features
 
-- **Infinite left-to-right canvas** powered by React Flow: pan with Space + left drag, middle drag, or press-and-drag on empty space (drift delay/distance configurable); while Space is held, dragging anywhere — card text, titles, attachments, or an unfocused input — pans the canvas. Wheel behavior is configurable under Settings → Canvas → Pointer → Wheel logic: scroll the hovered card or zoom the canvas. A new Pointer device switch (default "Mouse", standard wheel behavior) adds "Trackpad (experimental)": two-finger swipes pan the canvas and pinches zoom it, and while Space is held a two-finger swipe also pans (pinch and mouse wheel still zoom).
+- **Infinite left-to-right canvas** powered by React Flow: pan with Space + left drag, middle drag, or press-and-drag on empty space (drift delay/distance configurable); while Space is held, dragging anywhere — card text, titles, attachments, or an unfocused input — pans the canvas. Scrollable regions inside cards (answer body, Thinking block, note body) scroll their content with the wheel; while Space is held the wheel zooms the canvas instead. A new Pointer device switch (default "Mouse", standard wheel behavior) adds "Trackpad (experimental)": two-finger swipes pan the canvas and pinches zoom it, and while Space is held a two-finger swipe also pans (pinch and mouse wheel still zoom).
 - **Card-based Q&A**: one card = one question + one answer; answers render as Markdown and scroll inside the card instead of stretching it.
 - **Selectable card text**: titles, Markdown answers, reasoning, and input boxes can be drag-selected; selecting text never moves the card. While Space is held, panning takes priority and no text is selected. Note titles and bodies become selectable after double-clicking into edit mode. The highlight uses a soft accent tone.
 - **Card sizes and notes**: chat cards share one global size, adjustable from all four edges and corners (minimum 280×240); note cards keep their own size. Double-click empty canvas to create a note; double-click its title or body to edit (single click is reserved for dragging and selection), and press Tab in the body editor to insert four spaces.
@@ -15,13 +18,16 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 - **Branch edges**: the main chain stays left-to-right; direct branches connect from the parent's top/bottom center to the child, and all non-main branches of one parent share a single bus. Edges route around cards.
 - **Auto layout**: the root card keeps its current position and the main chain always stays on one horizontal line. In direct mode branch heads sit directly below their parent in the same column; in bus mode they sit in the next column to the right and share one bus. Row/column spacing is controlled by Settings → Canvas → Card spacing.
 - **Drag, pin, and multi-select**: any blank area of a card can be dragged while text and buttons never trigger a drag; a grab cursor is shown. Pinning locks a card in place (the root card is pinned by default); dragging moves the whole subtree. Ctrl-click toggles multi-select and batch delete, while Shift snaps to a 20px grid and nearby cards.
+- **Dynamic layering and focus-on-top**: clicking, dragging, or focusing a card counts as a state update, so that card is raised above note cards; cards that are streaming are raised too, and with a multi-selection the most recently clicked card sits on top. When nothing is focused, note cards sit above the suggestion ghosts and idle chat cards stay at the bottom.
 - **Title editing**: double-click a card title to edit it (the interval is configurable); Enter or blur commits, Esc cancels.
 - **Undo and save**: each canvas keeps its own multi-step undo stack (Ctrl+Z, depth configurable, including card-size changes); Ctrl+S saves manually and autosave is configurable. Saving does not clear undo history. Select one or more cards and press `Delete` to remove them quickly.
-- **Multiple canvases**: a collapsible left sidebar (240px / 48px) to create, switch, rename, and delete canvases. Each canvas has exactly one root question. After the first answer completes, the app asks the model for a canvas title; a manual rename is never overwritten.
-- **In-app settings**: the gear at the bottom-left opens a floating dialog with three tabs — Model service / Canvas / Appearance (save options live in Canvas). Each section has a heading, with a description on the left and the control on the right; bounded values use a slider plus a number input, and changes take effect immediately — no restart.
+- **Multiple canvases**: a collapsible left sidebar (240px / 48px) to create, switch, rename, and delete canvases. Each canvas has exactly one root question. With DeepSeek, the root card's first answer generates a canvas title; a manual rename is never overwritten.
+- **Local / server mode**: the default `APP_MODE=local` is single-user with no login. With `APP_MODE=server`, first visit requires registration, later visits require login, canvases and settings are isolated per account, and the sidebar footer offers logout. Registration usernames are 3–32 letters, digits, or underscores and must be unique; passwords are 4–12 characters. Username, password, and confirm-password fields validate on blur and show the reason directly below the field.
+- **In-app settings**: the gear at the bottom-left opens a floating dialog with three tabs — Model service / Canvas / Appearance (save options live in Canvas). Each section has a heading, with a description on the left and the control on the right; bounded values use a slider plus a number input, and changes take effect immediately — no restart. The “Restore defaults” button at the bottom-left resets every setting while keeping saved API keys.
 - **Multiple providers**: the provider is a dropdown (DeepSeek → Volcengine Ark → OpenAI-compatible), with “OpenAI-compatible” always last. DeepSeek supports `deepseek-flash` / `deepseek-v4-pro`; Volcengine Ark takes an API key (encrypted at rest), a base URL (default `https://ark.cn-beijing.volces.com/api/v3`), and a model name (default `doubao-seed-2-1-pro-260915`), with streaming answers, deep thinking, and smart web search; the OpenAI-compatible option works with any service that implements the OpenAI protocol and adds organization/project IDs, temperature, max output tokens, reasoning effort, and request timeout, and can point at a proxy.
-- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek and Volcengine Ark), and a synced shortcut sits beside the attachment button in card inputs. When enabled, the app calls the provider's search capability before answering and injects a summary; for DeepSeek the number of sources can be capped under Settings → Model service → General → “Model search limit” (default 0 means unlimited). Cards show “参考 N 篇资料” at the bottom-left; clicking it slides up a draggable frosted-glass drawer inside the card (25% of the card height by default; the height is remembered and applied to every card). The drawer lists numbered page titles linked to the originals; DeepSeek answers render `[n]` markers as clickable citation badges, while Volcengine Ark only shows the source list and never inserts `[n]` badges; the drawer closes only via its arrow or Esc. Forced search is DeepSeek-only; Ark always uses smart search (the hover panel does not show the forced-search switch), and session titles are generated by DeepSeek only.
-- **Attachments**: the root question input and the “custom direction” box accept click-to-upload or drag-and-drop files — images, text, PDF, video, audio, and other files. Cards show every attachment as a file icon plus filename (more than three collapse into “附件 N”; clicking an item opens the original file in a new window). For Volcengine Ark, images / video / audio / PDF are uploaded to the Ark Files API (`purpose=user_data`) and injected by `fileId`; DeepSeek keeps parsing PDF / Office documents; OpenAI-compatible providers keep images / text. PDF attachments report their page count; when any PDF exceeds 30 pages or the total exceeds 30, the input toolbar (left of the web-search button) shows a warning icon and “pdf页数过多，费用可能失控” regardless of provider or model. Text attachments are injected along the root-to-current path, so sibling branches never see them.
+- **Web search**: a toggle sits next to “Auto layout” at the canvas top-left (DeepSeek and Volcengine Ark), and a synced shortcut sits beside the attachment button in card inputs. When enabled, the app calls the provider's search capability before answering and injects a summary; for DeepSeek the forced-search source count can be set under Settings → Model service → DeepSeek → “Forced search limit” (1–50, default 50; legacy 0 is displayed and saved as 50). Cards show “参考 N 篇资料” at the bottom-left; clicking it slides up a draggable frosted-glass drawer inside the card (25% of the card height by default; the height is remembered and applied to every card). The drawer lists numbered page titles linked to the originals; DeepSeek answers render `[n]` markers as clickable citation badges, while Volcengine Ark only shows the source list and never inserts `[n]` badges; the drawer closes only via its arrow or Esc. Forced search is DeepSeek-only; Ark always uses smart search (the hover panel does not show the forced-search switch), and session titles are generated by DeepSeek only.
+- **Link detection in inputs**: pasting or typing a URL in the root question, custom direction, branch input, or prompt drawer extracts it from the text into a numbered frosted-glass chip below the input, leaving only the body text in the box; on submit the links are appended to the end of the question in chip order (up to 10, matching the “link 1 / link 2 …” numbering). Clicking a chip opens the link in a new tab, double-clicking edits it inline (Enter saves, Esc cancels), and the × on a chip drops that link.
+- **Attachments**: the root question, custom direction, branch input, and prompt drawer all accept click-to-upload or drag-and-drop files — images, text, PDF, video, audio, and other files. Cards show every attachment as a file icon plus filename (more than three collapse into “附件 N”; clicking an item opens the original file, with PDFs and images previewed inline in the browser). For Volcengine Ark, images / video / audio / PDF are uploaded to the Ark Files API (`purpose=user_data`) and injected by `fileId`; DeepSeek keeps parsing PDF / Office documents; OpenAI-compatible providers keep images / text. PDF attachments report their page count; when any PDF exceeds 30 pages or the total exceeds 30, the submit button's left side shows a warning icon and “pdf页数过多，费用可能失控” regardless of provider or model. Text attachments are injected along the root-to-current path, so sibling branches never see them.
 - **Persistence**: canvases, cards, positions, and viewport are stored in local SQLite and restored after refresh.
 - **Appearance**: follow system / light / dark, plus accent hue, edge width and color; 12/24-hour time formats. Card body font size is adjustable (12–24px, default 14) and cards grow automatically when the font size increases.
 - **Modified time**: chat and note cards show the last modified time at the bottom-right outside the card (`yyyy-mm-dd hh:mm`, with AM/PM in 12-hour mode), updated as edits happen.
@@ -33,9 +39,9 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 ### Requirements
 
 - Python 3.10+
-- Node.js 18+ (developed and verified on Node 25)
+- Node.js 20.19+ (or 22.12+; required by Vite 8, developed and verified on Node 25)
 - Windows 10/11 or macOS 12+ (Intel / Apple Silicon)
-- Linux can also use `start.sh`; the project is developed on Windows, and macOS/Linux have not been tested on real hardware yet
+- Linux has been verified for server deployment (`start.sh` also works); desktop development is on Windows, and macOS has not been tested on real hardware yet
 
 ### One-click start (recommended)
 
@@ -56,6 +62,8 @@ Both launchers:
 4. Start the backend first and wait for `/health`, then start the frontend and open the browser. The macOS launcher writes logs to `.runtime/`, and `Ctrl+C` stops both services.
 
 > API configuration is not part of the startup script. On first use, click the gear at the bottom-left of the page and fill in your API key — saving applies immediately.
+
+> In server mode (`APP_MODE=server`), the first visit requires registration and later visits require login; the default local mode has no accounts.
 
 > When moving between Windows and macOS, delete `backend/.venv` and `frontend/node_modules` first, then run the launcher again so dependencies are reinstalled for the current platform.
 
@@ -97,7 +105,7 @@ Paths: the database and upload directories default to repo-relative `backend/dat
 
 ## Configuration
 
-Precedence: **in-app settings > `backend/.env`**. Settings are stored in `backend/data/app.db` and never leak into frontend bundles.
+Precedence: **in-app settings > `backend/.env`**. Settings are stored in `backend/data/app.db` (local mode uses `app_settings`; server mode stores per-account rows in `user_settings`) and never leak into frontend bundles.
 
 | `backend/.env` key | Description | Default |
 | --- | --- | --- |
@@ -110,24 +118,46 @@ Precedence: **in-app settings > `backend/.env`**. Settings are stored in `backen
 | `THINKING_ENABLED` | Enable thinking mode | `true` |
 | `SUGGESTION_COUNT` | Number of suggestion arrows (2–6) | `3` |
 | `DB_PATH` | SQLite file path | `backend/data/app.db` |
+| `UPLOAD_DIR` | Attachment storage directory; accepts `~` | `backend/data/uploads` |
+| `APP_MODE` | Runtime mode: `local` (single user, no login) / `server` (multi-user, login required) | `local` |
+| `AUTH_SECRET` | Required in `server` mode; signs sessions and encrypts model keys | empty |
+| `OPENAI_API_KEY` | OpenAI-compatible API key | empty |
+| `OPENAI_BASE_URL` | OpenAI-compatible base URL | `https://api.openai.com/v1` |
+| `OPENAI_MODEL` | OpenAI-compatible model name | `gpt-4o-mini` |
 
 Notes:
 
 - The in-app settings cover the DeepSeek and Ark keys, base URLs, and models, plus thinking mode and suggestion count. Leaving a base URL empty restores the `.env` default.
+- Model keys in `.env` are a local-mode fallback only. In server mode each account uses only its own saved settings; a new account starts from hard-coded defaults with no key and never inherits `.env` secrets.
 - Model names use one shared interaction: a text input with a scrollable candidate popup — focusing clears the field to show every candidate, and blur restores or keeps the choice. DeepSeek and Volcengine Ark provide candidates; the OpenAI-compatible provider has none and takes whatever model name the service requires.
-- All dropdowns use the same frosted-glass popup as the model candidates; the number of visible items is configurable (9 by default), the popup opens upward when space is tight, and native `<select>` is no longer used.
-- API keys stay on the backend. The settings API only returns masked values (e.g. `sk-••••7890`).
+- All dropdowns use the same frosted-glass popup as the model candidates; a component argument controls the number of visible items (9 by default), the popup opens upward when space is tight, and native `<select>` is no longer used.
+- API keys are stored only in the backend database (encrypted at rest in server mode). The settings API only returns masked values (e.g. `sk-••••7890`) and never writes them to browser storage.
 - Get keys at DeepSeek <https://platform.deepseek.com/api_keys> and Volcengine Ark <https://console.volcengine.com/ark>.
 
 ## Security & Secret Protection
 
 - `.gitignore` already excludes `.env*` (keeping `.env.example`), database files such as `*.db` / `*.sqlite*`, virtualenvs, dependencies, and build output.
-- `.githooks/pre-commit` scans staged content before each commit and aborts when it finds a long `sk-…` string or a non-empty `DEEPSEEK_API_KEY`, printing the offending file (`*.env.example` is skipped).
-- Enable the pre-commit hook once — every later commit in this repository is then checked automatically:
+- This repository does not ship a `.githooks/pre-commit` hook (`.githooks/` itself is ignored); before committing, check that `backend/.env`, real API keys, and database files are not staged.
 
-```powershell
-git config core.hooksPath .githooks
-```
+### Key and settings boundaries
+
+- **Local mode**: settings live in `app_settings`; keys may come from the in-app settings or fall back to `backend/.env`, with the in-app value taking precedence.
+- **Server mode**: every account owns a separate `user_settings` row. A new account starts with all defaults and no key, never inherits model keys from `backend/.env`, and no account can read or reuse another account's key, base URL, or model.
+- Server-mode API keys are encrypted with Fernet before being written to the database. Reading settings returns only masked values (e.g. `sk-••••7890`); plaintext keys never reach the frontend or browser storage.
+- The session cookie is named `tt_session_server` (HttpOnly, SameSite=Lax). Local mode never reads it, so running a local instance and an online instance on the same host with different ports cannot share a login session.
+- “Restore defaults” clears only non-secret fields and keeps saved keys; it affects the current account only.
+
+### What is uploaded and what is not
+
+- **Uploaded to the local backend**: files you explicitly attach (stored under `UPLOAD_DIR`) and business data such as canvases, cards, and settings (SQLite).
+- **Sent to the model provider** (only when the related feature runs, using the currently configured provider):
+  - the Q&A text on the root-to-current path and the attachments you selected;
+  - question text, search keywords, and search results returned by the provider when web search is enabled;
+  - document parsing: DeepSeek PDF / Office files and Ark images / video / audio / PDF are uploaded to the corresponding provider's Files API first.
+- **Never uploaded**:
+  - other accounts' canvases, attachments, settings, or API keys;
+  - keys and configuration of providers that are not selected (for example, a DeepSeek answer never sends the OpenAI or Ark key);
+  - browser storage (only the “development notice seen” flag is stored; Mock mode keeps masked keys only in `sessionStorage`).
 
 ## Usage
 
@@ -142,8 +172,9 @@ git config core.hooksPath .githooks
 6. **Create and edit notes**: double-click empty canvas to create a note; double-click its title or body to edit (single click is reserved for dragging), and press Tab in the body editor to insert four spaces. Drag any edge or corner to resize it independently. Notes are excluded from auto layout and edges.
 7. **Adjust appearance and interaction**: the Settings dialog at the bottom-left has three tabs:
    - **Model service**: provider (dropdown: DeepSeek / Volcengine Ark / OpenAI-compatible), API key, base URL, model, thinking mode, suggestion count;
-   - **Canvas**: connection style (direct branch / shared bus), card spacing (80px by default, shared by new cards and auto layout), wheel logic in the pointer section, double-click interval, pointer drift delay and distance, autosave interval and undo depth;
-   - **Appearance**: follow system / light / dark, body font size (12–24px), accent hue (with a reset button), edge width and color, 12/24-hour clock.
+   - **Canvas**: connection style (direct branch / shared bus), card spacing (80px by default, shared by new cards and auto layout), canvas pan inertia and coefficient, canvas style, pointer device in the pointer section, double-click interval, pointer drift delay and distance, autosave interval and undo depth;
+   - **Appearance**: follow system / light / dark, body font size (12–24px), accent hue (with a reset button), edge width and color, note-link style / width / color / release action, 12/24-hour clock.
+   - **Restore defaults**: the button at the bottom-left resets every setting and keeps saved API keys.
 8. **Undo, save, and delete**: `Ctrl+Z` undoes the last action on the current canvas (stacks are per-canvas and include card-size changes); `Ctrl+S` saves the current canvas; autosave runs on the configured interval, and saving never clears undo history. Select one or more cards and press `Delete` to remove them quickly (the root question card still cannot be deleted).
 
 ## Keyboard Action Priority
@@ -167,23 +198,24 @@ Tree_thinking/
 │  ├─ app/
 │  │  ├─ main.py              # FastAPI entry
 │  │  ├─ db.py, models.py, schemas.py, config.py
-│  │  ├─ api/                 # projects / nodes / settings
-│  │  └─ services/            # llm / context / suggestions / settings / graph
+│  │  ├─ api/                 # auth / projects / nodes / links / attachments / models / settings
+│  │  └─ services/            # auth / llm / context / attachments / citations / suggestions / search / naming / settings / graph / urls
 │  └─ tests/                  # pytest unit and API tests
 └─ frontend/
    ├─ vite.config.ts          # port 5173 + /api proxy
    └─ src/
       ├─ api/                 # client / sse / mock / types
-      ├─ canvas/              # Canvas / CardNode / Ghost nodes / layout
-      ├─ components/          # Sidebar / SettingsDialog
+      ├─ canvas/              # Canvas / CardNode / attachments / note links / layout
+      ├─ components/          # Sidebar / SettingsDialog / AuthPage
+      ├─ lib/                 # escapeStack / theme / time helpers
       ├─ store/               # Zustand graph state
       └─ styles/theme.css     # theme tokens (light/dark)
 ```
 
 ## Tech Stack
 
-- Frontend: React 19, TypeScript, Vite, @xyflow/react (React Flow 12), Zustand, Tailwind CSS v4, react-markdown, dagre
-- Backend: Python 3.10, FastAPI, SQLAlchemy 2.0, SQLite, openai SDK (DeepSeek-compatible)
+- Frontend: React 19, TypeScript, Vite 8, @xyflow/react (React Flow 12), Zustand, Tailwind CSS v4, react-markdown, dagre
+- Backend: Python 3.10, FastAPI, SQLAlchemy 2.0, SQLite, openai SDK (DeepSeek / Volcengine Ark / OpenAI-compatible)
 - Streaming: SSE (`text/event-stream` from the backend, parsed with fetch + ReadableStream in the frontend)
 
 ## FAQ
@@ -200,11 +232,37 @@ Tree_thinking/
   1. Run `start.bat` in Windows Terminal (the default on most Windows 11 setups);
   2. Enable virtual terminal processing for the current user: run `reg add "HKCU\Console" /v VirtualTerminalLevel /t REG_DWORD /d 1 /f` in PowerShell, then close and reopen the console windows;
   3. Disable colored logs: add `--no-use-colors` to the backend command and set the `NO_COLOR=1` environment variable before starting the frontend.
-- **`.env` is ignored / the commit hook blocks a commit**: this is expected — environment files and suspected keys must not enter the repository. Keep the real key in a local, ignored `.env` and commit only key-free templates such as `.env.example`; the hook prints the offending file, so remove any `sk-` key or non-empty `DEEPSEEK_API_KEY` from it and commit again.
+- **`.env` is ignored**: this is expected — environment files and suspected keys must not enter the repository. The repo does not ship a commit hook, so before committing check that `backend/.env`, real keys, and database files are not staged.
 
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.3.13 — 2026-11-22
+- Improved: pasting or typing a URL in any question input (root question, custom direction, branch input, prompt drawer) now moves the link out of the text into a numbered chip, so the box keeps only the body text; on submit the links are appended to the end of the question in chip order. Clicking a chip opens it in a new tab, double-clicking edits it inline (Enter saves, Esc cancels), and removing a chip drops that link.
+- Improved: note cards now sit above the suggestion ghosts, so suggestion arrows and the custom-direction input no longer cover notes.
+- Improved: clicking, dragging, or focusing a card counts as a state update and raises it above note cards; streaming cards are raised too, and with a multi-selection the most recently clicked card sits on top.
+- Improved: removed Settings → Canvas → Pointer → Wheel logic; scrollable regions inside cards (answer body, Thinking block, note body) now always scroll their content with the wheel, and holding Space makes the wheel zoom the canvas.
+- Docs: corrected the server deployment guides (Chinese and English) to match the current code — HTTPS section reference, Python 3.10+ / Node 20.19+, server mode ignoring `.env` model keys (each account configures its own in Settings), upgrade and 401 troubleshooting after the session-cookie rename, `backend/.env` (AUTH_SECRET) added to the backup scope, OpenAI-compatible egress, and provider ownership of document parsing and web search.
+- Version: bumped to 0.3.13.
+
+### 0.3.12 — 2026-11-22
+- Added: server-mode registration now validates that the username is well-formed and not taken; a public read-only `GET /api/auth/check-username` endpoint backs the in-form check, and the registration endpoint still performs the final validation.
+- Added: a “Restore defaults” button at the bottom-left of the settings dialog resets every setting while keeping saved API keys; in server mode it only affects the current account.
+- Improved: server-mode passwords are now 4–12 characters; the username, password, and confirm-password fields validate on blur, show the reason below the field, and highlight the invalid border.
+- Improved: the server-mode model search limit now defaults to 50 (legacy 0 is treated as 50) and is clamped to 1–50.
+- Improved: settings key hints now read “the key is stored only in the backend and never written to the browser”.
+- Fixed: a new account showing a masked API key by default — in server mode `settings.effective()` no longer falls back to model keys from `backend/.env` and `llm._resolve()` respects an explicitly empty runtime key; registration creates an empty per-user settings row, accounts use hard-coded defaults, and neither accounts nor `.env` share keys any more.
+- Notes: the session cookie is renamed to `tt_session_server` to isolate same-host instances on different ports; existing sessions become invalid after upgrading and require signing in again.
+- Notes: browser storage never contains plaintext API keys or settings — only the “development notice seen” flag; the settings API returns masked keys only. The README adds “Key and settings boundaries” and “What is uploaded and what is not”.
+- Docs: updated the README, deployment guides, and development conventions (account rules, settings isolation, restore defaults, data egress boundaries).
+- Version: bumped to 0.3.12.
+
+### 0.3.11 — 2026-11-22
+- Added: after the first login in server mode, an in-app “under development” notice appears once per account per browser; local mode never shows it.
+- Fixed: `start.sh` still told users Node.js 18+ was enough; it now says 20.19+, as required by Vite 8.
+- Docs: the README now marks the project as WIP, macOS as experimental, and Linux as verified for server deployment at the top, and corrects statements that no longer matched the code (Node 20.19+, `APP_MODE` and server login, DeepSeek-only auto titles, forced-search limit 1–50 with default 50, attachment preview and warning placement, config table, security section, project layout, and tech stack).
+- Version: bumped to 0.3.11.
 
 ### 0.3.10 — 2026-11-21
 - Improved: attachment chips are slightly larger and scale with the card font size; title icon buttons, “Thinking process”, footer actions, stop / retry / pause controls, input toolbars, and note-card buttons also scale proportionally. When attachments are collapsed, hovering only the “Attachments N” entry or the popup expands it, and the pointer can move into the popup without it closing.

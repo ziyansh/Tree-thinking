@@ -252,11 +252,12 @@ const PASTE_TEXT_LIMIT = 2000
 /**
  * 剪贴板粘贴：文件（含资源管理器 / Finder 复制的文件、截图）直接上传为附件；
  * 超长文本转成 .txt 附件；普通短文本不拦截，保持浏览器默认粘贴行为。
+ * 返回 true 表示已经按附件处理（调用方可跳过链接识别）。
  */
 export function usePasteAttachments(uploads: AttachmentUploads) {
-  return (event: ReactClipboardEvent<HTMLElement>) => {
+  return (event: ReactClipboardEvent<HTMLElement>): boolean => {
     const clipboard = event.clipboardData
-    if (!clipboard) return
+    if (!clipboard) return false
 
     // 从文件管理器复制的文件：clipboardData.files 里是完整的 File 对象
     const files = Array.from(clipboard.files ?? [])
@@ -276,7 +277,7 @@ export function usePasteAttachments(uploads: AttachmentUploads) {
     if (files.length > 0) {
       event.preventDefault()
       void uploads.addFiles(files)
-      return
+      return true
     }
 
     const text = clipboard.getData('text/plain')
@@ -285,7 +286,9 @@ export function usePasteAttachments(uploads: AttachmentUploads) {
       const stamp = new Date().toISOString().replace(/[:.]/g, '-')
       const file = new File([text], `pasted-${stamp}.txt`, { type: 'text/plain' })
       void uploads.addFiles([file])
+      return true
     }
+    return false
   }
 }
 

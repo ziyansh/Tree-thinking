@@ -67,6 +67,17 @@ def _get_client(options: dict) -> AsyncOpenAI:
     return client
 
 
+def _key_from(values: dict, env_key: str) -> str:
+    """解析 API Key：runtime 显式提供 api_key 时以其为准（允许为空），否则才回落环境变量。
+
+    服务器模式的 effective() 总会给出 api_key 字段（可能为空串），
+    这里必须尊重该空值，避免无 Key 的账号意外使用服务端 .env 里的 Key。
+    """
+    if "api_key" in values:
+        return (values.get("api_key") or "").strip()
+    return (env_key or "").strip()
+
+
 def _resolve(runtime: dict | None) -> dict:
     """把运行时设置与环境变量合并；runtime 为空时全部用环境变量。"""
     values = runtime or {}
@@ -75,7 +86,7 @@ def _resolve(runtime: dict | None) -> dict:
     if provider == "openai":
         return {
             "provider": "openai",
-            "api_key": (values.get("api_key") or config.OPENAI_API_KEY or "").strip(),
+            "api_key": _key_from(values, config.OPENAI_API_KEY),
             "base_url": (values.get("base_url") or config.OPENAI_BASE_URL).strip(),
             "model": (values.get("model") or config.OPENAI_MODEL).strip(),
             "organization": (values.get("openai_organization") or "").strip(),
@@ -92,7 +103,7 @@ def _resolve(runtime: dict | None) -> dict:
     if provider == "ark":
         return {
             "provider": "ark",
-            "api_key": (values.get("api_key") or config.ARK_API_KEY or "").strip(),
+            "api_key": _key_from(values, config.ARK_API_KEY),
             "base_url": (values.get("base_url") or config.ARK_BASE_URL).strip(),
             "model": (values.get("model") or config.ARK_MODEL).strip(),
             "thinking_enabled": bool(
@@ -102,7 +113,7 @@ def _resolve(runtime: dict | None) -> dict:
 
     return {
         "provider": "deepseek",
-        "api_key": (values.get("api_key") or config.DEEPSEEK_API_KEY or "").strip(),
+        "api_key": _key_from(values, config.DEEPSEEK_API_KEY),
         "base_url": (values.get("base_url") or config.DEEPSEEK_BASE_URL).strip(),
         "model": (values.get("model") or config.DEEPSEEK_MODEL).strip(),
         "thinking_enabled": bool(

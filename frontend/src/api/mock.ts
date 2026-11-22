@@ -168,7 +168,6 @@ const DEFAULT_SETTINGS: SettingsDTO = {
   doubleClickMs: 300,
   dragDriftDelayMs: 0,
   dragDriftDistance: 10,
-  wheelMode: 'zoom-canvas',
   pointerMode: 'mouse',
   cardFontSize: 14,
   autosaveMinutes: 5,
@@ -404,6 +403,11 @@ export const mockApi: ApiClient = {
 
   async logout() {
     // 本地模式没有会话，直接视为成功
+  },
+
+  async checkUsername() {
+    // Mock 模式没有账号体系，统一返回不可用
+    return { available: false, reason: 'Mock 模式为本地模式，无需注册' }
   },
 
   async exportProject(id) {
@@ -1012,9 +1016,6 @@ export const mockApi: ApiClient = {
     if (patch.dragDriftDistance !== undefined) {
       settings.dragDriftDistance = Math.min(50, Math.max(0, Math.round(patch.dragDriftDistance)))
     }
-    if (patch.wheelMode !== undefined) {
-      settings.wheelMode = patch.wheelMode
-    }
     if (patch.pointerMode !== undefined) {
       settings.pointerMode = patch.pointerMode
     }
@@ -1067,6 +1068,23 @@ export const mockApi: ApiClient = {
     }
     saveSettingsState(settings)
     return { ...settings }
+  },
+
+  async resetSettings() {
+    await delay(60)
+    // 恢复默认：保留已配置的 Key 与其脱敏值，其余字段回到默认
+    const current = getSettingsState()
+    const reset: SettingsDTO = {
+      ...DEFAULT_SETTINGS,
+      hasKey: current.hasKey,
+      apiKeyMasked: current.apiKeyMasked,
+      openaiHasKey: current.openaiHasKey,
+      openaiApiKeyMasked: current.openaiApiKeyMasked,
+      arkHasKey: current.arkHasKey,
+      arkApiKeyMasked: current.arkApiKeyMasked,
+    }
+    saveSettingsState(reset)
+    return { ...reset }
   },
 
   // Mock 模式不校验 Key，始终返回内置模型列表

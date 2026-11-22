@@ -15,7 +15,6 @@ import type {
   ThemeMode,
   TimeFormat,
   WebSearchMode,
-  WheelMode,
 } from '../api/types'
 import { useGraphStore } from '../store/graphStore'
 import { useEscapeHandler } from '../lib/escapeStack'
@@ -86,7 +85,6 @@ interface SettingsForm {
   doubleClickMs: number
   dragDriftDelayMs: number
   dragDriftDistance: number
-  wheelMode: WheelMode
   pointerMode: PointerMode
   cardFontSize: number
   autosaveMinutes: number
@@ -134,7 +132,6 @@ function fromSettings(data: SettingsDTO): SettingsForm {
     doubleClickMs: data.doubleClickMs,
     dragDriftDelayMs: data.dragDriftDelayMs,
     dragDriftDistance: data.dragDriftDistance,
-    wheelMode: data.wheelMode,
     pointerMode: data.pointerMode ?? 'mouse',
     cardFontSize: data.cardFontSize,
     autosaveMinutes: data.autosaveMinutes,
@@ -779,11 +776,13 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
   const [settings, setSettings] = useState<SettingsDTO | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   // 关闭时保留 180ms 播放退场动画，结束再卸载
   const [mounted, setMounted] = useState(open)
   const updatePreferences = useGraphStore((state) => state.updatePreferences)
+  const loadPreferences = useGraphStore((state) => state.loadPreferences)
   const arkModels = useGraphStore((state) => state.arkModels)
   const arkModelsLoading = useGraphStore((state) => state.arkModelsLoading)
   const loadArkModels = useGraphStore((state) => state.loadArkModels)
@@ -814,7 +813,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
     doubleClickMs: 300,
     dragDriftDelayMs: 0,
     dragDriftDistance: 10,
-    wheelMode: 'zoom-canvas',
     pointerMode: 'mouse',
     cardFontSize: 14,
     autosaveMinutes: 5,
@@ -946,7 +944,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
         doubleClickMs: form.doubleClickMs,
         dragDriftDelayMs: form.dragDriftDelayMs,
         dragDriftDistance: form.dragDriftDistance,
-        wheelMode: form.wheelMode,
         pointerMode: form.pointerMode,
         cardFontSize: form.cardFontSize,
         autosaveMinutes: form.autosaveMinutes,
@@ -983,6 +980,26 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
       setError(err instanceof Error ? err.message : '保存失败，请稍后重试')
     } finally {
       setSaving(false)
+    }
+  }
+
+  /** 恢复默认设置：后端保留已保存的 API Key，其余字段全部回落默认值 */
+  const resetAll = async () => {
+    if (!window.confirm('确定恢复所有设置为默认值吗？已保存的 API Key 会保留。')) return
+    setResetting(true)
+    setError('')
+    setMessage('')
+    try {
+      const data = await api.resetSettings()
+      setSettings(data)
+      setForm(fromSettings(data))
+      // 同步画布 store 并立即应用主题与外观
+      await loadPreferences()
+      setMessage('已恢复默认设置，API Key 已保留')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '恢复默认设置失败，请稍后重试')
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -1083,7 +1100,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           hint={
                             settings?.hasKey
                               ? `当前：${settings.apiKeyMasked}；留空保持不变`
-                              : '尚未配置，填写后才能获得回答；Key 只保存在本地后端'
+                              : '尚未配置，填写后才能获得回答；Key 只保存在后端，不会写入浏览器'
                           }
                         >
                           <input
@@ -1162,7 +1179,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           hint={
                             settings?.arkHasKey
                               ? `当前：${settings.arkApiKeyMasked}；留空保持不变`
-                              : '尚未配置，填写后才能获得回答；Key 只保存在本地后端'
+                              : '尚未配置，填写后才能获得回答；Key 只保存在后端，不会写入浏览器'
                           }
                         >
                           <input
@@ -1225,7 +1242,7 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
                           hint={
                             settings?.openaiHasKey
                               ? `当前：${settings.openaiApiKeyMasked}；留空保持不变`
-                              : '兼容任意 OpenAI 协议服务（官方 OpenAI、中转、OpenRouter、Moonshot 等），Key 只保存在本地后端'
+                              : '兼容任意 OpenAI 协议服务（官方 OpenAI、中转、OpenRouter、Moonshot 等），Key 只保存在后端，不会写入浏览器'
                           }
                         >
                           <input
@@ -1440,20 +1457,6 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
 
                     <Section title="指针">
                       <Row
-                        label="滚轮逻辑"
-                        hint="鼠标悬停在画布上时的滚轮行为；按住空格时始终缩放画布；默认缩放画布"
-                      >
-                        <ChoiceGroup
-                          value={form.wheelMode}
-                          options={[
-                            { value: 'scroll-card', label: '悬停时滑动卡片' },
-                            { value: 'zoom-canvas', label: '悬停时缩放画布' },
-                          ]}
-                          onChange={(wheelMode) => setForm({ ...form, wheelMode })}
-                        />
-                      </Row>
-
-                      <Row
                         label="触摸板逻辑"
                         hint="鼠标：标准滚轮行为；触摸板（实验性）：双指滑动直接平移、捏合缩放；默认鼠标"
                       >
@@ -1667,16 +1670,26 @@ export function SettingsDialog({ open, onClose }: SettingsDialogProps) {
           </div>
 
           <footer className="flex items-center justify-between gap-4 border-t border-subtle px-5 py-3">
-            <p
-              className={['min-w-0 break-words text-[12px]', error ? 'text-danger' : 'text-muted'].join(
-                ' ',
-              )}
-            >
-              {error || message || '保存后立即生效，设置会持久化到本地后端'}
-            </p>
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                disabled={saving || resetting || loading}
+                onClick={() => void resetAll()}
+                className="flex-none rounded-lg border border-subtle px-3 py-1.5 text-[12px] text-body transition-colors duration-150 hover:border-strong hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {resetting ? '恢复中…' : '恢复默认设置'}
+              </button>
+              <p
+                className={['min-w-0 break-words text-[12px]', error ? 'text-danger' : 'text-muted'].join(
+                  ' ',
+                )}
+              >
+                {error || message || '保存后立即生效，设置只保存在后端'}
+              </p>
+            </div>
             <button
               type="button"
-              disabled={saving || loading}
+              disabled={saving || resetting || loading}
               onClick={() => void save()}
               className="flex-none rounded-lg bg-accent px-4 py-1.5 text-[13px] font-medium text-on-accent transition-opacity duration-150 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
             >

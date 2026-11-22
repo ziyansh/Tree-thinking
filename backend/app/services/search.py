@@ -12,16 +12,17 @@ import httpx
 SUMMARY_MAX_CHARS = 800
 
 # DeepSeek Search 接口的 count 范围为 1–50，服务端默认只返回 10 条。
-# 「不设限」时必须显式请求上限，否则会一直被服务端默认值锁在 10 条。
+# 需要完整上限时必须显式请求 50，否则会一直被服务端默认值锁在 10 条。
 MAX_RESULT_COUNT = 50
 
 
 def _limit_of(runtime: dict) -> int:
-    """读取「模型搜索上限」：0 表示不设限，非法值按 0 处理。"""
+    """读取「模型搜索上限」：1–50；非法值或旧配置的 0 按默认 50 处理。"""
     try:
-        return max(0, int(runtime.get("search_limit") or 0))
+        value = int(runtime.get("search_limit") or 0)
     except (TypeError, ValueError):
-        return 0
+        value = 0
+    return value if value > 0 else MAX_RESULT_COUNT
 
 
 def _endpoint(base_url: str) -> str:
@@ -79,14 +80,13 @@ def merge_sources(current: list[dict], incoming: list[dict]) -> bool:
 async def search_web(query: str, runtime: dict) -> list[dict]:
     """根据运行时设置发起联网搜索。
 
-    返回条数由「模型搜索上限」决定：0 表示不设限（显式请求服务端上限 50 条，
-    避免回落到默认的 10 条），大于 0 时请求并截断到该数量。
+    返回条数由「模型搜索上限」决定（1–50），旧配置的 0 按默认 50 处理。
     """
     limit = _limit_of(runtime)
     url = _endpoint(runtime.get("base_url") or "")
     payload = {
         "query": query,
-        "count": limit if limit > 0 else MAX_RESULT_COUNT,
+        "count": limit,
         "need_content": False,
         "ori_question": query,
     }

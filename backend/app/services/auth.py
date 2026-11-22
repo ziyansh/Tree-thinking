@@ -18,8 +18,8 @@ from app import config
 from app.db import get_db
 from app.models import User
 
-# 会话 Cookie 名称与有效期（24 小时）
-COOKIE_NAME = "tt_session"
+# 服务器模式会话 Cookie 名称：与本地实例隔离，避免同域不同端口互相覆盖
+COOKIE_NAME = "tt_session_server"
 SESSION_MAX_AGE = 24 * 60 * 60
 
 # local 模式下派生加密密钥的固定默认值，保证本地无需额外配置
@@ -27,10 +27,10 @@ _DEFAULT_SECRET = "tree-thinking-local-secret"
 # 加密值前缀：带该前缀表示已加密，其余视为旧明文
 ENC_PREFIX = "enc:"
 
-# 用户名 3–32 位字母数字下划线；密码 8–72 位
+# 用户名 3–32 位字母数字下划线；密码 4–12 位
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_]{3,32}$")
-MIN_PASSWORD_LENGTH = 8
-MAX_PASSWORD_LENGTH = 72
+MIN_PASSWORD_LENGTH = 4
+MAX_PASSWORD_LENGTH = 12
 
 
 def is_server_mode() -> bool:
@@ -43,14 +43,22 @@ def normalize_username(username: str) -> str:
     return (username or "").strip().lower()
 
 
+def username_error(username: str) -> str | None:
+    """返回用户名格式错误文案；合法时返回 None。"""
+    if not USERNAME_PATTERN.match((username or "").strip()):
+        return "用户名需为 3–32 位字母、数字或下划线"
+    return None
+
+
 def validate_credentials(username: str, password: str) -> None:
     """校验注册/登录的格式；不合法时抛 400 可读错误。"""
-    if not USERNAME_PATTERN.match((username or "").strip()):
-        raise HTTPException(status_code=400, detail="用户名需为 3–32 位字母、数字或下划线")
+    error = username_error(username)
+    if error:
+        raise HTTPException(status_code=400, detail=error)
     password = password or ""
-    # bcrypt 只处理前 72 字节，超长密码直接拒绝
-    if len(password) < MIN_PASSWORD_LENGTH or len(password.encode("utf-8")) > MAX_PASSWORD_LENGTH:
-        raise HTTPException(status_code=400, detail="密码长度需在 8–72 位之间")
+    # 密码按字符数限制 4–12 位
+    if len(password) < MIN_PASSWORD_LENGTH or len(password) > MAX_PASSWORD_LENGTH:
+        raise HTTPException(status_code=400, detail="密码长度需在 4–12 位之间")
 
 
 def hash_password(password: str) -> str:

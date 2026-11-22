@@ -86,7 +86,7 @@ def test_register_sets_cookie_and_session(server_client):
 
     assert response.status_code == 200
     assert response.json()["user"]["username"] == "alice"
-    assert "tt_session" in server_client.cookies
+    assert "tt_session_server" in server_client.cookies
 
     session = server_client.get("/api/auth/session").json()
     assert session["mode"] == "server"
@@ -97,7 +97,9 @@ def test_register_validation_and_duplicate(server_client):
     """用户名/密码格式校验与重复注册（大小写不敏感）。"""
     assert _register(server_client, "ab", "password123").status_code == 400
     assert _register(server_client, "alice!", "password123").status_code == 400
-    assert _register(server_client, "alice", "short").status_code == 400
+    # 密码改为 4–12 位：3 位与 13 位都应拒绝
+    assert _register(server_client, "alice", "abc").status_code == 400
+    assert _register(server_client, "alice", "abcdefghijklm").status_code == 400
 
     assert _register(server_client).status_code == 200
     duplicate = _register(server_client, "ALICE")
@@ -105,11 +107,35 @@ def test_register_validation_and_duplicate(server_client):
     assert "已被注册" in duplicate.json()["detail"]
 
 
+def test_password_length_boundaries(server_client):
+    """4 位与 12 位密码都合法。"""
+    assert _register(server_client, "shortpw", "abcd").status_code == 200
+    server_client.post("/api/auth/logout")
+    server_client.cookies.clear()
+    assert _register(server_client, "longpw", "abcdefghijkl").status_code == 200
+
+
+def test_check_username(server_client):
+    """注册前检查用户名：格式、可用与重复（大小写不敏感）。"""
+    assert server_client.get("/api/auth/check-username?username=alice").json() == {
+        "available": True,
+        "reason": None,
+    }
+    bad = server_client.get("/api/auth/check-username?username=ab").json()
+    assert bad["available"] is False
+    assert "3–32" in bad["reason"]
+
+    _register(server_client, "alice")
+    taken = server_client.get("/api/auth/check-username?username=ALICE").json()
+    assert taken["available"] is False
+    assert "已被注册" in taken["reason"]
+
+
 def test_login_errors_are_unified(server_client):
     """用户名不存在或密码错误统一提示「用户名或密码错误」。"""
     _register(server_client)
 
-    wrong_password = _login(server_client, "alice", "wrong-password")
+    wrong_password = _login(server_client, "alice", "wrongpass123")
     assert wrong_password.status_code == 400
     assert wrong_password.json()["detail"] == "用户名或密码错误"
 
@@ -238,6 +264,59 @@ def test_attachment_owner_recorded(server_client, server_session_factory):
     finally:
         db.close()
     assert stored["owner_id"] == user_id
+
+
+def test_server_new_user_has_no_env_keys(server_client, monkeypatch):
+    """服务器模式新账号只使用默认设置，绝不继承服务端 .env 里的密钥。"""
+    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "sk-env-deepseek-1234")
+    monkeypatch.setattr(config, "ARK_API_KEY", "ark-env-1234")
+    monkeypatch.setattr(config, "OPENAI_API_KEY", "sk-env-openai-1234")
+
+    _register(server_client, "fresh")
+    data = server_client.get("/api/settings").json()
+
+    assert data["provider"] == "deepseek"
+    assert data["hasKey"] is False
+    assert data["apiKeyMasked"] == ""
+    assert data["arkHasKey"] is False
+    assert data["arkApiKeyMasked"] == ""
+    assert data["openaiHasKey"] is False
+    assert data["openaiApiKeyMasked"] == ""
+    assert data["baseUrl"] == "https://api.deepseek.com"
+    assert data["model"] == "deepseek-flash"
+    assert data["searchLimit"] == 50
+
+
+def test_reset_settings_keeps_keys(server_client, server_session_factory):
+    """恢复默认设置：非密钥字段回到默认值，已保存的 Key 保留且仍为密文。"""
+    _register(server_client, "resetter")
+    server_client.put(
+        "/api/settings",
+        json={
+            "apiKey": "sk-reset-key-1234",
+            "themeHue": 100,
+            "model": "deepseek-v4-pro",
+            "cardGap": 300,
+            "searchLimit": 8,
+        },
+    )
+
+    data = server_client.post("/api/settings/reset").json()
+    assert data["hasKey"] is True
+    assert data["apiKeyMasked"] == "sk-••••1234"
+    assert data["themeHue"] == 173
+    assert data["model"] == "deepseek-flash"
+    assert data["cardGap"] == 80
+    assert data["searchLimit"] == 50
+
+    db = server_session_factory()
+    try:
+        user = db.scalar(select(User).where(User.username == "resetter"))
+        stored = db.get(UserSetting, user.id).api_key
+    finally:
+        db.close()
+    assert stored.startswith("enc:")
+    assert "sk-reset-key-1234" not in stored
 
 
 def test_server_mode_requires_auth_secret(server_mode, monkeypatch):

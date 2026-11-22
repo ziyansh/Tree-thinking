@@ -20,6 +20,14 @@ def read_settings(
     return settings_service.dto(db, user)
 
 
+@router.post("/reset")
+def reset_settings(
+    db: Session = Depends(get_db), user: User | None = Depends(require_user)
+) -> dict:
+    """恢复全部设置为默认值，已保存的 API Key 保持不变。"""
+    return settings_service.reset(db, user)
+
+
 @router.put("")
 def write_settings(
     payload: SettingsPatch,

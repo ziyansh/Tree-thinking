@@ -42,7 +42,7 @@ trap 'exit 130' HUP INT TERM
 
 # ---------- 0. 基础命令检查 ----------
 if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  echo "[错误] 未找到 node / npm，请先安装 Node.js 18+：https://nodejs.org/"
+  echo "[错误] 未找到 node / npm，请先安装 Node.js 20.19+：https://nodejs.org/"
   exit 1
 fi
 

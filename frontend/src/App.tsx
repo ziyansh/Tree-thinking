@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, api } from './api/client'
+import { api } from './api/client'
 import type { AuthSession, AuthUser } from './api/types'
 import { Canvas } from './canvas/Canvas'
 import { AuthPage } from './components/AuthPage'
@@ -9,11 +9,8 @@ import { Toast } from './components/Toast'
 import { WipNotice } from './components/WipNotice'
 import { useGraphStore } from './store/graphStore'
 
-/** 启动阶段：读取会话 → 登录页 / 画布 */
-type Phase = 'loading' | 'auth' | 'canvas'
-
-// StrictMode 下 effect 会执行两次，用模块级标记避免重复读取会话与建画布
-let bootstrapped = false
+/** 启动阶段：读取会话 → 登录页 / 画布 / 连接失败 */
+type Phase = 'loading' | 'auth' | 'canvas' | 'error'
 
 function App() {
   const loadProjects = useGraphStore((state) => state.loadProjects)
@@ -31,6 +28,12 @@ function App() {
   const [phase, setPhase] = useState<Phase>('loading')
   // 服务器模式首次登录的开发中提示；按账号记录，同一浏览器只弹一次
   const [wipOpen, setWipOpen] = useState(false)
+  // 启动失败原因：无法确认运行模式时展示重试页，绝不回落到画布
+  const [bootError, setBootError] = useState('')
+  // StrictMode 会重复执行 effect，用 ref 保证一次挂载只读取一次会话
+  const bootStartedRef = useRef(false)
+  // 重试计数：递增后重新触发启动流程
+  const [bootAttempt, setBootAttempt] = useState(0)
 
   /** 初始化画布：打开最近更新的画布，一个都没有时新建第一个 */
   const initCanvas = useCallback(async () => {
@@ -52,22 +55,19 @@ function App() {
 
   // 启动：先读会话；local 直接初始化，server 未登录时只渲染登录页，不触发画布请求
   useEffect(() => {
-    if (bootstrapped) return
-    bootstrapped = true
+    if (bootStartedRef.current) return
+    bootStartedRef.current = true
 
     void (async () => {
       let current: AuthSession
       try {
         current = await api.getSession()
       } catch (err) {
-        if (err instanceof ApiError && err.status === 401) {
-          // 会话接口返回 401 视为未登录，渲染登录页
-          current = { mode: 'server', user: null }
-        } else {
-          // 后端未启动等其他失败按本地模式继续，画布初始化会各自告警
-          console.warn('读取会话失败', err)
-          current = { mode: 'local', user: null }
-        }
+        // 无法确认运行模式时不能当作 local 进入画布，否则服务器模式会绕过登录页
+        console.error('读取会话失败', err)
+        setBootError(err instanceof Error ? err.message : '无法连接后端服务')
+        setPhase('error')
+        return
       }
       setSession(current)
       if (current.mode === 'server' && !current.user) {
@@ -77,7 +77,15 @@ function App() {
       await initCanvas()
       setPhase('canvas')
     })()
-  }, [initCanvas])
+  }, [initCanvas, bootAttempt])
+
+  /** 启动失败后重试：重置标记并重新读取会话 */
+  const retryBoot = useCallback(() => {
+    bootStartedRef.current = false
+    setBootError('')
+    setPhase('loading')
+    setBootAttempt((count) => count + 1)
+  }, [])
 
   /** 登录/注册成功：写入会话，初始化画布后进入主界面 */
   const handleAuthenticated = useCallback(
@@ -211,6 +219,28 @@ function App() {
   // server 模式未登录：只渲染登录页，不触发任何画布请求
   if (phase === 'auth') {
     return <AuthPage onAuthenticated={handleAuthenticated} />
+  }
+
+  // 启动失败：无法确认运行模式时只提供重试，绝不进入画布
+  if (phase === 'error') {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-canvas px-4">
+        <div className="w-[360px] max-w-full rounded-xl border border-subtle bg-panel p-6 shadow-2xl">
+          <h1 className="text-[16px] font-semibold text-ink">无法连接后端</h1>
+          <p className="mt-2 text-[12px] text-body">{bootError}</p>
+          <p className="mt-2 text-[12px] text-muted">
+            请确认后端已启动，并检查前端代理或服务器 /api 反向代理配置。
+          </p>
+          <button
+            type="button"
+            onClick={retryBoot}
+            className="mt-4 w-full rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-on-accent transition-opacity duration-150 hover:opacity-90"
+          >
+            重试
+          </button>
+        </div>
+      </div>
+    )
   }
 
   return (

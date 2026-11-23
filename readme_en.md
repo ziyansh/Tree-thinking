@@ -248,6 +248,7 @@ Versioning: each conversation iteration bumps one minor version (0.1.x) unless a
 - Docs: corrected the server deployment guides (Chinese and English) to match the current code — HTTPS section reference, Python 3.10+ / Node 20.19+, server mode ignoring `.env` model keys (each account configures its own in Settings), upgrade and 401 troubleshooting after the session-cookie rename, `backend/.env` (AUTH_SECRET) added to the backup scope, OpenAI-compatible egress, and provider ownership of document parsing and web search.
 - Version: bumped to 0.3.13.
 - readme: rewritten the introduction part.
+- 0.3.13 hotfix1: Fixed: in server mode, a failed session request on first load (backend down, 502, `/api` not reverse-proxied) was treated as local mode and went straight to the canvas, bypassing the login page; the app now shows a “cannot reach the backend” retry screen instead of rendering the canvas, and non-JSON `/api` responses report a proxy configuration hint.
 
 
 

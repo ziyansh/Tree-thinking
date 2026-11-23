@@ -90,7 +90,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(res.status, await readError(res))
   }
   if (res.status === 204) return undefined as T
-  return (await res.json()) as T
+  try {
+    return (await res.json()) as T
+  } catch {
+    // 常见于 /api 未反向代理：静态服务器把 index.html 当作接口响应返回
+    throw new ApiError(res.status, '接口返回的不是 JSON，请检查 /api 代理配置')
+  }
 }
 
 /** 上传单个附件：multipart 表单字段名固定为 file，Content-Type 交给浏览器自动生成 */

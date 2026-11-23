@@ -15,6 +15,7 @@ import { CORNER_ZONES, EDGE_ZONES, IconButton } from './CardNode'
 import type { ResizeEdge } from './CardNode'
 import { formatModifiedTime } from '../lib/time'
 import { useSpacePressed } from '../lib/spaceKey'
+import { highlightText } from '../lib/highlight'
 import { NOTE_LINK_DOT, startNoteLinkDrag, useNoteLinkDragSignal } from './noteLink'
 
 /** 笔记卡片：双击空白画布创建，标题/正文独立编辑，拥有自己的宽高 */
@@ -60,12 +61,90 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
   const lastContentClickRef = useRef(0)
   const titleInputRef = useRef<HTMLInputElement | null>(null)
   const contentInputRef = useRef<HTMLTextAreaElement | null>(null)
+  /** 正文只读容器：搜索命中时滚动到命中位置附近 */
+  const contentBodyRef = useRef<HTMLDivElement | null>(null)
+  /** 搜索跳转请求：命中正文时把笔记内部滚到命中位置 */
+  const focusRequest = useGraphStore((state) => state.focusRequest)
   // 缩放中的实时尺寸预览，松手后写入 store 并持久化
   const [sizeDraft, setSizeDraft] = useState<{ width: number; height: number } | null>(null)
 
   // 外部变化（撤销、重新载入）时同步本地草稿
   useEffect(() => setTitle(node.question), [node.question])
   useEffect(() => setContent(node.answer), [node.answer])
+
+  // 命中正文时按字符位置估算滚动比例，把高亮内容滚到可视区中间
+  useEffect(() => {
+    const request = focusRequest
+    if (!request || request.nodeId !== node.id || request.field !== 'answer') return
+    const term = request.query.trim().toLowerCase()
+    if (!term) return
+    const text = node.answer || ''
+    const index = text.toLowerCase().indexOf(term)
+    if (index < 0) return
+    const container = editingContent ? contentInputRef.current : contentBodyRef.current
+    if (!container) return
+    const ratio = index / Math.max(1, text.length)
+    container.scrollTop = Math.max(0, ratio * container.scrollHeight - container.clientHeight / 2)
+  }, [focusRequest, node.id, node.answer, editingContent])
+
+  /** 搜索命中后的高亮：关键词与请求 nonce，用来重播闪烁动画 */
+  const [flash, setFlash] = useState<{ term: string; nonce: number } | null>(null)
+  /** 高亮渲染后的滚动帧句柄 */
+  const flashScrollRef = useRef<number | null>(null)
+  /** 只闪烁模式下的收尾定时器（闪烁 5 次共 3.5 秒，留一点余量） */
+  const flashTimerRef = useRef<number | null>(null)
+
+  // 一次只保留目标笔记的高亮：命中本笔记时闪烁并保持高亮，其它笔记清除
+  useEffect(() => {
+    const request = focusRequest
+    if (!request) return
+    const term = request.query.trim()
+    if (!term) return
+    if (request.nodeId !== node.id) {
+      setFlash(null)
+      return
+    }
+    setFlash({ term, nonce: request.nonce })
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = null
+    // 侧边栏搜索只闪烁一次：结束后移除高亮，恢复普通文本
+    if (request.flashOnly) {
+      flashTimerRef.current = window.setTimeout(() => {
+        flashTimerRef.current = null
+        setFlash(null)
+      }, 3600)
+    }
+
+    // 只读正文的高亮渲染后，把命中内容滚到可视区中间
+    let frames = 0
+    const scrollToMark = () => {
+      const container = contentBodyRef.current
+      const mark = container?.querySelector<HTMLElement>('mark.search-flash')
+      if (!container || !mark) {
+        if (frames < 12) {
+          frames += 1
+          flashScrollRef.current = window.requestAnimationFrame(scrollToMark)
+        }
+        return
+      }
+      const containerRect = container.getBoundingClientRect()
+      const markRect = mark.getBoundingClientRect()
+      const scale = container.clientHeight / Math.max(1, containerRect.height)
+      const offset = (markRect.top - containerRect.top) * scale
+      container.scrollTop += offset - container.clientHeight / 2 + (markRect.height * scale) / 2
+    }
+    if (flashScrollRef.current !== null) window.cancelAnimationFrame(flashScrollRef.current)
+    flashScrollRef.current = window.requestAnimationFrame(scrollToMark)
+  }, [focusRequest, node.id])
+
+  // 卸载时清理滚动帧与收尾定时器
+  useEffect(
+    () => () => {
+      if (flashScrollRef.current !== null) window.cancelAnimationFrame(flashScrollRef.current)
+      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    },
+    [],
+  )
 
   const width = sizeDraft?.width ?? node.width ?? NOTE_DEFAULT_WIDTH
   const height = sizeDraft?.height ?? node.height ?? NOTE_DEFAULT_HEIGHT
@@ -291,6 +370,7 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
             ref={titleInputRef}
             value={title}
             placeholder="笔记标题"
+            data-search-field="title"
             onChange={(event) => setTitle(event.target.value)}
             onBlur={commitTitle}
             onPointerDown={(event) => event.stopPropagation()}
@@ -313,10 +393,19 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
           <h3
             onPointerDown={handleTitlePointerDown}
             onPointerUp={handleTitlePointerUp}
+            data-search-field="title"
             className="min-w-0 flex-1 select-none break-words rounded-md px-1 py-0.5 font-semibold leading-snug text-accent"
             style={{ fontSize: 'calc(var(--card-font-size) + 1px)' }}
           >
-            {title || <span className="text-muted">笔记标题</span>}
+            {title ? (
+              flash ? (
+                <span key={flash.nonce}>{highlightText(title, flash.term, 'search-flash')}</span>
+              ) : (
+                title
+              )
+            ) : (
+              <span className="text-muted">笔记标题</span>
+            )}
           </h3>
         )}
         <div className="flex shrink-0 items-center gap-1">
@@ -342,6 +431,7 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
           onChange={(event) => setContent(event.target.value)}
           onBlur={commitContent}
           onKeyDown={handleContentKeyDown}
+          data-search-field="answer"
           className={[
             'nodrag nopan selectable-text mt-2 min-h-0 flex-1 resize-none rounded-lg border border-subtle bg-elevated px-2 py-1.5 leading-[1.65] text-body outline-none transition-colors duration-150 placeholder:text-muted focus:border-accent',
             spacePressed ? '' : 'nowheel',
@@ -350,15 +440,25 @@ function NoteNodeInner({ data, dragging }: NodeProps<NoteFlowNode>) {
         />
       ) : (
         <div
+          ref={contentBodyRef}
           onPointerDown={handleContentPointerDown}
           onPointerUp={handleContentPointerUp}
+          data-search-field="answer"
           className={[
             'mt-2 min-h-0 flex-1 select-none overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-subtle px-2 py-1.5 leading-[1.65] text-body',
             spacePressed ? '' : 'nowheel',
           ].join(' ')}
           style={{ fontSize: 'var(--card-font-size)' }}
         >
-          {content || <span className="text-muted">双击编辑正文</span>}
+          {content ? (
+            flash ? (
+              <span key={flash.nonce}>{highlightText(content, flash.term, 'search-flash')}</span>
+            ) : (
+              content
+            )
+          ) : (
+            <span className="text-muted">双击编辑正文</span>
+          )}
         </div>
       )}
 

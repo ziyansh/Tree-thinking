@@ -161,6 +161,7 @@ def test_protected_routes_require_login(server_client):
     """server 模式下未登录访问受保护接口一律 401。"""
     assert server_client.get("/api/projects").status_code == 401
     assert server_client.get("/api/settings").status_code == 401
+    assert server_client.get("/api/search", params={"q": "任意"}).status_code == 401
     assert server_client.post("/api/projects", json={}).status_code == 401
     assert server_client.get("/api/attachments/" + "0" * 32).status_code == 401
 
@@ -179,6 +180,9 @@ def test_cross_user_isolation(server_client):
     server_client.put(
         "/api/settings", json={"apiKey": "sk-alice-key-1234", "themeHue": 100}
     )
+    # 自己的内容可以搜到
+    own_hit = server_client.get("/api/search", params={"q": "A 的画布"}).json()["items"]
+    assert len(own_hit) == 1 and own_hit[0]["projectId"] == alice_project_id
     server_client.post("/api/auth/logout")
     server_client.cookies.clear()
 
@@ -186,6 +190,11 @@ def test_cross_user_isolation(server_client):
 
     # 列表里看不到别人的画布
     assert server_client.get("/api/projects").json() == []
+    # 搜索同样按账号隔离：全局与指定画布都搜不到别人的内容
+    assert server_client.get("/api/search", params={"q": "A 的画布"}).json()["items"] == []
+    assert server_client.get(
+        "/api/search", params={"q": "A 的画布", "project_id": alice_project_id}
+    ).json()["items"] == []
     # 画布相关接口统一 404（不泄露存在性）
     assert server_client.get(f"/api/projects/{alice_project_id}/graph").status_code == 404
     assert server_client.patch(

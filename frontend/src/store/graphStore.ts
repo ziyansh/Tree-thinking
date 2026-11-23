@@ -304,6 +304,28 @@ function findRootNode(nodes: NodeDTO[]): NodeDTO | undefined {
   return nodes.find((node) => node.parentId === null && node.nodeType === 'chat')
 }
 
+/** 搜索跳转的缩放策略：keep 保持当前缩放、reset 至少恢复到 100%、fit 适配视口 */
+export type FocusZoomMode = 'keep' | 'reset' | 'fit'
+
+/** 搜索跳转参数：命中字段与关键词用于把卡片内部滚动到命中位置 */
+export interface FocusOptions {
+  field?: 'project' | 'title' | 'answer'
+  query?: string
+  zoom?: FocusZoomMode
+  /** 命中内容只闪烁一次，结束后恢复普通文本（侧边栏搜索使用） */
+  flashOnly?: boolean
+}
+
+/** 一次搜索跳转请求；nonce 保证重复点击同一结果也会重新定位 */
+interface FocusRequest {
+  nodeId: string
+  field: 'project' | 'title' | 'answer'
+  query: string
+  zoom: FocusZoomMode
+  flashOnly: boolean
+  nonce: number
+}
+
 interface GraphState {
   projects: ProjectDTO[]
   currentProjectId: string | null
@@ -338,6 +360,8 @@ interface GraphState {
   toast: string | null
   /** 新建分支卡片后的一次性检测信号：交给画布判断落点是否遮挡其它卡片的提问区 */
   layoutCheckNodeId: string | null
+  /** 搜索结果跳转请求：nonce 递增保证同一张卡片也能重复定位 */
+  focusRequest: FocusRequest | null
 
   loadProjects: () => Promise<void>
   openProject: (id: string) => Promise<void>
@@ -353,6 +377,8 @@ interface GraphState {
   requestLayoutCheck: (nodeId: string) => void
   /** 检测处理完毕后清空请求信号 */
   clearLayoutCheck: () => void
+  /** 请求把某张卡片居中显示并选中（搜索结果跳转使用） */
+  requestFocus: (nodeId: string, options?: FocusOptions) => void
   createProject: (name?: string) => Promise<void>
   renameProject: (id: string, name: string) => Promise<void>
   /** 首轮回答完成后尝试自动命名；失败只告警，不影响画布 */
@@ -511,6 +537,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
     arkModelsLoading: false,
     toast: null,
     layoutCheckNodeId: null,
+    focusRequest: null,
 
     loadProjects: async () => {
       const projects = await api.listProjects()
@@ -536,6 +563,8 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         branchUrlChips: {},
         ghostDrafts: {},
         ghostUrlChips: {},
+        // 切换画布后丢弃上一条跳转请求，避免定位到同 id 卡片的错误位置
+        focusRequest: null,
         projects: get().projects.map((project) =>
           project.id === graph.project.id ? graph.project : project,
         ),
@@ -685,6 +714,21 @@ export const useGraphStore = create<GraphState>()((set, get) => {
 
     clearLayoutCheck: () => set({ layoutCheckNodeId: null }),
 
+    requestFocus: (nodeId, options) =>
+      set((state) => ({
+        // 跳转同时选中该卡片，便于后续操作与层级抬升
+        selectedNodeId: nodeId,
+        selectedNodeIds: [nodeId],
+        focusRequest: {
+          nodeId,
+          field: options?.field ?? 'project',
+          query: options?.query ?? '',
+          zoom: options?.zoom ?? 'keep',
+          flashOnly: options?.flashOnly ?? false,
+          nonce: (state.focusRequest?.nonce ?? 0) + 1,
+        },
+      })),
+
     createProject: async (name) => {
       const graph = await api.createProject(name)
       const nodes = graph.nodes.map(toFlowNode)
@@ -805,6 +849,7 @@ export const useGraphStore = create<GraphState>()((set, get) => {
         branchUrlChips: {},
         ghostDrafts: {},
         ghostUrlChips: {},
+        focusRequest: null,
         toast: null,
       })
     },

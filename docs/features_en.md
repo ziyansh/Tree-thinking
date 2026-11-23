@@ -16,6 +16,12 @@ This document supplements the [README](../readme_en.md) with the complete list o
 - **Dynamic layering**: clicking, dragging, or focusing a card counts as a state update and raises it above note cards; streaming cards are raised too. When nothing is focused, notes sit above suggestion ghosts and idle chat cards stay at the bottom. Edges always render beneath cards.
 - **Canvas style**: solid or dotted background; pan inertia can be enabled with an adjustable coefficient.
 
+## Search
+
+- **In-canvas search**: `Ctrl/Cmd + F` opens a frosted search panel at the top of the canvas and searches only the current canvas's card titles and bodies (including notes). Results show snippets around each hit with highlighted keywords. A single click aims the camera at the matched keyword inside the card (keeping the current zoom), and the hit is highlighted and smoothly flashes for about 3.5 seconds, then keeps the highlight background to show its position; body hits also scroll the card internally to the match. Clicking the same result again quickly (within the configured double-click interval) restores the zoom to 100%, while an already larger zoom is kept. The panel can be resized from its bottom-right corner, and the size is stored in the browser and restored next time.
+- **Global search**: the search box at the top of the sidebar searches canvas names, card titles, and bodies across all canvases. The result popover spans the sidebar width and labels the owning canvas and field type; clicking a hit switches to that canvas, moves the camera, fits a suitable zoom to the viewport, and highlights and flashes the matched content; once the flashing ends the text returns to normal, so no highlight is kept on the card.
+- **Matching scope**: case-insensitive substring matching; in server mode only the signed-in account's canvases are returned, and in-canvas search additionally narrows to the open canvas. A single request returns at most 60 items and marks the list as truncated when more exist.
+
 ## Chat cards
 
 - **One question, one answer**: each card stores a question and an answer. Answers render as Markdown with tables, code blocks, and math, and scroll inside the card when long.
@@ -85,5 +91,6 @@ This document supplements the [README](../readme_en.md) with the complete list o
 | `Esc` | Close overlays and drawers in last-opened-first-closed order |
 | `Tab` (note body editing) | Insert four spaces |
 | `Delete` | Delete selected cards (the root card excluded) |
+| `Ctrl/Cmd + F` | Open / focus in-canvas search |
 | `Ctrl/Cmd + Z` | Undo the last action on the current canvas |
 | `Ctrl/Cmd + S` | Save the current canvas |

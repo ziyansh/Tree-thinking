@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { NodeProps } from '@xyflow/react'
 import { Handle, Position } from '@xyflow/react'
@@ -25,6 +25,8 @@ import type { CardNodeData, CardFlowNode } from '../store/graphStore'
 import { formatModifiedTime } from '../lib/time'
 import { useEscapeHandler } from '../lib/escapeStack'
 import { useSpacePressed } from '../lib/spaceKey'
+import { highlightText } from '../lib/highlight'
+import { remarkSearchFlash } from '../lib/markdownHighlight'
 import { bumpUiLayer } from '../lib/uiLayers'
 import { AttachmentBar } from './AttachmentBar'
 import { AttachmentChips, ArkCapabilityWarning, PdfPageWarning, openAttachment, useAttachmentUploads, usePasteAttachments, useFileDropZone } from './AttachmentComposer'
@@ -242,6 +244,89 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   /** 正文容器：抽屉高度不能超过它的实际高度 */
   const sourcesContainerRef = useRef<HTMLDivElement | null>(null)
+  /** 回答正文滚动容器：搜索命中时滚动到命中位置附近 */
+  const answerScrollRef = useRef<HTMLDivElement | null>(null)
+  /** 搜索跳转请求：命中正文时把卡片内部滚到命中位置 */
+  const focusRequest = useGraphStore((state) => state.focusRequest)
+
+  // 命中正文时按字符位置估算滚动比例，把高亮内容滚到可视区中间
+  useEffect(() => {
+    const request = focusRequest
+    if (!request || request.nodeId !== node.id || request.field !== 'answer') return
+    const container = answerScrollRef.current
+    const term = request.query.trim().toLowerCase()
+    if (!container || !term) return
+    const index = node.answer.toLowerCase().indexOf(term)
+    if (index < 0) return
+    const ratio = index / Math.max(1, node.answer.length)
+    container.scrollTop = Math.max(0, ratio * container.scrollHeight - container.clientHeight / 2)
+  }, [focusRequest, node.id, node.answer])
+
+  /** 搜索命中后的高亮：关键词与请求 nonce，用来重播闪烁动画 */
+  const [flash, setFlash] = useState<{ term: string; nonce: number } | null>(null)
+  /** 高亮渲染后的滚动帧句柄 */
+  const flashScrollRef = useRef<number | null>(null)
+  /** 只闪烁模式下的收尾定时器（闪烁 5 次共 3.5 秒，留一点余量） */
+  const flashTimerRef = useRef<number | null>(null)
+
+  // 一次只保留目标卡片的高亮：命中本卡片时闪烁并保持高亮，其它卡片清除
+  useEffect(() => {
+    const request = focusRequest
+    if (!request) return
+    const term = request.query.trim()
+    if (!term) return
+    if (request.nodeId !== node.id) {
+      setFlash(null)
+      return
+    }
+    setFlash({ term, nonce: request.nonce })
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = null
+    // 侧边栏搜索只闪烁一次：结束后移除高亮，恢复普通文本
+    if (request.flashOnly) {
+      flashTimerRef.current = window.setTimeout(() => {
+        flashTimerRef.current = null
+        setFlash(null)
+      }, 3600)
+    }
+
+    // 等高亮渲染后把命中词滚到正文可视区中间；按容器自身屏幕比例折算，画布缩放不影响
+    let frames = 0
+    const scrollToMark = () => {
+      const container = answerScrollRef.current
+      const mark = container?.querySelector<HTMLElement>('mark.search-flash')
+      if (!container || !mark) {
+        if (frames < 12) {
+          frames += 1
+          flashScrollRef.current = window.requestAnimationFrame(scrollToMark)
+        }
+        return
+      }
+      const containerRect = container.getBoundingClientRect()
+      const markRect = mark.getBoundingClientRect()
+      const scale = container.clientHeight / Math.max(1, containerRect.height)
+      const offset = (markRect.top - containerRect.top) * scale
+      container.scrollTop += offset - container.clientHeight / 2 + (markRect.height * scale) / 2
+    }
+    if (flashScrollRef.current !== null) window.cancelAnimationFrame(flashScrollRef.current)
+    flashScrollRef.current = window.requestAnimationFrame(scrollToMark)
+  }, [focusRequest, node.id])
+
+  // 卸载时清理滚动帧与收尾定时器
+  useEffect(
+    () => () => {
+      if (flashScrollRef.current !== null) window.cancelAnimationFrame(flashScrollRef.current)
+      if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    },
+    [],
+  )
+
+  /** 正文 Markdown 插件：命中时追加关键词高亮 */
+  const remarkPlugins = useMemo(
+    () =>
+      flash ? [remarkGfm, remarkMath, remarkSearchFlash(flash.term)] : [remarkGfm, remarkMath],
+    [flash],
+  )
 
   // 抽屉展开时统一走 Escape 栈，多浮层叠加时总是先关闭最后打开的那个
   useEscapeHandler(sourcesOpen, () => setSourcesOpen(false))
@@ -539,6 +624,7 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
             autoFocus
             value={titleDraft}
             onChange={(event) => setTitleDraft(event.target.value)}
+            data-search-field="title"
             onBlur={() => commitTitle()}
             onPointerDown={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
@@ -558,10 +644,19 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           <h3
             onPointerDown={handleTitlePointerDown}
             onPointerUp={handleTitlePointerUp}
+            data-search-field="title"
             className="line-clamp-2 min-w-0 flex-1 cursor-grab break-words font-semibold leading-snug text-accent active:cursor-grabbing"
             style={{ fontSize: 'calc(var(--card-font-size) + 2px)' }}
           >
-            {node.question || <span className="text-muted">请输入你的元问题</span>}
+            {node.question ? (
+              flash ? (
+                <span key={flash.nonce}>{highlightText(node.question, flash.term, 'search-flash')}</span>
+              ) : (
+                node.question
+              )
+            ) : (
+              <span className="text-muted">请输入你的元问题</span>
+            )}
           </h3>
         )}
         <div className="flex shrink-0 items-center gap-1">
@@ -733,11 +828,20 @@ function CardNodeInner({ data, dragging }: NodeProps<CardFlowNode>) {
           <div ref={sourcesContainerRef} className="relative mt-3 min-h-0 flex-1">
             {/* 正文占据剩余高度，内容超出后内部滚动，绝不撑开卡片；
                 容器留白可拖动卡片，正文本身标了 nodrag 以支持选字 */}
-            <div className={`${answerScrollClass} h-full min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable]`}>
+            <div
+              ref={answerScrollRef}
+              data-search-field="answer"
+              className={`${answerScrollClass} h-full min-h-0 overflow-y-auto pr-1 [scrollbar-gutter:stable]`}
+            >
               {node.answer ? (
-                <div className={MARKDOWN_CLASS} style={{ fontSize: 'var(--card-font-size)' }}>
+                // key 跟随命中请求：重复点击同一条结果时重播闪烁动画
+                <div
+                  key={flash?.nonce ?? 'idle'}
+                  className={MARKDOWN_CLASS}
+                  style={{ fontSize: 'var(--card-font-size)' }}
+                >
                   <Markdown
-                    remarkPlugins={[remarkGfm, remarkMath]}
+                    remarkPlugins={remarkPlugins}
                     rehypePlugins={[rehypeKatex]}
                     components={{
                       // 引用角标：把 #source-n 渲染成可点击的小徽标

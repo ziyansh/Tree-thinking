@@ -1,9 +1,21 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronsLeft, ChevronsRight, Download, LogOut, Pencil, Plus, Settings, Trash2 } from 'lucide-react'
+import {
+  ChevronsLeft,
+  ChevronsRight,
+  Download,
+  LogOut,
+  Pencil,
+  Plus,
+  Search,
+  Settings,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { api } from '../api/client'
 import { useGraphStore } from '../store/graphStore'
-import type { AuthSession, ProjectDTO } from '../api/types'
+import { highlightText } from '../lib/highlight'
+import type { AuthSession, ProjectDTO, SearchHit } from '../api/types'
 
 /** 展开/收起后的固定宽度；切换宽度不做动画，避免画布内容出现大幅位移 */
 const EXPANDED_WIDTH = 240
@@ -29,6 +41,13 @@ function fileStamp(date: Date): string {
     pad(date.getHours()),
     pad(date.getMinutes()),
   ].join('')
+}
+
+/** 搜索结果标签：区分画布名、卡片标题与正文 */
+function hitLabel(hit: SearchHit): string {
+  if (hit.field === 'project') return '画布'
+  if (hit.field === 'title') return hit.nodeType === 'note' ? '笔记标题' : '卡片标题'
+  return hit.nodeType === 'note' ? '笔记正文' : '回答'
 }
 
 interface IconButtonProps {
@@ -86,6 +105,91 @@ export function Sidebar({
   const [draftName, setDraftName] = useState('')
   /** Esc 取消重命名时置位，避免随后的 blur 事件把草稿提交上去 */
   const skipCommitRef = useRef(false)
+
+  // 全局搜索：跨画布搜索画布名、卡片标题与正文
+  const requestFocus = useGraphStore((state) => state.requestFocus)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchError, setSearchError] = useState('')
+  const [searchTruncated, setSearchTruncated] = useState(false)
+  const searchInputRef = useRef<HTMLTextAreaElement | null>(null)
+
+  // 关键词变化后防抖请求；server 模式下后端只会返回当前用户自己的画布
+  useEffect(() => {
+    const term = searchQuery.trim()
+    if (!term) {
+      setSearchHits([])
+      setSearchTruncated(false)
+      setSearchError('')
+      setSearchLoading(false)
+      return
+    }
+    let alive = true
+    const timer = window.setTimeout(() => {
+      setSearchLoading(true)
+      void api
+        .search(term)
+        .then((result) => {
+          if (!alive) return
+          setSearchHits(result.items)
+          setSearchTruncated(result.truncated)
+          setSearchError('')
+        })
+        .catch((err: unknown) => {
+          if (!alive) return
+          setSearchHits([])
+          setSearchError(err instanceof Error ? err.message : '搜索失败，请稍后重试')
+        })
+        .finally(() => {
+          if (alive) setSearchLoading(false)
+        })
+    }, 250)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [searchQuery])
+
+  /** 输入框随换行内容自动增高，避免长关键词被截断 */
+  const handleSearchInput = (value: string) => {
+    setSearchQuery(value)
+    const input = searchInputRef.current
+    if (!input) return
+    input.style.height = 'auto'
+    input.style.height = `${input.scrollHeight}px`
+  }
+
+  /** 清空搜索并收起结果浮层 */
+  const clearSearch = () => {
+    setSearchQuery('')
+    const input = searchInputRef.current
+    if (input) input.style.height = 'auto'
+  }
+
+  /** 点击结果：先切换到所属画布，再移动镜头、适配缩放到合适大小并高亮闪烁命中内容 */
+  const pickHit = async (hit: SearchHit) => {
+    const term = searchQuery.trim()
+    const state = useGraphStore.getState()
+    if (hit.projectId !== state.currentProjectId) {
+      try {
+        await state.openProject(hit.projectId)
+      } catch (err) {
+        console.warn('切换画布失败', err)
+        return
+      }
+    }
+    if (hit.nodeId) {
+      // 侧边栏搜索只做一次性闪烁提示，结束后恢复普通文本
+      requestFocus(hit.nodeId, {
+        field: hit.field,
+        query: term,
+        zoom: 'fit',
+        flashOnly: true,
+      })
+    }
+    clearSearch()
+  }
 
   const startRename = (project: ProjectDTO) => {
     skipCommitRef.current = false
@@ -168,6 +272,79 @@ export function Sidebar({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="px-3 pb-2 pt-3">
+            {/* 全局搜索：结果浮层覆盖画布列表，避免搜索时列表跳动 */}
+            <div className="relative mb-3">
+              <div className="glass-surface flex items-start gap-2 rounded-lg border border-subtle px-2 py-1.5">
+                <Search size={13} className="mt-0.5 shrink-0 text-muted" />
+                <textarea
+                  ref={searchInputRef}
+                  rows={1}
+                  value={searchQuery}
+                  placeholder="搜索所有画布…"
+                  spellCheck={false}
+                  onChange={(event) => handleSearchInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      if (searchHits.length > 0) void pickHit(searchHits[0])
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault()
+                      clearSearch()
+                    }
+                  }}
+                  className="max-h-24 min-h-[18px] w-full resize-none overflow-y-auto bg-transparent text-[12px] leading-[1.5] text-ink outline-none placeholder:text-muted"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    title="清空搜索"
+                    aria-label="清空搜索"
+                    onClick={clearSearch}
+                    className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-ghost-border hover:text-ink"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {searchQuery.trim() && (
+                <div className="glass-surface absolute left-0 right-0 top-full z-30 mt-1 max-h-[55vh] overflow-y-auto rounded-lg border border-subtle shadow-[0_12px_32px_rgba(0,0,0,0.24)]">
+                  <div className="flex items-center justify-between border-b border-subtle px-2 py-1 text-[11px] text-muted">
+                    <span>
+                      {searchLoading
+                        ? '搜索中…'
+                        : `${searchHits.length} 条结果${searchTruncated ? '（已截断）' : ''}`}
+                    </span>
+                    <span>Esc 清空</span>
+                  </div>
+                  {searchError ? (
+                    <p className="px-2 py-2 text-[12px] text-danger">{searchError}</p>
+                  ) : null}
+                  {!searchError && !searchLoading && searchHits.length === 0 ? (
+                    <p className="px-2 py-2 text-[12px] text-muted">没有匹配的内容。</p>
+                  ) : null}
+                  {searchHits.map((hit) => (
+                    <button
+                      key={`${hit.projectId}-${hit.nodeId ?? 'project'}-${hit.field}`}
+                      type="button"
+                      onClick={() => void pickHit(hit)}
+                      className="flex w-full flex-col gap-1 border-b border-subtle px-2 py-1.5 text-left transition-colors duration-150 last:border-b-0 hover:bg-ghost-border"
+                    >
+                      <span className="flex items-center gap-1.5 text-[11px] text-muted">
+                        <span className="shrink-0 rounded bg-elevated px-1 py-0.5">
+                          {hitLabel(hit)}
+                        </span>
+                        <span className="truncate">{hit.projectName}</span>
+                      </span>
+                      <span className="line-clamp-2 break-words text-[12px] leading-[1.6] text-body">
+                        {highlightText(hit.snippet, searchQuery.trim())}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <span className="text-[13px] text-muted">画布</span>
             <button
               type="button"

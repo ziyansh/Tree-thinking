@@ -14,6 +14,7 @@ import type {
   NodeDTO,
   NoteLinkDTO,
   ProjectDTO,
+  SearchResponse,
   SettingsDTO,
   SettingsPatch,
   SourceDTO,
@@ -143,6 +144,8 @@ export interface ApiClient {
   logout(): Promise<void>
   /** 注册前检查用户名格式与是否已被占用 */
   checkUsername(username: string): Promise<UsernameCheck>
+  /** 搜索卡片文本：传 projectId 只搜该画布，不传搜索全部画布 */
+  search(query: string, projectId?: string): Promise<SearchResponse>
   /** 导出画布为 JSON 文件（Blob），供浏览器下载 */
   exportProject(id: string): Promise<Blob>
   /** 导入画布文件，返回新建画布与根节点 id */
@@ -241,6 +244,13 @@ const realApi: ApiClient = {
   // 公开只读接口：失焦时检查用户名，最终仍由注册接口兜底校验
   checkUsername: (username) =>
     request<UsernameCheck>(`/auth/check-username?username=${encodeURIComponent(username)}`),
+
+  // 服务器模式下后端按账号过滤，前端不传任何用户标识
+  search: (query, projectId) => {
+    const params = new URLSearchParams({ q: query })
+    if (projectId) params.set('project_id', projectId)
+    return request<SearchResponse>(`/search?${params.toString()}`)
+  },
 
   exportProject: downloadProjectFile,
 

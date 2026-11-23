@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.3.13** | [中文说明](readme.md)
+> Current version: **0.3.14** | [中文说明](readme.md)
 >
 > **WIP**: this project is still under active development; features and UI may change at any time and do not represent final quality.
 >
@@ -16,6 +16,7 @@ Turn linear chat into an endlessly expanding tree of thought: every Q&A pair is 
 - **Thinking and web search stay inside the card**: reasoning is folded into the card and expands when needed; with web search on, answers list their sources at the bottom-left and open a source drawer from the card.
 - **Local or online, one codebase**: local mode is single-user with no login by default; server mode adds multi-account registration and keeps canvases, attachments, settings, and keys isolated per account.
 - **Daily work stays on the canvas**: drag, zoom, pin, multi-select, undo, autosave, and export/import all happen in place, and card layering follows the focus automatically.
+- **Search is always at hand**: `Ctrl+F` searches card titles and bodies within the current canvas, while the search box at the top of the sidebar searches across every canvas; a single click aims the camera at the matched keyword and flashes a highlight in the card, and sidebar jumps also fit a suitable zoom. The in-canvas panel can be resized and remembers its size.
 
 See [docs/features_en.md](docs/features_en.md) for the complete feature and behavior reference.
 
@@ -153,7 +154,8 @@ See the [server deployment guide](docs/deploy_en.md) for environment variables, 
 5. **Manage canvases**: create, switch, rename, and delete canvases from the left sidebar.
 6. **Take notes**: double-click empty space to create a note; double-click its title or body to edit; drag its edges to resize.
 7. **Adjust settings**: the gear at the bottom-left opens Model service / Canvas / Appearance tabs, and changes apply immediately.
-8. **Undo, save, delete**: `Ctrl+Z` undoes, `Ctrl+S` saves, and `Delete` removes selected cards (the root question card excluded).
+8. **Search**: `Ctrl+F` searches card titles and bodies within the current canvas; the sidebar search box searches all canvases. A single click aims the camera at the matched keyword: in-canvas search keeps the highlight after flashing, while sidebar search only flashes and then returns the text to normal; sidebar jumps switch the canvas first and then fit the zoom. Only a quick double-click on the same in-canvas result zooms to 100%.
+9. **Undo, save, delete**: `Ctrl+Z` undoes, `Ctrl+S` saves, and `Delete` removes selected cards (the root question card excluded).
 
 More details are in [docs/features_en.md](docs/features_en.md).
 
@@ -212,7 +214,7 @@ Tree_thinking/
 │  ├─ app/
 │  │  ├─ main.py              # FastAPI entry point
 │  │  ├─ db.py, models.py, schemas.py, config.py
-│  │  ├─ api/                 # auth / projects / nodes / links / attachments / models / settings
+│  │  ├─ api/                 # auth / projects / nodes / links / attachments / models / settings / search
 │  │  └─ services/            # auth / llm / context / attachments / citations / suggestions / search / naming / settings / graph / urls
 │  └─ tests/                  # pytest unit and API tests
 └─ frontend/
@@ -239,6 +241,14 @@ You may use, modify, and distribute the project, including commercially, provide
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.3.14 — 2026-11-23
+- Added: in-canvas search. `Ctrl/Cmd + F` opens a frosted search panel at the top of the canvas, scoped to the current canvas's card titles and bodies (including notes); results show matching snippets with highlighted keywords, the input grows with its content, and the panel can be resized from its bottom-right corner with the size stored locally.
+- Added: a global search box at the top of the sidebar that searches canvas names, card titles, and bodies across all canvases; the result popover spans the sidebar width and labels the owning canvas and field type.
+- Added: backend `GET /api/search` (`q` plus optional `project_id`) with case-insensitive substring matching and snippets around each hit, capped at 60 items per request; in server mode it only searches the signed-in user's canvases, and in-canvas search additionally narrows to the open canvas.
+- Added: focus behavior after clicking a result. The camera aims at the matched keyword inside the card: in-canvas search keeps the current zoom on a single click and only restores the zoom to 100% when the same result is clicked again quickly (within the configured double-click interval), while sidebar search switches the canvas, moves the camera, and fits a suitable zoom to the viewport.
+- Added: matched content is highlighted and smoothly flashes inside the card (ease-in-out fade, 0.7s per pulse, five pulses; titles, answers, and note bodies are supported while code blocks and math are left untouched). In-canvas search keeps the highlight after flashing, sidebar search flashes only and then returns the text to normal, and jumping to a new result clears the previous highlight.
+- Version: bumped to 0.3.14.
 
 ### 0.3.13 — 2026-11-22
 - Improved: pasting or typing a URL in any question input (root question, custom direction, branch input, prompt drawer) now moves the link out of the text into a numbered chip, so the box keeps only the body text; on submit the links are appended to the end of the question in chip order. Clicking a chip opens it in a new tab, double-clicking edits it inline (Enter saves, Esc cancels), and removing a chip drops that link.

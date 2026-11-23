@@ -10,6 +10,8 @@ import type {
   NodeDTO,
   NoteLinkDTO,
   ProjectDTO,
+  SearchHit,
+  SearchResponse,
   SettingsDTO,
   SettingsPatch,
   SuggestionDTO,
@@ -408,6 +410,70 @@ export const mockApi: ApiClient = {
   async checkUsername() {
     // Mock 模式没有账号体系，统一返回不可用
     return { available: false, reason: 'Mock 模式为本地模式，无需注册' }
+  },
+
+  async search(query, projectId) {
+    await delay(80)
+    const term = (query ?? '').trim()
+    if (!term) return { query, items: [], truncated: false }
+    const db = getDb()
+    const projects = db.projects.filter((item) => !projectId || item.id === projectId)
+    const names = new Map(projects.map((item) => [item.id, item.name]))
+    const items: SearchHit[] = []
+
+    // 与后端一致：返回命中位置附近的单行片段，超长时以省略号收尾
+    const snippet = (text: string | null | undefined): string | null => {
+      if (!text) return null
+      const position = text.toLowerCase().indexOf(term.toLowerCase())
+      if (position < 0) return null
+      const start = Math.max(0, position - 48)
+      const end = Math.min(text.length, position + term.length + 48)
+      const body = text.slice(start, end).split(/\s+/).join(' ')
+      return `${start > 0 ? '…' : ''}${body}${end < text.length ? '…' : ''}`
+    }
+
+    for (const project of projects) {
+      const text = snippet(project.name)
+      if (text === null) continue
+      items.push({
+        projectId: project.id,
+        projectName: project.name,
+        nodeId: null,
+        nodeType: 'project',
+        field: 'project',
+        snippet: text,
+        updatedAt: project.updatedAt ?? '',
+      })
+    }
+
+    const nodes = db.nodes
+      .filter((node) => names.has(node.projectId))
+      .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
+    for (const node of nodes) {
+      const fields = [
+        ['title', node.question],
+        ['answer', node.answer],
+      ] as const
+      for (const [field, text] of fields) {
+        const body = snippet(text)
+        if (body === null) continue
+        items.push({
+          projectId: node.projectId,
+          projectName: names.get(node.projectId) ?? '',
+          nodeId: node.id,
+          nodeType: node.nodeType,
+          field,
+          snippet: body,
+          updatedAt: node.updatedAt ?? '',
+        })
+      }
+    }
+
+    return {
+      query,
+      items: items.slice(0, 60),
+      truncated: items.length > 60,
+    } satisfies SearchResponse
   },
 
   async exportProject(id) {

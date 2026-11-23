@@ -19,6 +19,7 @@ import type { Edge, Node } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Brain, Globe, LayoutGrid, Maximize, Minus, Plus } from 'lucide-react'
 import { CardNode } from './CardNode'
+import { CanvasSearch } from './CanvasSearch'
 import { NoteNode } from './NoteNode'
 import { BranchInputNode } from './BranchInputNode'
 import { GhostInputNode } from './GhostInputNode'
@@ -289,13 +290,15 @@ function CanvasInner() {
   const clearSelection = useGraphStore((state) => state.clearSelection)
   const deleteSelected = useGraphStore((state) => state.deleteSelected)
   const selectedNodeIds = useGraphStore((state) => state.selectedNodeIds)
+  const focusRequest = useGraphStore((state) => state.focusRequest)
   const savePosition = useGraphStore((state) => state.savePosition)
   const createNoteAt = useGraphStore((state) => state.createNoteAt)
   const importProjectFile = useGraphStore((state) => state.importProjectFile)
   const updatePreferences = useGraphStore((state) => state.updatePreferences)
   const dotColor = useDotColor()
 
-  const { fitView, setViewport, getViewport, screenToFlowPosition } = useReactFlow()
+  const { fitView, setViewport, getViewport, screenToFlowPosition, setCenter, getNode } =
+    useReactFlow()
   const fittedProjectRef = useRef<string | null>(null)
   const viewportTimerRef = useRef<number | null>(null)
   /** 空格是否按下：由全局 spaceKey 提供，卡片内滚动也共用同一状态 */
@@ -304,6 +307,8 @@ function CanvasInner() {
   const trackpadEnabled = preferences.pointerMode === 'trackpad'
   /** 是否正在自定义平移：用于切换抓取光标 */
   const [isPanning, setIsPanning] = useState(false)
+  /** 画布内搜索面板是否打开 */
+  const [searchOpen, setSearchOpen] = useState(false)
   /** 拖入画布文件时的强调色提示 */
   const [dragActive, setDragActive] = useState(false)
   /** 自动整理插值中：给节点加合成层提示，减少逐帧重绘 */
@@ -391,6 +396,113 @@ function CanvasInner() {
     () => window.matchMedia('(prefers-reduced-motion: reduce)').matches,
     [],
   )
+
+  // Ctrl/Cmd+F：打开画布内搜索；设置等模态浮层打开时保留浏览器原生查找
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey)) return
+      if (event.key.toLowerCase() !== 'f') return
+      if (document.querySelector('[data-modal-open="true"]')) return
+      event.preventDefault()
+      setSearchOpen(true)
+      // 面板已打开时再次按快捷键：重新聚焦并全选关键词
+      const input = document.querySelector<HTMLTextAreaElement>(
+        '[data-search-panel="canvas"] textarea',
+      )
+      input?.focus()
+      input?.select()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // 搜索命中跳转：镜头对准命中字段；单击只平移（保持当前缩放），双击恢复可读缩放
+  useEffect(() => {
+    if (!focusRequest) return
+    const storeNode = useGraphStore
+      .getState()
+      .nodes.find((item) => item.id === focusRequest.nodeId)
+    if (!storeNode) return
+
+    let frame = 0
+    let raf = 0
+    const move = () => {
+      const viewport = getViewport()
+      const measured = getNode(focusRequest.nodeId)?.measured
+      const width = measured?.width ?? storeNode.data.node.width ?? cardSize.width
+      const height = measured?.height ?? storeNode.data.node.height ?? cardSize.height
+
+      // 缩放策略：keep 保持、reset 至少 100%、fit 让整张卡片落在视口 82% 内
+      let zoom = viewport.zoom
+      if (focusRequest.zoom === 'reset') {
+        zoom = Math.max(viewport.zoom, 1)
+      } else if (focusRequest.zoom === 'fit') {
+        const element = containerRef.current
+        const viewWidth = element?.clientWidth ?? window.innerWidth
+        const viewHeight = element?.clientHeight ?? window.innerHeight
+        const fit = Math.min((viewWidth * 0.82) / width, (viewHeight * 0.82) / height, 1)
+        zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, fit))
+      }
+
+      // 优先对准卡片内正在闪烁的关键词本身，让高亮内容落在镜头中央
+      const nodeElement = document.querySelector(
+        `.react-flow__node[data-id="${focusRequest.nodeId}"]`,
+      )
+      const markElement = nodeElement?.querySelector<HTMLElement>('mark.search-flash')
+      // 高亮由子组件挂载：命中词还没渲染时等几帧再测量，避免用旧位置定位
+      if (nodeElement && !markElement && focusRequest.query.trim() && frame < 12) {
+        frame += 1
+        raf = window.requestAnimationFrame(move)
+        return
+      }
+      const markRect = markElement?.getBoundingClientRect()
+      if (markRect && markRect.width > 0 && markRect.height > 0) {
+        const center = screenToFlowPosition({
+          x: markRect.left + markRect.width / 2,
+          y: markRect.top + markRect.height / 2,
+        })
+        void setCenter(center.x, center.y, { zoom, duration: 300 })
+        return
+      }
+
+      // 没有可用的高亮（如命中画布名）时退回命中字段容器
+      const fieldElement = nodeElement?.querySelector<HTMLElement>(
+        `[data-search-field="${focusRequest.field}"]`,
+      )
+      const rect = fieldElement?.getBoundingClientRect()
+      if (rect && rect.width > 0 && rect.height > 0) {
+        const center = screenToFlowPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+        })
+        void setCenter(center.x, center.y, { zoom, duration: 300 })
+        return
+      }
+
+      // 跨画布跳转时节点可能还没挂载：等待几帧再测量，仍找不到就退回卡片中心
+      if (!nodeElement && frame < 12) {
+        frame += 1
+        raf = window.requestAnimationFrame(move)
+        return
+      }
+      void setCenter(
+        storeNode.data.node.x + width / 2,
+        storeNode.data.node.y + height / 2,
+        { zoom, duration: 300 },
+      )
+    }
+
+    raf = window.requestAnimationFrame(move)
+    return () => window.cancelAnimationFrame(raf)
+  }, [
+    focusRequest,
+    cardSize.width,
+    cardSize.height,
+    getNode,
+    getViewport,
+    screenToFlowPosition,
+    setCenter,
+  ])
 
   /** 记录连接线 hover：Delete 时只删除当前悬停的那条连线 */
   const handleNoteLinkHover = useCallback((linkId: string | null) => {
@@ -1825,6 +1937,8 @@ function CanvasInner() {
     fittedProjectRef.current = currentProjectId
 
     const timer = window.setTimeout(() => {
+      // 搜索跳转刚切换了画布：优先定位目标卡片，跳过旧视口恢复
+      if (useGraphStore.getState().focusRequest) return
       const viewport = project?.viewport
       if (viewport) {
         void setViewport(viewport, { duration: 0 })
@@ -2095,6 +2209,15 @@ function CanvasInner() {
                 取消选择
               </button>
             </div>
+          </Panel>
+        )}
+        {/* 画布内搜索：Ctrl/Cmd+F 打开，搜索范围仅当前画布 */}
+        {searchOpen && (
+          <Panel
+            position="top-center"
+            className={['nodrag nopan', selectedNodeIds.length > 1 ? '!mt-14' : ''].join(' ')}
+          >
+            <CanvasSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
           </Panel>
         )}
         <Panel position="bottom-right">

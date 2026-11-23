@@ -115,6 +115,27 @@ export interface GraphDTO {
   links: NoteLinkDTO[]
 }
 
+/** 搜索结果：nodeId 为空表示命中的是画布名称 */
+export interface SearchHit {
+  projectId: string
+  projectName: string
+  nodeId: string | null
+  /** project 表示画布名称命中 */
+  nodeType: 'chat' | 'note' | 'project'
+  /** project 画布名 / title 卡片标题 / answer 回答或笔记正文 */
+  field: 'project' | 'title' | 'answer'
+  /** 命中位置附近的单行片段，超长时以省略号收尾 */
+  snippet: string
+  updatedAt: string
+}
+
+export interface SearchResponse {
+  query: string
+  items: SearchHit[]
+  /** 结果超过上限被截断 */
+  truncated: boolean
+}
+
 /** 创建子节点的入参 */
 export interface NodeCreateInput {
   parentId: string

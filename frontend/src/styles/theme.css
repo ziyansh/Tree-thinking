@@ -425,6 +425,33 @@ button:not(:disabled):active {
   animation: toast-out 160ms var(--motion-ease-in) both;
 }
 
+/* 搜索命中高亮：点击搜索结果后卡片内命中词短暂闪烁提示位置，
+   每次明暗切换用 ease-in-out 做极短的淡入淡出，闪烁结束后保持高亮底色 */
+@keyframes search-flash {
+  0%,
+  100% {
+    background-color: var(--accent-dim);
+  }
+  50% {
+    background-color: hsl(var(--theme-hue) 62% var(--accent-lightness) / 0.5);
+  }
+}
+
+.search-flash {
+  border-radius: 2px;
+  padding: 0 2px;
+  color: var(--accent);
+  background-color: var(--accent-dim);
+  animation: search-flash 700ms ease-in-out 5;
+}
+
+/* 系统减少动效：保留高亮底色，只去掉闪烁 */
+@media (prefers-reduced-motion: reduce) {
+  .search-flash {
+    animation: none;
+  }
+}
+
 /* 设置选项卡切换：内容轻微淡入，不做横向位移 */
 @keyframes tab-in {
   from {

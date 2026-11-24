@@ -42,17 +42,17 @@ function GhostNodeInner({
     <div
       onClick={() => void handleClick()}
       className={[
-        'group glass-surface relative flex min-h-[44px] w-max min-w-[280px] max-w-[420px] cursor-pointer items-center gap-1.5 rounded-lg border border-ghost-border px-2.5 py-2',
+        'group glass-surface relative flex min-h-[calc(44px*var(--card-font-scale))] w-max min-w-[calc(280px*var(--card-font-scale))] max-w-[calc(420px*var(--card-font-scale))] cursor-pointer items-center gap-[calc(6px*var(--card-font-scale))] rounded-lg border border-ghost-border px-[calc(10px*var(--card-font-scale))] py-[calc(8px*var(--card-font-scale))]',
         'transition-colors duration-150 hover:border-accent',
         pending ? 'pointer-events-none opacity-60' : '',
       ].join(' ')}
     >
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
-      <span className="shrink-0 text-[10px] leading-none text-muted/70">猜你想问</span>
-      <p className="min-w-0 flex-1 whitespace-normal break-words text-[13px] leading-[1.45] text-muted transition-colors duration-150 group-hover:text-ink">
+      <span className="shrink-0 card-scale-10 leading-none text-muted/70">猜你想问</span>
+      <p className="min-w-0 flex-1 whitespace-normal break-words card-scale-13 leading-[1.45] text-muted transition-colors duration-150 group-hover:text-ink">
         {data.text}
       </p>
-      <ChevronRight size={12} className="shrink-0 text-muted/70" />
+      <ChevronRight size={12} className="card-scale-icon-sm shrink-0 text-muted/70" />
     </div>
   )
 }

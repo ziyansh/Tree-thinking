@@ -28,7 +28,7 @@ export type BranchInputFlowNode = Node<BranchInputNodeData, 'branch-input'>
 /** ghost 节点的联合类型（建议箭头 + 输入箭头） */
 export type GhostFlowNode = SuggestionGhostNode | InputGhostNode
 
-/** ghost 卡片预留宽度（布局与边线避让共用），与 GhostNode 的最大宽度保持一致 */
+/** ghost 卡片预留宽度（14px 字号基准，布局与边线避让共用），与 GhostNode 的最大宽度保持一致 */
 export const GHOST_WIDTH = 420
 
 /** ghost 卡片之间的纵向间距 */
@@ -44,11 +44,11 @@ export const GHOST_INPUT_OPEN_HEIGHT = 120
 const BRANCH_INPUT_GAP = 170
 
 /**
- * 估算候选方向 ghost 的实际高度：每行约 26 个字符、行高 20px、上下内边距 12px，最小 44px。
- * 与 GhostNode 的 whitespace-normal 换行规则保持一致，避免多行文本互相覆盖。
+ * 估算候选方向 ghost 的实际高度：每行约 26 个字符、行高 20px、上下内边距 12px，最小 44px，
+ * 再乘以字号缩放比例；与 GhostNode 的尺寸规则保持一致，避免多行文本互相覆盖。
  */
-export function suggestionGhostHeight(text: string): number {
-  return Math.max(44, Math.ceil(text.length / 26) * 20 + 12)
+export function suggestionGhostHeight(text: string, fontScale = 1): number {
+  return Math.max(44, Math.ceil(text.length / 26) * 20 + 12) * fontScale
 }
 
 /** 每张卡片已挂载的子卡片数量与已消费的候选方向，渲染与布局共用同一份统计 */
@@ -103,14 +103,15 @@ export function ghostGroupHeight(
   node: GraphFlowNode['data']['node'],
   hasChildren: boolean,
   usedSuggestions: Set<string>,
+  fontScale = 1,
 ): number {
   let height = 0
   for (const suggestion of pendingSuggestions(node, usedSuggestions)) {
-    height += suggestionGhostHeight(suggestion.text) + GHOST_GAP
+    height += suggestionGhostHeight(suggestion.text, fontScale) + GHOST_GAP
   }
   const showSuggestions = !node.suggestionsConsumed && node.suggestions.length > 0
   const open = !hasChildren && !showSuggestions
-  return height + (open ? GHOST_INPUT_OPEN_HEIGHT : GHOST_INPUT_HEIGHT) + GHOST_GAP
+  return height + (open ? GHOST_INPUT_OPEN_HEIGHT : GHOST_INPUT_HEIGHT) * fontScale + GHOST_GAP
 }
 
 /**
@@ -125,6 +126,7 @@ export function buildGhostNodes(
   cardSize: { width: number; height: number },
   cardGap: number,
   getGhostDraft: (parentId: string) => string = () => '',
+  fontScale = 1,
 ): GhostFlowNode[] {
   /** 已被创建成子卡片的建议与每个父卡片的子卡片数量：与布局共用同一份统计 */
   const { childCount, usedSuggestions } = collectGhostUsage(cards)
@@ -157,7 +159,7 @@ export function buildGhostNodes(
           deletable: false,
           connectable: false,
         })
-        offset += suggestionGhostHeight(suggestion.text) + GHOST_GAP
+        offset += suggestionGhostHeight(suggestion.text, fontScale) + GHOST_GAP
       }
     }
 

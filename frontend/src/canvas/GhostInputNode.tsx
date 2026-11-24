@@ -184,8 +184,8 @@ function GhostInputNodeInner({
       className={[
         'glass-surface relative flex rounded-lg border transition-[width,min-height,border-color,background-color] duration-200 ease-out',
         focused
-          ? 'min-h-[120px] w-[460px] flex-col gap-1.5 p-2.5'
-          : 'min-h-[44px] w-[280px] items-center gap-1.5 px-2.5 py-1',
+          ? 'min-h-[calc(120px*var(--card-font-scale))] w-[calc(460px*var(--card-font-scale))] flex-col gap-1.5 p-[calc(10px*var(--card-font-scale))]'
+          : 'min-h-[calc(44px*var(--card-font-scale))] w-[calc(280px*var(--card-font-scale))] items-center gap-[calc(6px*var(--card-font-scale))] px-[calc(10px*var(--card-font-scale))] py-[calc(4px*var(--card-font-scale))]',
         dropZone.dragOver
           ? 'border-accent bg-accent-dim'
           : focused
@@ -213,7 +213,7 @@ function GhostInputNodeInner({
             }}
             placeholder="输入问题，继续你的思考方向"
             className={[
-              'nodrag selectable-text min-h-[60px] w-full resize-none bg-transparent leading-[1.65] text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
+              'nodrag selectable-text min-h-[calc(60px*var(--card-font-scale))] w-full resize-none bg-transparent leading-[1.65] text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
               spacePressed ? '' : 'nowheel',
             ].join(' ')}
             style={{ fontSize: 'var(--card-font-size)' }}
@@ -312,7 +312,7 @@ function GhostInputNodeInner({
             }}
             placeholder="输入问题，继续你的思考方向"
             className={[
-              'nodrag h-5 min-w-0 flex-1 resize-none bg-transparent leading-5 text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
+              'nodrag h-[calc(20px*var(--card-font-scale))] min-w-0 flex-1 resize-none bg-transparent leading-[calc(20px*var(--card-font-scale))] text-body outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60',
               spacePressed ? '' : 'nowheel',
             ].join(' ')}
             style={{ fontSize: 'var(--card-font-size)' }}

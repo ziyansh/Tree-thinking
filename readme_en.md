@@ -243,9 +243,11 @@ You may use, modify, and distribute the project, including commercially, provide
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
 
 ### 0.3.15 — 2026-11-24
+- Added: a GitHub button in the bottom-left corner of the Settings dialog; clicking it opens this project's open-source repository at <https://github.com/ziyansh/Tree-thinking> in a new tab.
+- Added: a compatibility notice when accessed from macOS or a mobile device, recommending Windows; in Linux local mode it reports that Linux local mode has not been tested. In server mode the notice appears after the "work in progress" notice and is shown once per browser.
+- Added: switches and copy for the startup notices are centralized in `frontend/src/lib/notices.ts`, so the work-in-progress notice and the compatibility notice can be enabled or disabled together.
 - Fixed: the font-size setting did not apply to the "You may want to ask" suggestion cards. Their label, text, chevron, and whole box now scale with the font-size ratio, matching the custom-direction input; the custom-direction box also scales its width, min-height, padding, and input line height in both collapsed and expanded states, so larger fonts are no longer cramped or clipped.
 - Fixed: suggestion stacking, ghost-group footprint, edge avoidance, and auto-layout now use the same font scale, so suggestion cards no longer overlap at larger font sizes.
-- Added: a GitHub button in the bottom-left corner of the Settings dialog; clicking it opens this project's open-source repository at <https://github.com/ziyansh/Tree-thinking> in a new tab.
 - Version: bumped to 0.3.15.
 
 ### 0.3.14 — 2026-11-23

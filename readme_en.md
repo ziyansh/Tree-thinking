@@ -1,6 +1,6 @@
 # Tree Thinking — Branching Chat Canvas
 
-> Current version: **0.3.14** | [中文说明](readme.md)
+> Current version: **0.3.15** | [中文说明](readme.md)
 >
 > **WIP**: this project is still under active development; features and UI may change at any time and do not represent final quality.
 >
@@ -241,6 +241,14 @@ You may use, modify, and distribute the project, including commercially, provide
 ## Changelog
 
 Versioning: each conversation iteration bumps one minor version (0.1.x) unless a specific target version is requested.
+
+### 0.3.15 — 2026-11-24
+- Added: a GitHub button in the bottom-left corner of the Settings dialog; clicking it opens this project's open-source repository at <https://github.com/ziyansh/Tree-thinking> in a new tab.
+- Added: a compatibility notice when accessed from macOS or a mobile device, recommending Windows; in Linux local mode it reports that Linux local mode has not been tested. In server mode the notice appears after the "work in progress" notice and is shown once per browser.
+- Added: switches and copy for the startup notices are centralized in `frontend/src/lib/notices.ts`, so the work-in-progress notice and the compatibility notice can be enabled or disabled together.
+- Fixed: the font-size setting did not apply to the "You may want to ask" suggestion cards. Their label, text, chevron, and whole box now scale with the font-size ratio, matching the custom-direction input; the custom-direction box also scales its width, min-height, padding, and input line height in both collapsed and expanded states, so larger fonts are no longer cramped or clipped.
+- Fixed: suggestion stacking, ghost-group footprint, edge avoidance, and auto-layout now use the same font scale, so suggestion cards no longer overlap at larger font sizes.
+- Version: bumped to 0.3.15.
 
 ### 0.3.14 — 2026-11-23
 - Added: in-canvas search. `Ctrl/Cmd + F` opens a frosted search panel at the top of the canvas, scoped to the current canvas's card titles and bodies (including notes); results show matching snippets with highlighted keywords, the input grows with its content, and the panel can be resized from its bottom-right corner with the size stored locally.

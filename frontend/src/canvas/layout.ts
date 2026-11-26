@@ -26,6 +26,7 @@ function collectRects(
   cards: GraphFlowNode[],
   size: { width: number; height: number },
   gap: number,
+  fontScale = 1,
 ): LayoutRect[] {
   const rects: LayoutRect[] = []
   // 子卡片数量与已消费建议与 ghosts.ts 共用同一份统计
@@ -51,8 +52,8 @@ function collectRects(
       kind: 'ghost',
       x: position.x + size.width + gap,
       y: position.y,
-      width: GHOST_WIDTH,
-      height: ghostGroupHeight(card.data.node, hasChildren, usedSuggestions),
+      width: GHOST_WIDTH * fontScale,
+      height: ghostGroupHeight(card.data.node, hasChildren, usedSuggestions, fontScale),
     })
   }
   return rects
@@ -76,6 +77,7 @@ export function newCardOverlapsGhost(
   size: { width: number; height: number },
   gap: number,
   newNodeId: string,
+  fontScale = 1,
 ): boolean {
   const newNode = cards.find((card) => card.id === newNodeId)
   if (!newNode) return false
@@ -102,8 +104,8 @@ export function newCardOverlapsGhost(
       kind: 'ghost',
       x: card.position.x + size.width + gap,
       y: card.position.y,
-      width: GHOST_WIDTH,
-      height: ghostGroupHeight(node, hasChildren, usedSuggestions),
+      width: GHOST_WIDTH * fontScale,
+      height: ghostGroupHeight(node, hasChildren, usedSuggestions, fontScale),
     }
     if (intersects(newRect, ghostRect)) return true
   }
@@ -146,11 +148,12 @@ function resolveOverlaps(
   cards: GraphFlowNode[],
   size: { width: number; height: number },
   gap: number,
+  fontScale = 1,
 ) {
   const laneStep = size.height + gap
 
   for (let pass = 0; pass < 300; pass += 1) {
-    const rects = collectRects(positions, cards, size, gap).sort(
+    const rects = collectRects(positions, cards, size, gap, fontScale).sort(
       (a, b) => a.y - b.y || a.x - b.x || a.id.localeCompare(b.id),
     )
 
@@ -250,10 +253,11 @@ export function computeAutoLayout(
   size: { width: number; height: number },
   connectionStyle: 'direct' | 'bus',
   gap: number,
+  fontScale = 1,
 ): LayoutPositions {
   const chatCards = chatCardsOf(cards)
   const positions = lanePositions(chatCards, size, connectionStyle, gap)
-  resolveOverlaps(positions, chatCards, size, gap)
+  resolveOverlaps(positions, chatCards, size, gap, fontScale)
   return positions
 }
 

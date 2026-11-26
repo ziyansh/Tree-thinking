@@ -3,10 +3,16 @@ import { api } from './api/client'
 import type { AuthSession, AuthUser } from './api/types'
 import { Canvas } from './canvas/Canvas'
 import { AuthPage } from './components/AuthPage'
+import { NoticeDialog } from './components/NoticeDialog'
 import { Sidebar } from './components/Sidebar'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Toast } from './components/Toast'
-import { WipNotice } from './components/WipNotice'
+import {
+  NOTICE_SWITCHES,
+  WIP_NOTICE,
+  detectCompatibilityNotice,
+  type NoticeContent,
+} from './lib/notices'
 import { useGraphStore } from './store/graphStore'
 
 /** 启动阶段：读取会话 → 登录页 / 画布 / 连接失败 */
@@ -28,6 +34,8 @@ function App() {
   const [phase, setPhase] = useState<Phase>('loading')
   // 服务器模式首次登录的开发中提示；按账号记录，同一浏览器只弹一次
   const [wipOpen, setWipOpen] = useState(false)
+  // 设备 / 运行模式的兼容性提示；按浏览器记录，关闭后不再提示
+  const [compatNotice, setCompatNotice] = useState<NoticeContent | null>(null)
   // 启动失败原因：无法确认运行模式时展示重试页，绝不回落到画布
   const [bootError, setBootError] = useState('')
   // StrictMode 会重复执行 effect，用 ref 保证一次挂载只读取一次会话
@@ -182,7 +190,7 @@ function App() {
 
   // 服务器模式登录后（含刷新恢复会话）检查该账号是否已看过开发中提示
   useEffect(() => {
-    if (session?.mode !== 'server' || !session.user) {
+    if (!NOTICE_SWITCHES.wip || session?.mode !== 'server' || !session.user) {
       setWipOpen(false)
       return
     }
@@ -206,6 +214,38 @@ function App() {
     }
     setWipOpen(false)
   }, [session])
+
+  // 登录后检查设备 / 运行模式的兼容性提示；同一浏览器只提示一次
+  useEffect(() => {
+    if (!NOTICE_SWITCHES.compatibility) {
+      setCompatNotice(null)
+      return
+    }
+    const notice = detectCompatibilityNotice(
+      session?.mode ?? 'local',
+      window.navigator.userAgent,
+    )
+    if (!notice) {
+      setCompatNotice(null)
+      return
+    }
+    try {
+      if (window.localStorage.getItem('tree-thinking:compatibility-notice') === '1') return
+    } catch {
+      // 隐私模式等禁用 localStorage 时仍提示一次，不影响主流程
+    }
+    setCompatNotice(notice)
+  }, [session])
+
+  /** 关闭兼容性提示，并在当前浏览器记录 */
+  const closeCompatNotice = useCallback(() => {
+    try {
+      window.localStorage.setItem('tree-thinking:compatibility-notice', '1')
+    } catch {
+      // 无法持久化时只关闭当前弹窗
+    }
+    setCompatNotice(null)
+  }, [])
 
   // 读取会话期间只显示居中加载态，避免闪现登录页
   if (phase === 'loading') {
@@ -254,7 +294,11 @@ function App() {
         <Canvas />
       </div>
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <WipNotice open={wipOpen} onClose={closeWipNotice} />
+      <NoticeDialog open={wipOpen} onClose={closeWipNotice} {...WIP_NOTICE} />
+      {compatNotice && (
+        // 开发中提示关闭后再展示，保证首次登录的提示顺序
+        <NoticeDialog open={!wipOpen} onClose={closeCompatNotice} {...compatNotice} />
+      )}
       <Toast message={toast} />
     </div>
   )

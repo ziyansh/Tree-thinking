@@ -21,6 +21,14 @@ export interface ThemePreferences {
 
 const DARK_QUERY = '(prefers-color-scheme: dark)'
 
+/** 卡片字号基准值（px），与 CSS 中 --card-font-scale 的基数一致 */
+const BASE_CARD_FONT_SIZE = 14
+
+/** 卡片字号对应的缩放比例，与 CSS 变量 --card-font-scale 保持一致 */
+export function cardFontScale(cardFontSize: number): number {
+  return (cardFontSize || BASE_CARD_FONT_SIZE) / BASE_CARD_FONT_SIZE
+}
+
 /** 把主题模式解析为实际生效的浅色 / 深色 */
 export function resolveTheme(mode: ThemeMode): ResolvedTheme {
   if (mode !== 'system') return mode
@@ -40,10 +48,7 @@ export function applyTheme(preferences: ThemePreferences): void {
   // 卡片正文字号：卡片内文字统一取该变量
   root.style.setProperty('--card-font-size', `${preferences.cardFontSize || 14}px`)
   // 卡片内固定尺寸元素（按钮、图标、小字）按同一比例缩放
-  root.style.setProperty(
-    '--card-font-scale',
-    String((preferences.cardFontSize || 14) / 14),
-  )
+  root.style.setProperty('--card-font-scale', String(cardFontScale(preferences.cardFontSize)))
 
   stopSystemWatch?.()
   stopSystemWatch = null

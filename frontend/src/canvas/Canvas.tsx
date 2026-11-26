@@ -37,7 +37,7 @@ import {
 import type { NoteLinkSourceKind, NoteLinkStartPayload } from './noteLink'
 import { NOTE_DEFAULT_HEIGHT, NOTE_DEFAULT_WIDTH, useGraphStore } from '../store/graphStore'
 import type { GraphFlowNode } from '../store/graphStore'
-import { DOT_COLORS, resolveTheme } from '../lib/theme'
+import { DOT_COLORS, resolveTheme, cardFontScale } from '../lib/theme'
 import { useSpacePressed } from '../lib/spaceKey'
 import {
   bumpUiLayer,
@@ -1349,8 +1349,9 @@ function CanvasInner() {
         cardSize,
         preferences.cardGap,
         (parentId) => useGraphStore.getState().ghostDrafts[parentId] ?? '',
+        cardFontScale(preferences.cardFontSize),
       ),
-    [nodes, cardSize, preferences.cardGap],
+    [nodes, cardSize, preferences.cardGap, preferences.cardFontSize],
   )
   // 分支输入条同样跟随父卡片移动，堆叠在卡片下方
   const branchInputNodes = useMemo(
@@ -1486,6 +1487,8 @@ function CanvasInner() {
   const edges = useMemo<Edge[]>(() => {
     const { cardWidth, cardHeight, cardGap, connectionStyle, edgeColor, edgeWidth } = preferences
     const visual = { color: edgeColor, width: edgeWidth }
+    // ghost 障碍矩形与 GhostNode 的尺寸同步按字号缩放
+    const ghostScale = cardFontScale(preferences.cardFontSize)
 
     // 所有卡片矩形：聊天卡片用全局尺寸，笔记用自身尺寸，ghost 用固定尺寸
     const rects = new Map<string, Rect>()
@@ -1504,8 +1507,8 @@ function CanvasInner() {
       rects.set(ghost.id, {
         x: ghost.position.x,
         y: ghost.position.y,
-        width: GHOST_SIZE.width,
-        height: GHOST_SIZE.height,
+        width: GHOST_SIZE.width * ghostScale,
+        height: GHOST_SIZE.height * ghostScale,
       })
     }
 
@@ -1792,6 +1795,7 @@ function CanvasInner() {
       state.cardSize,
       state.preferences.connectionStyle,
       state.preferences.cardGap,
+      cardFontScale(state.preferences.cardFontSize),
     )
     // 笔记不参与排版，但按母卡片的平均位移跟随平移，无连接时保持原位
     followNotesWithLinks(state.nodes, state.links, positions)
@@ -1882,6 +1886,7 @@ function CanvasInner() {
         state.cardSize,
         state.preferences.cardGap,
         layoutCheckNodeId,
+        cardFontScale(state.preferences.cardFontSize),
       )
       state.clearLayoutCheck()
       if (!overlap) return

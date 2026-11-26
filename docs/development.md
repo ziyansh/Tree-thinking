@@ -240,7 +240,7 @@ backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 - **密钥隔离**：server 模式的三个 Key（`api_key` / `openai_api_key` / `ark_api_key`）只读取当前用户设置行；地址、模型与开关使用硬编码默认值，禁止回落到 `backend/.env`。`.env` 只在 local 模式作为兜底。
 - **新用户初始化**：注册时先 `db.flush()` 取得用户主键，再写入空的 `UserSetting` 行，避免在未 flush 时使用 `user.id`（此时仍为 `None`）。
 - **恢复默认**：`settings.reset()` 遍历设置列，跳过 `id` / `user_id` / `updated_at` 与三个 Key 字段，其余置 `None`；新增设置列会自动纳入重置，不需要改代码。
-- **浏览器缓存**：前端不得把 Key 或敏感设置写入 `localStorage` / `sessionStorage`；目前仅「已看过开发中提示」标记使用 `localStorage`，Mock 模式在 `sessionStorage` 中只保存脱敏 Key。
+- **浏览器缓存**：前端不得把 Key 或敏感设置写入 `localStorage` / `sessionStorage`；目前仅「已看过开发中提示」「已看过兼容性提示」两个标记使用 `localStorage`，Mock 模式在 `sessionStorage` 中只保存脱敏 Key。
 - **数据外发**：仅在回答、联网搜索、文档解析时向当前服务商发送「根 → 当前节点」上下文与所选附件；不得发送其他账号数据、未选中服务商的 Key 与配置。新增任何外部请求都必须按此边界审查。
 
 ## 更新日志写作约定
